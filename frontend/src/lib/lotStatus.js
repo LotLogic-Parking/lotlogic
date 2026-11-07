@@ -269,3 +269,8 @@ export function rowTarget(row, list) {
   const status = list === 'do_not_tow' && row?.reason === 'pending' ? 'pending' : 'approved';
   return { section: 'log', status, q: String(row?.plate ?? '') };
 }
+
+/** "Open pass" from the Live tab: the Parking Passes queue, Approved, searched for the plate. */
+export function passTarget(plate) {
+  return { section: 'log', status: 'approved', q: String(plate ?? '') };
+}

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getLotStatus, getPassHistory, getPassMetrics, getPlateTimeline, getPresence, getViolations, requestsApi } from '../src/lib/requestsApi.js';
+import { getLotStatus, getPassHistory, getPassMetrics, getPermits, getPlateTimeline, getPresence, getViolations, requestsApi } from '../src/lib/requestsApi.js';
 
 async function seenUrl(call) {
   const realFetch = globalThis.fetch;
@@ -49,4 +49,10 @@ test('getViolations and getPassMetrics carry the day window', async () => {
   assert.ok((await seenUrl(() => getPassMetrics('p1'))).endsWith('/apartment/passes/metrics?property_id=p1'), 'no days: the server default');
   assert.equal(requestsApi.getViolations, getViolations);
   assert.equal(requestsApi.getPassMetrics, getPassMetrics);
+});
+
+test('getPermits reads the approval queue for one property', async () => {
+  const url = await seenUrl(() => getPermits('p 1'));
+  assert.ok(url.endsWith('/apartment/passes/permits?property_id=p+1'), url);
+  assert.equal(requestsApi.getPermits, getPermits);
 });

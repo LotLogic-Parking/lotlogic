@@ -216,6 +216,10 @@ export const getPlateTimeline = (propertyId, plate) =>
 export const getPassHistory = (propertyId, { plate, unit, name } = {}) =>
   get(`/apartment/passes/history${query({ property_id: propertyId, plate, unit, name })}`);
 
+/** GET /apartment/passes/permits?property_id= → `{residents, guests}` — the approval queue's payload */
+export const getPermits = (propertyId) =>
+  get(`/apartment/passes/permits${query({ property_id: propertyId })}`);
+
 /** GET /apartment/passes/presence?property_id= → `{has_cameras, counts, on_property, recent_exits}` */
 export const getPresence = (propertyId) =>
   get(`/apartment/passes/presence${query({ property_id: propertyId })}`);
@@ -300,7 +304,7 @@ export const requestsApi = {
   inviteMember, updateMember, removeMember, approveMember, declineMember,
   joinProperty, resendJoinRequest, createApartmentProperty, updateApartmentProperty,
   archiveApartmentProperty, listPartnerProperties, verifyPartnerProperty,
-  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPresence, getViolations, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
+  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getViolations, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
   deleteSlackIdentity, setSlackFeedChannel, getRequestAction, postRequestAction,
   listTeam, inviteTeammate, patchTeammate, removeTeammate, resendTeammate, assignProperties,
 };

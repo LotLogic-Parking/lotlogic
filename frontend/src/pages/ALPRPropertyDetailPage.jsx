@@ -25,7 +25,7 @@ import { RequestsSection } from './property/RequestsSection.jsx';
 import { lockedChips } from '../lib/upsell.js';
 import { UpsellPanel } from './property/UpsellPanel.jsx';
 import { LotStatusTab } from './lot/LotStatusTab.jsx';
-import { SOLO_SECTION_IDS, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
+import { SOLO_SECTION_IDS, passTarget, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
@@ -414,8 +414,7 @@ export function ALPRPropertyDetailPage({
 
   // A Lot status row tap: a hold goes to Requests; a pass goes to the Parking
   // Passes queue, searched for the plate (it reads `?status=&q=` as it mounts).
-  const openLotRow = useCallback((row, list) => {
-    const target = rowTarget(row, list);
+  const openTarget = useCallback((target) => {
     if (target.section === 'log') {
       try {
         const { pathname, search, hash } = window.location;
@@ -425,6 +424,10 @@ export function ALPRPropertyDetailPage({
     setSectionFilter(target.section);
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, []);
+  const openLotRow = useCallback((row, list) => openTarget(rowTarget(row, list)), [openTarget]);
+  // "Open pass" on a Live row: the Parking Passes queue, Approved, searched
+  // for the plate (the queue selects the first match as it mounts).
+  const openPass = useCallback((plate) => openTarget(passTarget(plate)), [openTarget]);
 
   // "Request tow" on a parking pass: open Requests the way its chip does, with
   // the composer on Tow and the plate filled in. The composer sits at the top
@@ -896,7 +899,13 @@ export function ALPRPropertyDetailPage({
       {sectionFilter === 'live' && !isTruckPlaza && (
         <ErrorBoundary label="live view">
           <React.Suspense fallback={<SkeletonCards />}>
-            <LiveTab propertyId={propertyId} propertyName={property?.name || ''} onRequestTow={canRequestTow ? requestTow : undefined} />
+            <LiveTab
+              propertyId={propertyId}
+              propertyName={property?.name || ''}
+              requireLease={property?.require_lease !== false}
+              onOpenPass={openPass}
+              onRequestTow={canRequestTow ? requestTow : undefined}
+            />
           </React.Suspense>
         </ErrorBoundary>
       )}

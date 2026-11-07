@@ -126,7 +126,7 @@ test('timelineKindLabel covers every kind in the contract', () => {
   assert.equal(timelineKindLabel('something_new').label, 'Update');
 });
 
-import { LOT_STATUS_CHIP, rowTarget, withLotStatusChip } from '../src/lib/lotStatus.js';
+import { LOT_STATUS_CHIP, passTarget, rowTarget, withLotStatusChip } from '../src/lib/lotStatus.js';
 
 const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Parking Passes' }, { id: 'qr', label: 'QR codes', locked: true }];
 
@@ -179,4 +179,9 @@ test('the activity sections stand alone, like Requests and Lot status (never und
 test('timeline: camera sessions read "Seen entering" / "Seen leaving" (build plan B5)', () => {
   assert.deepEqual(timelineKindLabel('entered'), { label: 'Seen entering', tone: 'green' });
   assert.deepEqual(timelineKindLabel('exited'), { label: 'Seen leaving', tone: 'neutral' });
+});
+
+test('passTarget: "Open pass" lands on the queue, Approved, searched for the plate', () => {
+  assert.deepEqual(passTarget('ABC1234'), { section: 'log', status: 'approved', q: 'ABC1234' });
+  assert.deepEqual(passTarget(null), { section: 'log', status: 'approved', q: '' });
 });
