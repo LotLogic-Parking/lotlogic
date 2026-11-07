@@ -59,7 +59,7 @@ jobs:
   local:
     name: e2e (local dist)
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +184,7 @@ jobs:
        github.event.deployment_status.state == 'success' &&
        github.event.deployment_status.environment == 'Preview' &&
        github.event.repository.full_name == github.repository)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
@@ -259,7 +259,7 @@ jobs:
   portal:
     name: portal (local backend)
     if: vars.PORTAL_E2E == '1' && github.event_name != 'deployment_status'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -296,7 +296,7 @@ jobs:
       - name: Check out lotlogic-backend
         uses: actions/checkout@v4
         with:
-          repository: getlotlogic/lotlogic-backend
+          repository: LotLogic-Parking/lotlogic-backend
           ref: ${{ vars.PORTAL_BACKEND_REF || 'main' }}
           path: backend
           token: ${{ secrets.BACKEND_REPO_TOKEN || github.token }}
