@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { requestsApi } from '../../lib/requestsApi.js';
 import { requestErrorMessage } from '../../lib/requestErrors.js';
 import { mustVerifyFirst, verifyResume } from '../../lib/requestGate.js';
@@ -41,6 +41,11 @@ import {
 //                   list — the 409 body carries only `request_id` (§8.3), so
 //                   the time in the conflict sentence is resolved client-side
 //   addToast(msg, type)
+//   initialKind, initialPlate, prefillNonce
+//                   a prefill from the page ("Request tow" on a parking pass):
+//                   each new nonce sets the kind and plate and focuses the
+//                   plate field. Nothing is posted — the manager still taps
+//                   "Request tow", which is the attestation.
 
 const KINDS = [
   { id: 'hold', label: 'Hold' },
@@ -74,6 +79,9 @@ export function RequestComposer({
   expiryFor,
   addToast,
   plateInputRef,
+  initialKind,
+  initialPlate,
+  prefillNonce,
 }) {
   const [kind, setKind] = useState('hold');
   const [plate, setPlate] = useState('');
@@ -134,6 +142,21 @@ export function RequestComposer({
     setConflictCopy(null);
     setVerifyCopy('');
   }
+
+  // A prefill from the page: every new nonce sets the kind and plate (a plate
+  // typed before is replaced — the manager asked for this one) and puts the
+  // caret in the plate field, scrolled into view. No nonce, no effect: a
+  // composer mounted without a prefill keeps its defaults.
+  useEffect(() => {
+    if (prefillNonce == null) return;
+    switchKind(KINDS.some(k => k.id === initialKind) ? initialKind : 'hold');
+    setPlate(String(initialPlate ?? ''));
+    setPlateError('');
+    const input = plateInputRef?.current;
+    if (!input) return;
+    try { input.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch { /* ignore */ }
+    try { input.focus({ preventScroll: true }); } catch { /* iOS without a gesture */ }
+  }, [prefillNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function choosePhoto(e) {
     const file = e.target.files?.[0];

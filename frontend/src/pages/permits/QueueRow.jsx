@@ -41,7 +41,7 @@ function RemainingTag({ row, now }) {
 }
 
 export function QueueRow({ row, now, selected, overLimit, cap, requireLease = true, ageChip, showThumb, showUnit, moreItems, onOpen }) {
-  const segment = segmentOf(row);
+  const segment = segmentOf(row, now);
   const cards = evidenceCards(row, { requireLease });
   const who = showUnit ? whoLine(row) : holderName(row);
   const car = vehicleLine(row);

@@ -45,21 +45,58 @@ export function isLongTerm(row) {
 
 // Status → segment. A long-term pass is `approved`, a short-term one `active`;
 // both read "Approved". Void, expired, cancelled, revoked and towed rows are
-// not decisions waiting on anyone, so they sit in no segment.
+// not decisions waiting on anyone: they are History, with a short-term pass
+// that is still `active` on the server but past its `valid_until`.
 const SEGMENT_BY_STATUS = {
   resident: { pending: 'pending', approved: 'approved', rejected: 'denied' },
   guest: { pending: 'pending', active: 'approved', rejected: 'denied' },
 };
 
+// The statuses that left service. `resident_plates` can be `void`;
+// `visitor_passes` can be `void`, `expired`, `revoked`, `cancelled` or
+// `towed` (their CHECK constraints). `voided` is not written anywhere today
+// and is accepted in case a unified table ever spells it that way.
+const HISTORY_STATUSES = new Set(['void', 'voided', 'expired', 'cancelled', 'revoked', 'towed']);
+
 export const SEGMENTS = Object.freeze([
   { id: 'pending', label: 'Needs review' },
   { id: 'approved', label: 'Approved' },
   { id: 'denied', label: 'Denied' },
+  { id: 'history', label: 'History' },
 ]);
 const SEGMENT_IDS = SEGMENTS.map(s => s.id);
 
-export function segmentOf(row) {
+function validUntilMs(row) {
+  const t = Date.parse(row?.valid_until ?? '');
+  return Number.isFinite(t) ? t : null;
+}
+
+/** A short-term pass the server still calls `active` whose end has passed. */
+function endedOnClock(row, nowMs) {
+  if (isLongTerm(row) || row?.status !== 'active') return false;
+  const until = validUntilMs(row);
+  return until !== null && until <= nowMs;
+}
+
+/**
+ * `pending` | `approved` | `denied` | `history` | null. History depends on
+ * the clock for a live short-term pass, so callers that already tick pass
+ * their `now`; the default keeps one-off calls honest.
+ */
+export function segmentOf(row, nowMs = Date.now()) {
+  if (HISTORY_STATUSES.has(row?.status) || endedOnClock(row, nowMs)) return 'history';
   return SEGMENT_BY_STATUS[row?.kind]?.[row?.status] || null;
+}
+
+/**
+ * "Request tow" is offered on a pass that is on the lot or was: a short-term
+ * pass that is Approved or in History, a long-term pass in History. Never on
+ * a request still waiting, and never on a denied one.
+ */
+export function canRequestTow(row, nowMs = Date.now()) {
+  const segment = segmentOf(row, nowMs);
+  if (segment === 'history') return true;
+  return segment === 'approved' && !isLongTerm(row);
 }
 
 // ── Normalisation, labels and search ──────────────────────────
@@ -242,23 +279,45 @@ function decidedMs(row) {
   return -Infinity;
 }
 
-/** Approved or Denied: one flat list, the latest decision first. */
-export function decidedRows(rows, segment, q = '') {
+/**
+ * The moment a History row left service — the list carries no `expired_at`,
+ * `cancelled_at` or `updated_at`, so it is the best of what it does carry:
+ *   * a short-term pass that expired, or is `active` past its end:
+ *     `valid_until`, the minute it ended;
+ *   * void (which stamps `reviewed_at` on the server), revoked, cancelled,
+ *     towed: `reviewed_at`, else `valid_until`, else `created_at`.
+ */
+export function leftServiceMs(row) {
+  const until = validUntilMs(row);
+  if (!isLongTerm(row) && (row?.status === 'expired' || row?.status === 'active') && until !== null) return until;
+  for (const value of [row?.reviewed_at, row?.valid_until, row?.created_at]) {
+    const t = Date.parse(value ?? '');
+    if (Number.isFinite(t)) return t;
+  }
+  return -Infinity;
+}
+
+/**
+ * Approved, Denied or History: one flat list, newest first — by the decision
+ * for Approved and Denied, by the moment the pass left service for History.
+ */
+export function decidedRows(rows, segment, q = '', nowMs = Date.now()) {
+  const stamp = segment === 'history' ? leftServiceMs : decidedMs;
   return (rows || [])
-    .filter(r => segmentOf(r) === segment && matchesSearch(r, q))
+    .filter(r => segmentOf(r, nowMs) === segment && matchesSearch(r, q))
     .sort((a, b) => {
-      const ta = decidedMs(a);
-      const tb = decidedMs(b);
+      const ta = stamp(a);
+      const tb = stamp(b);
       if (ta !== tb) return ta > tb ? -1 : 1;
       return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
     });
 }
 
 /** Rows per segment after the search — what the segmented control shows. */
-export function segmentCounts(rows, q = '') {
-  const counts = { pending: 0, approved: 0, denied: 0 };
+export function segmentCounts(rows, q = '', nowMs = Date.now()) {
+  const counts = { pending: 0, approved: 0, denied: 0, history: 0 };
   for (const row of rows || []) {
-    const segment = segmentOf(row);
+    const segment = segmentOf(row, nowMs);
     if (segment && matchesSearch(row, q)) counts[segment] += 1;
   }
   return counts;
@@ -307,7 +366,7 @@ export function waitingChip(createdAt, nowMs) {
 }
 
 export function ageChip(row, nowMs) {
-  if (segmentOf(row) !== 'pending') return null;
+  if (segmentOf(row, nowMs) !== 'pending') return null;
   return isLongTerm(row) ? protectionChip(row.created_at, nowMs) : waitingChip(row.created_at, nowMs);
 }
 
@@ -605,7 +664,12 @@ export function decisionLine(row) {
     case 'approved':
     case 'active': return stamp(row.reviewed_at, 'Approved');
     case 'rejected': return stamp(row.reviewed_at, 'Denied');
-    case 'void': return stamp(row.reviewed_at, 'Voided');
+    case 'void':
+    case 'voided': return stamp(row.reviewed_at, 'Voided');
+    case 'expired': return stamp(row.valid_until, 'Expired');
+    case 'cancelled': return stamp(row.reviewed_at || row.valid_until, 'Cancelled');
+    case 'revoked': return stamp(row.reviewed_at || row.valid_until, 'Revoked');
+    case 'towed': return stamp(row.reviewed_at || row.valid_until, 'Towed');
     default: return stamp(row?.created_at, 'Submitted');
   }
 }
@@ -622,9 +686,38 @@ const STATUS_TAGS = {
   towed: { tone: 'neutral', text: 'Towed' },
 };
 
-/** A status tag is never colour alone. */
-export function statusTag(row) {
+/** A status tag is never colour alone. A live short-term pass past its end reads "Ended", not "Approved". */
+export function statusTag(row, nowMs = Date.now()) {
+  if (endedOnClock(row, nowMs)) return STATUS_TAGS.expired;
   return STATUS_TAGS[row?.status] || { tone: 'neutral', text: 'Unknown status' };
+}
+
+// How a History row says why and when it left service.
+const HISTORY_WORDS = {
+  active: 'Expired',
+  expired: 'Expired',
+  void: 'Voided',
+  voided: 'Voided',
+  cancelled: 'Cancelled',
+  revoked: 'Revoked',
+  towed: 'Towed',
+};
+
+const ET_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' });
+const ET_DAY_CLOCK = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/**
+ * The History chip: "Expired Nov 6, 3:10 PM" (the minute a short-term pass
+ * ended matters) or "Voided Nov 5" (the day is what a manager looks up), in
+ * Eastern time. Null outside History, so it slots in where the age chip does.
+ */
+export function historyChip(row, nowMs = Date.now()) {
+  if (segmentOf(row, nowMs) !== 'history') return null;
+  const word = HISTORY_WORDS[row?.status] || 'Ended';
+  const at = leftServiceMs(row);
+  if (!Number.isFinite(at)) return { tone: 'neutral', text: word };
+  const stamp = word === 'Expired' ? ET_DAY_CLOCK.format(new Date(at)) : ET_DAY.format(new Date(at));
+  return { tone: 'neutral', text: `${word} ${stamp}` };
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

@@ -26,7 +26,7 @@ import { lockedChips } from '../lib/upsell.js';
 import { UpsellPanel } from './property/UpsellPanel.jsx';
 import { LotStatusTab } from './lot/LotStatusTab.jsx';
 import { withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
-import { writeQueueQuery } from '../lib/permitsQueue.js';
+import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
 // parking-log bundle before the operator ever scrolls to it.
@@ -43,10 +43,18 @@ const TruckParkingLog = lazyPage(() => import('./TruckParkingLog.jsx'));
 // Draft the Settings form opens with; the diff on save is against this, so an
 // untouched form is a no-op even when the property has no stored policy yet.
 function settingsBaseline(property) {
+  const cap = Number(property?.max_vehicles_per_unit);
   return {
     property_type: property?.property_type || 'apartment',
     policy_text: property?.policy_text || DEFAULT_TRUCK_PLAZA_POLICY,
     policy_phone: property?.policy_phone || '',
+    // The parking rules (apartments). Same defaults the Passes queue reads
+    // the property with: short-term passes reviewed by the office, the lease
+    // required, the registration card not, and no cap per unit.
+    guest_auto_approve: property?.guest_auto_approve === true,
+    require_lease: property?.require_lease !== false,
+    require_vehicle_registration: property?.require_vehicle_registration === true,
+    max_vehicles_per_unit: Number.isInteger(cap) && cap >= 1 && cap <= 10 ? cap : null,
   };
 }
 
@@ -326,6 +334,10 @@ export function ALPRPropertyDetailPage({
   const [saving, setSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState(null);
+  // What the Requests composer opens pre-filled with (`{kind, plate, nonce}`),
+  // set by "Request tow" on a parking pass. The nonce makes the same plate
+  // twice in a row still land; the composer itself stays the signature.
+  const [requestPrefill, setRequestPrefill] = useState(null);
   const [passTotalCount, setPassTotalCount] = useState(0);
   const [openSessions, setOpenSessions] = useState([]);
   const [activeHolds, setActiveHolds] = useState([]);
@@ -401,6 +413,17 @@ export function ALPRPropertyDetailPage({
       } catch { /* history blocked: the section still opens, unsearched */ }
     }
     setSectionFilter(target.section);
+    try { window.scrollTo(0, 0); } catch { /* ignore */ }
+  }, []);
+
+  // "Request tow" on a parking pass: open Requests the way its chip does, with
+  // the composer on Tow and the plate filled in. The composer sits at the top
+  // of the section, so the page scrolls to the top and the composer brings its
+  // plate field into view once the prefill lands. The tap on "Request tow" in
+  // the composer stays the attestation — nothing is posted from here.
+  const requestTow = useCallback((row) => {
+    setRequestPrefill({ kind: 'tow', plate: plateText(row), nonce: Date.now() });
+    setSectionFilter('requests');
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, []);
 
@@ -871,6 +894,7 @@ export function ALPRPropertyDetailPage({
             onNeedVerify={onNeedVerify}
             request={request}
             upload={upload}
+            prefill={requestPrefill}
             addToast={addToast}
           />
         </ErrorBoundary>
@@ -897,6 +921,45 @@ export function ALPRPropertyDetailPage({
               <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',marginTop:4}}>Towing Contact Phone</label>
               <input type="tel" value={settingsDraft.policy_phone} onChange={e => setSettingsDraft({...settingsDraft, policy_phone: e.target.value})} placeholder="+12692176208" style={{padding:'10px 12px',background:'var(--bg-inset)',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-primary)',fontSize:14}} />
             </>
+          )}
+          {/* Parking rules — apartments only. What the registration forms ask
+              for and what the Passes queue checks against; saved through the
+              same PATCH as the fields above. */}
+          {settingsDraft.property_type !== 'truck_plaza' && (
+            <fieldset style={{border:'none',padding:0,margin:0,display:'flex',flexDirection:'column',gap:8}}>
+              <legend style={{fontSize:11,color:'var(--text-muted)',fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',marginTop:4,padding:0}}>Parking rules</legend>
+              <div role="radiogroup" aria-labelledby="pd-rule-shortterm" style={{display:'flex',flexDirection:'column',gap:6}}>
+                <span id="pd-rule-shortterm" style={{fontSize:13,color:'var(--text-primary)',fontWeight:700}}>Short-term passes</span>
+                <label style={{display:'flex',alignItems:'center',gap:8,fontSize:14,color:'var(--text-primary)'}}>
+                  <input type="radio" name="pd-guest-auto-approve" checked={settingsDraft.guest_auto_approve === true} onChange={() => setSettingsDraft({...settingsDraft, guest_auto_approve: true})} />
+                  Approved automatically
+                </label>
+                <label style={{display:'flex',alignItems:'center',gap:8,fontSize:14,color:'var(--text-primary)'}}>
+                  <input type="radio" name="pd-guest-auto-approve" checked={settingsDraft.guest_auto_approve !== true} onChange={() => setSettingsDraft({...settingsDraft, guest_auto_approve: false})} />
+                  Reviewed by the office
+                </label>
+              </div>
+              <label htmlFor="pd-max-vehicles" style={{fontSize:13,color:'var(--text-primary)',fontWeight:700,marginTop:4}}>Vehicles per unit</label>
+              <select
+                id="pd-max-vehicles"
+                value={settingsDraft.max_vehicles_per_unit == null ? '' : String(settingsDraft.max_vehicles_per_unit)}
+                onChange={e => setSettingsDraft({...settingsDraft, max_vehicles_per_unit: e.target.value === '' ? null : Number(e.target.value)})}
+                style={{padding:'10px 12px',background:'var(--bg-inset)',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-primary)',fontSize:14,alignSelf:'flex-start',minWidth:160}}
+              >
+                <option value="">No limit</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={String(n)}>{n}</option>)}
+              </select>
+              <label style={{display:'flex',alignItems:'center',gap:8,fontSize:14,color:'var(--text-primary)',marginTop:4}}>
+                <input type="checkbox" checked={settingsDraft.require_lease === true} onChange={e => setSettingsDraft({...settingsDraft, require_lease: e.target.checked})} />
+                Require a copy of the lease with long-term requests
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:8,fontSize:14,color:'var(--text-primary)'}}>
+                <input type="checkbox" checked={settingsDraft.require_vehicle_registration === true} onChange={e => setSettingsDraft({...settingsDraft, require_vehicle_registration: e.target.checked})} />
+                Require the vehicle registration card with long-term requests
+              </label>
+              {/* Not spec copy. */}
+              <div style={{fontSize:11,color:'var(--text-faint)'}}>Changes apply to new requests right away.</div>
+            </fieldset>
           )}
           <button type="submit" disabled={saving} style={{background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,padding:'10px',fontSize:14,fontWeight:700,cursor:'pointer',marginTop:4}}>{saving ? 'Saving...' : 'Save Settings'}</button>
         </form>
@@ -1034,7 +1097,16 @@ export function ALPRPropertyDetailPage({
       ) : (
         // Apartment permit registry (M3): pending approval queue + resident /
         // guest rosters with doc viewing, approve/reject, extend, void.
-        <ErrorBoundary label="apartment permits"><ApartmentPermits property={property} /></ErrorBoundary>
+        <ErrorBoundary label="apartment permits">
+          <ApartmentPermits
+            property={property}
+            /* "Request tow" only where the composer it opens will render: the
+               office (admin / manager) places requests; a viewer or the tow
+               company gets no such button. Same role rule RequestsSection
+               applies to its composer. */
+            onRequestTow={['admin', 'manager'].includes(property?.role) ? requestTow : undefined}
+          />
+        </ErrorBoundary>
       ))}
 
       {/* History — permanent, all-time record of every registration (truck
