@@ -3365,17 +3365,7 @@
        surface (and the `.ls-blue` pieces inside the pass detail) reads from
        them. Blue is the one accent; red and green stay semantic and small. ── */
     :root {
-      --ll-blue: #2563EB;                 /* the app icon's blue: active segment, busiest bar, links, focus */
-      --ll-blue-deep: #1D4ED8;            /* hover / pressed */
-      --ll-blue-tint: rgba(37,99,235,.10); /* tinted backgrounds, the heat ramp's first step */
-      --ll-white: #FFFFFF;                /* cards, the plate badge */
-      --ll-page: #F5F7FB;                 /* the page tint behind white cards */
-      --ll-ink: #0F172A;                  /* primary text on white */
-      --ll-ink-2: #475569;                /* secondary text */
-      --ll-ink-3: #94A3B8;                /* muted text, ticks */
-      --ll-hairline: #E2E8F0;             /* borders */
-      --ll-red: #DC2626;                  /* towable / failed, chips only */
-      --ll-green: #16A34A;                /* covered / ok, chips only */
+      /* --ll-blue … --ll-green are declared once, in the brand block at the top of :root. */
       /* How the blue surfaces map onto the theme in force: the dark theme
          keeps its own backgrounds and text, the light theme is white + ink. */
       --ll-surface: var(--bg-card);

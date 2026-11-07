@@ -187,7 +187,7 @@ function SightingStrip({ sightings, cameras, nowTick }) {
         <span style={{fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.04em',textTransform:'uppercase'}}>{sorted.length} sighting{sorted.length === 1 ? '' : 's'}</span>
         <span>· last seen {lastSeenStr}</span>
         {lowConfCount > 0 && (
-          <span style={{fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:4,background:'rgba(251,191,36,.12)',color:'#fbbf24',border:'1px solid rgba(251,191,36,.25)'}}>{lowConfCount} LOW CONFIDENCE</span>
+          <span style={{fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:4,background:'var(--accent-tint)',color:'var(--accent-text)',border:'1px solid var(--accent-line)'}}>{lowConfCount} LOW CONFIDENCE</span>
         )}
       </div>
       <div style={{display:'flex',gap:6,overflowX:'auto',WebkitOverflowScrolling:'touch',paddingBottom:2}}>
@@ -197,7 +197,7 @@ function SightingStrip({ sightings, cameras, nowTick }) {
           const statusColor = ev.match_status === 'matched' ? '#4ade80'
             : ev.match_status === 'visitor_pass_fuzzy' ? '#4ade80'
             : ev.match_status === 'partner_truck' ? '#4ade80'
-            : ev.match_status === 'low_confidence' ? '#fbbf24'
+            : ev.match_status === 'low_confidence' ? 'var(--accent-text)'
             : ev.match_status === 'camera_suspended' ? '#f87171'
             : 'var(--text-faint)';
           const title = `${cam?.name || 'camera'} · ${new Date(ev.created_at).toLocaleString()} · ${ev.match_status}${conf != null ? ` · ${conf}%` : ''}`;
@@ -860,12 +860,12 @@ export function ALPRPropertyDetailPage({
                   fontSize: 12, fontWeight: 800,
                   padding: '6px 12px', borderRadius: 999,
                   // Locked chips never take the active fill — `--accent` is
-                  // the brand amber, and amber-on-muted-grey is nowhere
+                  // the brand blue, and blue-on-muted-grey is nowhere
                   // near 4.5:1 (an axe scan on this exact chip caught it).
                   // They stay visually "just open", never "selected".
                   border: `1px solid ${(active && !locked) ? 'var(--accent)' : 'var(--border)'}`,
                   background: (active && !locked) ? 'var(--accent)' : 'var(--bg-card)',
-                  // `--on-accent`, not #fff: white on the dark theme's amber is
+                  // `--on-accent`, not #fff: the ink on the brand blue is
                   // 1.66:1 (the Requests chip is now the default active one).
                   color: locked ? 'var(--text-muted)' : (active ? 'var(--on-accent)' : 'var(--text-primary)'),
                   cursor: 'pointer',
@@ -1060,7 +1060,7 @@ export function ALPRPropertyDetailPage({
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>
               <span className="pd-section-title">{label}</span>
               <span className="pd-section-count">{plates.length}</span>
-              {pendingCount > 0 && <span style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',padding:'2px 7px',borderRadius:20,background:'rgba(251,191,36,.12)',color:'#fbbf24',border:'1px solid rgba(251,191,36,.25)'}}>{pendingCount} PENDING</span>}
+              {pendingCount > 0 && <span style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',padding:'2px 7px',borderRadius:20,background:'var(--accent-tint)',color:'var(--accent-text)',border:'1px solid var(--accent-line)'}}>{pendingCount} PENDING</span>}
             </div>
             <button onClick={() => setShowAddPlate(!showAddPlate)} className="pd-share-btn" style={{color:'#4ade80'}}>{showAddPlate ? 'Cancel' : '+ Add'}</button>
           </div>
@@ -1091,7 +1091,7 @@ export function ALPRPropertyDetailPage({
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                   <div style={{minWidth:0,flex:1}}>
                     <span style={{fontWeight:800,fontSize:15,color:'var(--text-primary)',letterSpacing:'.03em',fontFamily:"'Courier New',monospace"}}>{p.plate_text}</span>
-                    {p.status === 'pending' && <span style={{fontSize:10,fontWeight:700,color:'#fbbf24',background:'rgba(251,191,36,.12)',padding:'2px 6px',borderRadius:4,marginLeft:6,border:'1px solid rgba(251,191,36,.25)'}}>PENDING</span>}
+                    {p.status === 'pending' && <span style={{fontSize:10,fontWeight:700,color:'var(--accent-text)',background:'var(--accent-tint)',padding:'2px 6px',borderRadius:4,marginLeft:6,border:'1px solid var(--accent-line)'}}>PENDING</span>}
                     {p.usdot_number && (
                       <span title={`USDOT ${p.usdot_number}`} style={{marginLeft:6,fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'2px 6px',borderRadius:14,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>USDOT</span>
                     )}
@@ -1227,7 +1227,7 @@ export function ALPRPropertyDetailPage({
               } else if (ageMin > 60) {
                 badge = { label: 'Stale', color: '#ef4444', bg: 'rgba(239,68,68,.12)' };
               } else if (ageMin > 15) {
-                badge = { label: 'Delayed', color: '#fbbf24', bg: 'rgba(251,191,36,.12)' };
+                badge = { label: 'Delayed', color: 'var(--accent-text)', bg: 'var(--accent-tint)' };
               } else {
                 badge = { label: 'Active', color: '#4ade80', bg: 'rgba(74,222,128,.12)' };
               }
@@ -1431,7 +1431,7 @@ export function ALPRPropertyDetailPage({
                   {ev?.image_url && <img src={ev.image_url} alt="plate" loading="lazy" style={{width:60,height:46,objectFit:'cover',borderRadius:6,border:'1px solid var(--border-subtle)',flexShrink:0}} />}
                   <div style={{minWidth:0,flex:1}}>
                     <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                      <span style={{fontFamily:"'Courier New',monospace",background:'#fef3c7',color:'#1c1009',border:'1.5px solid #fbbf24',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{v.plate_text}</span>
+                      <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{v.plate_text}</span>
                       <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'rgba(248,113,113,.12)',color:'#f87171',border:'1px solid rgba(248,113,113,.4)'}}>Dispatch failed</span>
                       {typeof v.dispatch_attempts === 'number' && <span style={{fontSize:11,color:'var(--text-faint)'}}>{v.dispatch_attempts} attempts</span>}
                     </div>
@@ -1453,8 +1453,8 @@ export function ALPRPropertyDetailPage({
         const reviewable = events.filter(e => ['low_confidence','review_needed','camera_suspended','overstay'].includes(e.match_status));
         if (reviewable.length === 0) return null;
         const statusLabel = {
-          low_confidence:      { label: 'Low confidence', color: '#fbbf24' },
-          review_needed:       { label: 'Ambiguous match', color: '#fbbf24' },
+          low_confidence:      { label: 'Low confidence', color: 'var(--accent-text)' },
+          review_needed:       { label: 'Ambiguous match', color: 'var(--accent-text)' },
           camera_suspended:    { label: 'Camera suspended', color: '#f87171' },
           overstay:            { label: 'Overstay', color: '#f87171' },
           partner_truck:       { label: 'Partner truck', color: '#4ade80' },
@@ -1467,7 +1467,7 @@ export function ALPRPropertyDetailPage({
                 <span className="pd-section-title">Needs Review</span>
                 <span className="pd-section-count">{reviewable.length}</span>
               </div>
-              <div className="pd-section-meta" style={{color:'#fbbf24'}}>No enforcement until cleared</div>
+              <div className="pd-section-meta" style={{color:'var(--accent-text)'}}>No enforcement until cleared</div>
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:16}}>
               {reviewable.slice(0, 10).map(ev => {
@@ -1479,7 +1479,7 @@ export function ALPRPropertyDetailPage({
                     {ev.image_url && <img src={ev.image_url} alt="plate" loading="lazy" style={{width:60,height:46,objectFit:'cover',borderRadius:6,border:'1px solid var(--border-subtle)',flexShrink:0}} />}
                     <div style={{minWidth:0,flex:1}}>
                       <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                        <span style={{fontFamily:"'Courier New',monospace",background:'#fef3c7',color:'#1c1009',border:'1.5px solid #fbbf24',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{ev.plate_text}</span>
+                        <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{ev.plate_text}</span>
                         <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:`${s.color}20`,color:s.color,border:`1px solid ${s.color}40`}}>{s.label}</span>
                         {conf != null && <span style={{fontSize:11,color:'var(--text-faint)'}}>{conf}%</span>}
                       </div>
@@ -1529,14 +1529,14 @@ export function ALPRPropertyDetailPage({
           const mins = Math.floor((nowTick - enteredMs) / 60000);
           const stateColor = s.state === 'registered' ? '#4ade80'
             : s.state === 'resident' ? '#60a5fa'
-            : s.state === 'grace'    ? '#fbbf24'
+            : s.state === 'grace'    ? 'var(--accent-text)'
             : s.state === 'expired'  ? '#f87171'
             : 'var(--text-faint)';
           return (
             <div key={s.id} style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',alignItems:'center',gap:12}}>
               <div style={{minWidth:0,flex:1}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                  <span style={{fontFamily:"'Courier New',monospace",background:'#fef3c7',color:'#1c1009',border:'1.5px solid #fbbf24',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{s.plate_text}</span>
+                  <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{s.plate_text}</span>
                   {(s.plate_text || '').startsWith('DOT-') && (
                     <span title="No license plate visible — read via USDOT OCR" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>USDOT</span>
                   )}
@@ -1662,7 +1662,7 @@ export function ALPRPropertyDetailPage({
           const evType = ev.event_type || 'patrol';
           const evColor = evType === 'entry' ? '#4ade80' : (evType === 'exit' ? '#f59e0b' : '#60a5fa');
           const statusColor = ['matched','resident','visitor_pass','self_registered','visitor_pass_fuzzy','partner_truck'].includes(ev.match_status) ? '#4ade80'
-            : ['low_confidence','review_needed','camera_suspended','grace_window','pending','overstay'].includes(ev.match_status) ? '#fbbf24'
+            : ['low_confidence','review_needed','camera_suspended','grace_window','pending','overstay'].includes(ev.match_status) ? 'var(--accent-text)'
             : ev.match_status === 'unmatched' ? '#f87171'
             : ev.match_status === 'dedup_suppressed' ? '#94a3b8'
             : 'var(--text-faint)';
@@ -1674,7 +1674,7 @@ export function ALPRPropertyDetailPage({
               )}
               <div style={{minWidth:0,flex:1}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                  <span style={{fontFamily:"'Courier New',monospace",background:'#fef3c7',color:'#1c1009',border:'1.5px solid #fbbf24',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{ev.plate_text}</span>
+                  <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{ev.plate_text}</span>
                   {(ev.plate_text || '').startsWith('DOT-') && (
                     <span title="No license plate visible — read via USDOT OCR (ParkPow)" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>USDOT</span>
                   )}
