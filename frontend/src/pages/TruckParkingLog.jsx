@@ -447,7 +447,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
   const AUTO_CLEAR_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
   const statusColor = {
     active: '#4ade80',
-    expiring: '#facc15',
+    expiring: 'var(--yellow)',
     // Neutral grey, never a red alert: a "recently expired" pass usually just
     // means the window ended and the camera (north gate, at night) didn't catch
     // the exit — not a violation.
@@ -455,7 +455,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
     auto_cleared: '#6b7280',
     cancelled: 'var(--text-muted)',
     revoked: 'var(--text-muted)',
-    towed: '#f59e0b',
+    towed: 'var(--accent-text)',
   };
   const statusDisplay = {
     active: 'Active',
@@ -511,7 +511,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
   const truckBucketMeta = {
     cooldown:         { label: 'On Cooldown',      color: '#ef4444' },
     active:           { label: 'Active',           color: '#4ade80' },
-    expiring:         { label: 'Expiring soon',    color: '#facc15' },
+    expiring:         { label: 'Expiring soon',    color: 'var(--yellow)' },
     recently_expired: { label: 'Recently expired', color: '#94a3b8' },
   };
   function truckBucket(r) {
@@ -771,10 +771,10 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
 
       {/* Non-blocking refresh error. The roster below is sourced independently
           from Supabase, so a backend-log hiccup must NEVER blank the view: we
-          show a quiet amber notice + manual retry and KEEP the last known
+          show a quiet blue notice + manual retry and KEEP the last known
           roster on screen. It auto-recovers on the next 60s poll. */}
       {(err || rosterError) && (
-        <div style={{padding:'10px 12px',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.35)',borderRadius:8,color:'var(--text-primary)',fontSize:12,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div style={{padding:'10px 12px',background:'var(--accent-tint)',border:'1px solid var(--accent-line)',borderRadius:8,color:'var(--text-primary)',fontSize:12,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span>Couldn't refresh from the server — showing the last known roster. Retrying automatically…</span>
           <button type="button" onClick={() => { load(); refreshRoster(); }} style={{fontSize:12,fontWeight:700,padding:'8px 12px',minHeight:36,borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text-primary)',cursor:'pointer',fontFamily:'inherit'}}>Retry now</button>
         </div>
@@ -839,7 +839,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
                 same expression is the gate. No link yet — the number is the
                 prompt to go and look. */}
             {paySummary?.needs_review > 0 && (
-              <div style={{fontSize:12,fontWeight:600,color:'#f59e0b'}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--accent-text)'}}>
                 ⚠️ {paySummary.needs_review} {paySummary.needs_review === 1 ? 'payment needs' : 'payments need'} review
               </div>
             )}
@@ -984,7 +984,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
                         fontWeight: 900,
                         fontFamily:"'DM Mono','Courier New',monospace",
                         letterSpacing: isExpiring ? '.08em' : '.06em',
-                        color: isExpiring ? '#ca8a04' : 'var(--text-primary)',
+                        color: isExpiring ? 'var(--yellow)' : 'var(--text-primary)',
                         lineHeight: 1.05,
                       }}>
                         {r.plate_text}
@@ -1225,7 +1225,7 @@ export function TruckParkingLog({ propertyId, propertyType, payToParkEnabled = f
           wrong bucket count on a surface that drives tow decisions. The
           roster union still guarantees currently-registered trucks appear. */}
       {!loading && total > rows.length && (
-        <div style={{fontSize:11,color:'#facc15',padding:'8px 12px',background:'rgba(250,204,21,.08)',border:'1px solid rgba(250,204,21,.3)',borderRadius:8}}>
+        <div style={{fontSize:11,color:'var(--accent-text)',padding:'8px 12px',background:'var(--accent-tint)',border:'1px solid var(--accent-line)',borderRadius:8}}>
           {isHistory
             ? <>Showing {rows.length.toLocaleString()} of {total.toLocaleString()} passes. Search by plate, name, or company to find any specific registration.</>
             : <>This window holds more passes than the {rows.length.toLocaleString()} loaded — bucket counts may run low. Currently-registered trucks always appear; use History for the complete record.</>}

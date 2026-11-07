@@ -99,9 +99,8 @@ export function ConfirmActionModal({
             disabled={disabled}
             style={{
               background: confirmColor || 'var(--accent)',
-              // Amber buttons take dark ink (spec §5): #fff on var(--accent)
-              // is 1.66:1 in the dark theme. A caller-supplied colour is a
-              // destructive red and keeps white.
+              // --accent-ink is white on the blue fill (5.2:1 in both themes).
+              // A caller-supplied colour is a destructive red and keeps white.
               color: confirmColor ? '#fff' : 'var(--accent-ink)',
               border: '1px solid ' + (confirmColor || 'var(--accent)'),
               borderRadius: 6,

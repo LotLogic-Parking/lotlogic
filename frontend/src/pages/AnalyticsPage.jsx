@@ -201,7 +201,7 @@ export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavi
           {Array.from({length: 24}, (_, hour) => {
             const avg = utilData.hourly[hour] || 0;
             const pct = Math.min((avg / totalSpaces) * 100, 100);
-            const color = pct > 80 ? '#ef4444' : pct > 50 ? '#fbbf24' : '#4ade80';
+            const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--accent)' : 'var(--green)';
             return (
               <div key={hour} className="utilization-bar-row">
                 <div className="utilization-bar-label">{hour.toString().padStart(2, '0')}:00</div>

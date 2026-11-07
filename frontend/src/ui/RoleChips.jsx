@@ -9,7 +9,7 @@ import { ROLES } from '../lib/signupValidation.js';
 // media query on `.signup-chip-grid` in dashboard.html, because a viewport
 // breakpoint cannot be expressed in an inline style.
 //
-// The selected chip is accent fill + `#1A1206` ink + a ✓ glyph: never colour
+// The selected chip is accent fill + `--on-accent` ink + a ✓ glyph: never colour
 // alone (https://www.w3.org/WAI/WCAG22/Understanding/use-of-color.html).
 // Chips are >= 44 px tall (WCAG 2.5.8 / Apple 44 pt).
 //

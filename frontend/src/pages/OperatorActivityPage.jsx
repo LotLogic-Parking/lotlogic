@@ -53,7 +53,7 @@ export function OperatorActivityPage({ violations, lots }) {
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hourLabel = (h) => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
 
-  const actionColors = { boot: '#fbbf24', tow: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
+  const actionColors = { boot: 'var(--accent-text)', tow: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
 
   // Group by date (using smart labels)
   const grouped = {};
@@ -120,7 +120,7 @@ export function OperatorActivityPage({ violations, lots }) {
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:10}}>
               <div style={{fontSize:13,fontWeight:800,color:'var(--text-primary)'}}>Time of day</div>
               <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:600}}>
-                {hourMax > 0 ? <>Peak: <span style={{color:'#fbbf24',fontWeight:800}}>{hourLabel(peakHour)}</span></> : '—'}
+                {hourMax > 0 ? <>Peak: <span style={{color:'var(--accent-text)',fontWeight:800}}>{hourLabel(peakHour)}</span></> : '—'}
               </div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(24, 1fr)',gap:2,alignItems:'end',height:64}}>
@@ -130,7 +130,7 @@ export function OperatorActivityPage({ violations, lots }) {
                   title={`${hourLabel(h)} — ${c === 1 ? '1 job' : `${c} jobs`}`}
                   style={{
                     height: c === 0 ? 4 : `${Math.max(10, (c / hourMax) * 100)}%`,
-                    background: c === 0 ? 'var(--border-subtle)' : (h === peakHour ? '#fbbf24' : '#fbbf2466'),
+                    background: c === 0 ? 'var(--border-subtle)' : (h === peakHour ? 'var(--accent)' : 'rgba(37,99,235,.4)'),
                     borderRadius:2,
                     opacity: c === 0 ? .35 : 1,
                   }}

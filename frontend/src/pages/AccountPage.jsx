@@ -151,8 +151,8 @@ function PartnerFeeEditor({ user, isPlatformAdmin = false }) {
               onClick={save}
               disabled={saving}
               style={{
-                background: saving ? 'rgba(251,191,36,.25)' : '#FBBF24',
-                color: saving ? '#FBBF24' : '#1A1206',
+                background: saving ? 'var(--accent-tint)' : 'var(--accent)',
+                color: saving ? 'var(--accent-text)' : 'var(--on-accent)',
                 border: 'none', borderRadius: 8, padding: '9px 16px',
                 fontSize: 13, fontWeight: 700, cursor: saving ? 'progress' : 'pointer',
                 fontFamily: 'inherit', letterSpacing: '.04em',
@@ -446,7 +446,7 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
             <div className="settings-row-label">Database</div>
             <div className="settings-row-desc">Live data connection</div>
           </div>
-          <div className="settings-row-value" style={{color: supabase ? '#4ade80' : '#fbbf24'}}>{supabase ? 'Connected' : 'Rails API'}</div>
+          <div className="settings-row-value" style={{color: supabase ? 'var(--green-text)' : 'var(--yellow)'}}>{supabase ? 'Connected' : 'Rails API'}</div>
         </div>
         <div className="settings-row">
           <div className="settings-row-info">

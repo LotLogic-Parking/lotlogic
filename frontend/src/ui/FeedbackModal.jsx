@@ -48,18 +48,13 @@ export function FeedbackModal({ propertyId, onClose, kind: initialKind = 'bug', 
       onClick={() => setKind(val)}
       style={{
         flex: 1, fontSize: 12, fontWeight: 700, padding: '7px', borderRadius: 6,
-        // Literal `#FBBF24`, not `var(--accent)` — spec §5's layout rules:
-        // "amber buttons use #1A1206 ink" (white here was 1.66:1, caught by
-        // the axe scan Task 26 added once `UpsellPanel`'s "Ask LotLogic"
-        // made the Feature tab open active by default). `var(--accent)`
-        // itself is only #FBBF24 in dark theme — in light theme it's
-        // #B85309, recalibrated for text/icon use, where #1A1206 ink is
-        // 3.77:1 (fails 4.5:1). The literal amber is the same pairing
-        // `AccountPage.jsx`'s Save button and `dashboard.html`'s
-        // `.login-btn` use, which holds in both themes.
-        border: '1px solid ' + (kind === val ? '#FBBF24' : 'var(--border)'),
-        background: kind === val ? '#FBBF24' : 'var(--bg-inset)',
-        color: kind === val ? '#1A1206' : 'var(--text-primary)',
+        // The selected tab is the blue `--accent` fill with `--on-accent`
+        // (white) ink — 5.2:1 in both themes (the axe scan Task 26 added
+        // covers it once `UpsellPanel`'s "Ask LotLogic" opens the Feature
+        // tab active by default).
+        border: '1px solid ' + (kind === val ? 'var(--accent)' : 'var(--border)'),
+        background: kind === val ? 'var(--accent)' : 'var(--bg-inset)',
+        color: kind === val ? 'var(--on-accent)' : 'var(--text-primary)',
         cursor: 'pointer',
       }}
     >{label}</button>
@@ -99,10 +94,8 @@ export function FeedbackModal({ propertyId, onClose, kind: initialKind = 'bug', 
             onClick={submit}
             disabled={disabled}
             style={{
-              // Same literal-amber fix as the tab buttons above — not
-              // `var(--accent)`, which is #B85309 in light theme (3.77:1
-              // with #1A1206, fails 4.5:1).
-              background:'#FBBF24', color:'#1A1206', border:'1px solid #FBBF24',
+              // Same blue fill / white ink pairing as the tab buttons above.
+              background:'var(--accent)', color:'var(--on-accent)', border:'1px solid var(--accent)',
               borderRadius:6, padding:'4px 12px', fontSize:12, fontWeight:700,
               cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1,
             }}

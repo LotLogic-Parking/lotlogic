@@ -129,7 +129,7 @@ export function OverviewPage({ violations, lots, partners, lotStates, onViewAs }
 
           {/* Action breakdown + fees */}
           <div style={{padding:'10px 16px 14px', display:'flex', flexWrap:'wrap', gap:8, alignItems:'center'}}>
-            {os.booted > 0 && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:700, color:'#fbbf24', background:'rgba(251,191,36,.1)', border:'1px solid rgba(251,191,36,.2)'}}>Boot ×{os.booted}</span>}
+            {os.booted > 0 && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:700, color:'var(--accent-text)', background:'var(--accent-tint)', border:'1px solid var(--accent-line)'}}>Boot ×{os.booted}</span>}
             {os.towed > 0 && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:700, color:'#f87171', background:'rgba(248,113,113,.1)', border:'1px solid rgba(248,113,113,.2)'}}>Tow ×{os.towed}</span>}
             {os.dismissed > 0 && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:700, color:'#a78bfa', background:'rgba(167,139,250,.1)', border:'1px solid rgba(167,139,250,.2)'}}>Dismissed ×{os.dismissed}</span>}
             {os.avgResponse != null && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600, color:'var(--text-muted)', background:'var(--bg-inset)', border:'1px solid var(--border)'}}>Avg {os.avgResponse < 60 ? `${os.avgResponse}m` : `${Math.round(os.avgResponse / 60)}h`} response</span>}
@@ -151,7 +151,7 @@ export function OverviewPage({ violations, lots, partners, lotStates, onViewAs }
             </div>
             <div style={{flex:'1 1 200px', display:'flex', flexWrap:'wrap', gap:6}}>
               {(os.partner.tow_truck_plates || []).length === 0 ? (
-                <span style={{fontSize:11, fontWeight:600, color:'#b45309', background:'rgba(251,191,36,.12)', border:'1px solid rgba(251,191,36,.35)', borderRadius:14, padding:'8px 12px',minHeight:36}}>
+                <span style={{fontSize:11, fontWeight:600, color:'var(--accent-text)', background:'var(--accent-tint)', border:'1px solid var(--accent-line)', borderRadius:14, padding:'8px 12px',minHeight:36}}>
                   ⚠ none registered — every tow requires manual confirm
                 </span>
               ) : (

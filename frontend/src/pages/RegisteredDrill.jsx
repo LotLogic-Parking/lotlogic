@@ -65,7 +65,7 @@ export function RegisteredDrill({ propertyId, propertyName, onBack }) {
         {/* Non-blocking refresh error — keep whatever roster we last had on
             screen and offer a retry, never a misleading empty state. */}
         {err && (
-          <div style={{margin:'0 0 10px',padding:'10px 12px',background:'rgba(245,158,11,.1)',border:'1px solid rgba(245,158,11,.35)',borderRadius:8,color:'var(--ink-1-paper, var(--text-primary))',fontSize:12,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{margin:'0 0 10px',padding:'10px 12px',background:'var(--accent-tint)',border:'1px solid var(--accent-line)',borderRadius:8,color:'var(--ink-1-paper, var(--text-primary))',fontSize:12,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
             <span>Couldn't refresh — showing the last known roster.</span>
             <button type="button" onClick={() => load()} style={{fontSize:12,fontWeight:700,padding:'8px 12px',minHeight:36,borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'inherit',cursor:'pointer',fontFamily:'inherit'}}>Retry now</button>
           </div>

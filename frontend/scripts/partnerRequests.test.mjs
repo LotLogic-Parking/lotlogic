@@ -485,7 +485,7 @@ test('the Not ours modal copy is the spec copy', () => {
 // Spec §5 is explicit — "Tokens only" and "`.theme-light` must still pass
 // 4.5:1 on the hold row". A hardcoded status colour satisfies the dark theme
 // and silently fails the light one, which is the theme N Style's crew uses
-// outdoors: `#fbbf24` is 1.66:1 on `.theme-light`'s `--bg-card` (#FFFFFE) and
+// outdoors: `#fbbf24` is 1.66:1 on `.theme-light`'s `--bg-card` (#FFFFFF) and
 // `#22c55e` is 2.27:1. The token pairs `--yellow` and `--green-text` exist in
 // `dashboard.html` for exactly this (the latter's comment says so), so the
 // rule this test enforces is: anything that lands in a CSS `color` on these
@@ -535,14 +535,25 @@ test('every ink on the three partner Requests surfaces comes from a token', () =
 
 const DASHBOARD = path.resolve(ROOT, 'dashboard.html');
 
-/** The `--name: value;` declarations inside one CSS rule of dashboard.html. */
+/** The `--name: value;` declarations inside one CSS rule of dashboard.html,
+ *  with `var(--other)` references resolved through the same block (the
+ *  blue + white palette is declared once as `--ll-*` and the theme tokens
+ *  point at it). */
 function tokenBlock(selector) {
   const src = readFileSync(DASHBOARD, 'utf8');
   const start = src.indexOf(`${selector} {`);
   assert.ok(start >= 0, `${selector} not found in dashboard.html`);
   const body = src.slice(start, src.indexOf('\n    }', start));
   const out = {};
-  for (const m of body.matchAll(/(--[a-z-]+):\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+  for (const m of body.matchAll(/(--[a-z0-9-]+):\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+  // .theme-light only overrides; the `--ll-*` palette lives in :root.
+  const root = selector === ':root' ? out : tokenBlock(':root');
+  const resolve = (v, depth = 0) => {
+    const m = /^var\((--[a-z0-9-]+)\)$/.exec(v);
+    if (!m || depth > 8) return v;
+    return resolve(out[m[1]] ?? root[m[1]] ?? v, depth + 1);
+  };
+  for (const k of Object.keys(out)) out[k] = resolve(out[k]);
   return out;
 }
 
@@ -562,7 +573,7 @@ function contrast(a, b) {
 test('the contrast maths agrees with the numbers in the token comments', () => {
   // Sanity check on the helper itself, against two known pairs.
   assert.equal(Math.round(contrast('#000000', '#FFFFFF')), 21);
-  assert.ok(contrast('#FBBF24', '#FFFFFE') < 2, 'raw amber is the failure this test exists for');
+  assert.ok(contrast('#FBBF24', '#FFFFFF') < 2, 'raw amber is the failure this test exists for');
 });
 
 test('every token these rows switched to clears 4.5:1 on --bg-card in BOTH themes', () => {
@@ -584,12 +595,28 @@ test('every token these rows switched to clears 4.5:1 on --bg-card in BOTH theme
   }
 });
 
-test('the dark theme keeps the exact status colours the rows used to hardcode', () => {
-  // The token swap must be invisible in the dark theme: --yellow and
-  // --green-text are the same literals the rows carried before.
+test('the dark theme resolves the status tokens to the blue + white palette', () => {
+  // --yellow is the warning ink and is BLUE (the brand has no amber):
+  // `--ll-blue-ink-dark` on the navy card. --green-text is the dark
+  // theme's small-text green.
   const dark = tokenBlock(':root');
-  assert.equal(dark['--yellow'].toLowerCase(), '#fbbf24');
+  assert.equal(dark['--yellow'].toLowerCase(), '#60a5fa');
   assert.equal(dark['--green-text'].toLowerCase(), '#22c55e');
+});
+
+test('the accent is LotLogic blue in both themes and its ink is white', () => {
+  for (const selector of [':root', '.theme-light']) {
+    const t = tokenBlock(selector);
+    assert.equal(t['--accent'].toLowerCase(), '#2563eb', `${selector} --accent`);
+    assert.equal(t['--accent-dark'].toLowerCase(), '#1d4ed8', `${selector} --accent-dark`);
+    assert.equal(t['--on-accent'].toLowerCase(), '#ffffff', `${selector} --on-accent`);
+    assert.equal(t['--accent-ink'].toLowerCase(), '#ffffff', `${selector} --accent-ink`);
+    assert.ok(contrast(t['--on-accent'], t['--accent']) >= 4.5, `${selector} white on the accent fill`);
+    assert.ok(contrast(t['--accent-text'], t['--bg-card']) >= 4.5, `${selector} --accent-text on --bg-card`);
+    assert.ok(contrast(t['--text-primary'], t['--bg-card']) >= 4.5, `${selector} --text-primary on --bg-card`);
+    assert.ok(contrast(t['--text-secondary'], t['--bg-card']) >= 4.5, `${selector} --text-secondary on --bg-card`);
+    assert.ok(contrast(t['--text-muted'], t['--bg-card']) >= 4.5, `${selector} --text-muted on --bg-card`);
+  }
 });
 
 // ── the Recent view does not borrow the active view's empty state ──

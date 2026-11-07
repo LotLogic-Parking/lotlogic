@@ -110,8 +110,8 @@ export function ReregTowFlag({ pass }) {
   // the tow driver that the truck holds two passes at once.
   const phoneOnly = pass.matched_on === 'phone';
   const cfg = phoneOnly
-    ? { accent:'#f59e0b', bg:'rgba(245,158,11,.10)', border:'rgba(245,158,11,.45)',
-        chipBg:'#b45309', chip:'⚠ REVIEW', title:'Same phone, different plate',
+    ? { accent:'var(--accent-text)', bg:'var(--accent-tint)', border:'var(--accent-line)',
+        chipBg:'var(--accent)', chip:'⚠ REVIEW', title:'Same phone, different plate',
         body:'A new pass shares this phone with an active one here, but the plate is different — likely a second truck from the same company. Verify before any tow.' }
     : { accent:'#ef4444', bg:'rgba(239,68,68,.12)', border:'rgba(239,68,68,.45)',
         chipBg:'#dc2626', chip:'🚨 TOW', title:'Re-registered while already parked',

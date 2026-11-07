@@ -171,9 +171,8 @@ export function TeamSection({ property, user }) {
                   flex: 1, padding: '8px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
                   border: invite.role === r ? '1px solid var(--accent)' : '1px solid var(--border)',
                   background: invite.role === r ? 'var(--accent)' : 'transparent',
-                  // '#fff' on --accent's dark-theme gold fails contrast — see
-                  // AddPropertyForm.jsx's submit button for the same fix.
-                  color: invite.role === r ? '#1A1206' : 'var(--text-primary)',
+                  // `--on-accent` is white on the blue fill (5.2:1 in both themes).
+                  color: invite.role === r ? 'var(--on-accent)' : 'var(--text-primary)',
                 }}
               >{r === 'manager' ? 'Manager' : 'View only'}</button>
             ))}
@@ -183,7 +182,7 @@ export function TeamSection({ property, user }) {
             Can add people
           </label>
           {error && <div style={{ color: '#f87171', fontSize: 12 }}>{error}</div>}
-          <button type="submit" disabled={inviting} style={{ background: 'var(--accent)', color: '#1A1206', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: inviting ? 'wait' : 'pointer' }}>
+          <button type="submit" disabled={inviting} style={{ background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: inviting ? 'wait' : 'pointer' }}>
             {inviting ? 'Sending…' : 'Send invite'}
           </button>
         </form>

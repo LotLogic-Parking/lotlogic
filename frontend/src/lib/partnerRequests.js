@@ -250,7 +250,7 @@ export function timeLeftLabel(item, now) {
   return `${Math.floor(left / DAY)}d ${Math.floor((left % DAY) / HOUR)}h left`;
 }
 
-/** Under an hour and still live — the time line turns amber (spec §5.2). */
+/** Under an hour and still live — the time line turns to the warning ink (spec §5.2). */
 export function isEndingSoon(item, now) {
   if (item?.kind !== 'hold' || !isActive(item)) return false;
   const left = msLeft(item, now);
