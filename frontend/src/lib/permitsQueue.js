@@ -298,19 +298,46 @@ export function leftServiceMs(row) {
 }
 
 /**
- * Approved, Denied or History: one flat list, newest first — by the decision
- * for Approved and Denied, by the moment the pass left service for History.
+ * Milliseconds until a live short-term pass lapses, measured from `nowMs`;
+ * null for a long-term pass, a pass without an end, or one not Approved.
+ * Negative once the end has passed (the row is then History anyway).
+ */
+export function timeLeftMs(row, nowMs = Date.now()) {
+  if (isLongTerm(row) || segmentOf(row, nowMs) !== 'approved') return null;
+  const until = validUntilMs(row);
+  return until === null ? null : until - nowMs;
+}
+
+const byKey = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+
+/**
+ * Approved, Denied or History: one flat list. Approved puts the short-term
+ * passes first, the one that lapses soonest at the top (that is the one the
+ * office is about to get a call about), then the long-term passes by latest
+ * decision. Denied is newest decision first; History newest departure first.
  */
 export function decidedRows(rows, segment, q = '', nowMs = Date.now()) {
-  const stamp = segment === 'history' ? leftServiceMs : decidedMs;
-  return (rows || [])
-    .filter(r => segmentOf(r, nowMs) === segment && matchesSearch(r, q))
-    .sort((a, b) => {
-      const ta = stamp(a);
-      const tb = stamp(b);
+  const list = (rows || []).filter(r => segmentOf(r, nowMs) === segment && matchesSearch(r, q));
+  if (segment === 'approved') {
+    return list.sort((a, b) => {
+      const la = timeLeftMs(a, nowMs);
+      const lb = timeLeftMs(b, nowMs);
+      if (la !== null && lb !== null && la !== lb) return la - lb;
+      if (la !== null && lb === null) return -1;
+      if (la === null && lb !== null) return 1;
+      const ta = decidedMs(a);
+      const tb = decidedMs(b);
       if (ta !== tb) return ta > tb ? -1 : 1;
-      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+      return byKey(a, b);
     });
+  }
+  const stamp = segment === 'history' ? leftServiceMs : decidedMs;
+  return list.sort((a, b) => {
+    const ta = stamp(a);
+    const tb = stamp(b);
+    if (ta !== tb) return ta > tb ? -1 : 1;
+    return byKey(a, b);
+  });
 }
 
 /** Rows per segment after the search — what the segmented control shows. */
@@ -738,3 +765,65 @@ export function tagDateLabel(date) {
 export function passTypeLabel(row) {
   return isLongTerm(row) ? 'Long-term pass' : 'Short-term pass';
 }
+
+// ── History at this unit (build plan B1 `?unit=`, F2) ────────
+//
+// `GET /apartment/passes/history?unit=` answers every pass the unit ever had,
+// long- and short-term, newest first. The detail shows it under the request
+// so a manager sees the household's pattern before deciding.
+
+const HISTORY_STATUS_TAGS = {
+  pending: { tone: 'amber', text: 'Needs review' },
+  approved: { tone: 'green', text: 'Approved' },
+  active: { tone: 'green', text: 'Approved' },
+  rejected: { tone: 'red', text: 'Denied' },
+  void: { tone: 'neutral', text: 'Voided' },
+  voided: { tone: 'neutral', text: 'Voided' },
+  expired: { tone: 'neutral', text: 'Ended' },
+  cancelled: { tone: 'neutral', text: 'Cancelled' },
+  revoked: { tone: 'neutral', text: 'Revoked' },
+  towed: { tone: 'neutral', text: 'Towed' },
+};
+
+export function historyStatusTag(status) {
+  return HISTORY_STATUS_TAGS[status] || { tone: 'neutral', text: 'Unknown status' };
+}
+
+/** A history entry's kind is the server's `permanent` / `temporary` token; the office reads Long-term / Short-term. */
+export function historyKindLabel(entry) {
+  return entry?.kind === 'permanent' || entry?.kind === 'resident' || entry?.kind === 'long_term' ? 'Long-term pass' : 'Short-term pass';
+}
+
+/**
+ * The entries of a history payload, newest first, without the pass being
+ * looked at (its own row is above). Entries keep the server's fields: `id`,
+ * `kind`, `status`, `plate`, `name`, `unit`, `created_at`, `valid_until`,
+ * `reject_reason`; `name` and `unit` are absent for a partner.
+ */
+export function unitHistoryRows(payload, { excludeId = null } = {}) {
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  return entries
+    .filter(e => e && (excludeId === null || String(e.id) !== String(excludeId)))
+    .sort((a, b) => {
+      const ta = Date.parse(a?.created_at ?? '') || 0;
+      const tb = Date.parse(b?.created_at ?? '') || 0;
+      return tb - ta;
+    });
+}
+
+/** "Short-term pass · ABC1234 · Pat Example" — one line per earlier pass. */
+export function historyEntryLine(entry) {
+  const plate = String(entry?.plate ?? entry?.plate_text ?? '').trim();
+  const name = String(entry?.name ?? '').trim();
+  return [historyKindLabel(entry), plate || null, name || null].filter(Boolean).join(' · ');
+}
+
+/** "Filed Wed Oct 8, 9:14 PM ET · ended Thu Oct 9, 9:14 PM ET". */
+export function historyWhenLine(entry) {
+  const filed = fmtET(entry?.created_at);
+  const until = fmtET(entry?.valid_until);
+  if (!filed && !until) return '';
+  return `${filed ? `Filed ${filed}` : ''}${filed && until ? ' · ' : ''}${until ? `ended ${until}` : ''}`;
+}
+
+export const UNIT_HISTORY_EMPTY = 'No earlier parking passes at this unit.';

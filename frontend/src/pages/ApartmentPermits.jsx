@@ -453,6 +453,7 @@ export function ApartmentPermits({ property, onRequestTow }) {
     return (
       <RequestDetail
         row={selectedRow}
+        propertyId={propertyId}
         isPhone={!isWide}
         headingRef={headingRef}
         propertyName={propertyName}

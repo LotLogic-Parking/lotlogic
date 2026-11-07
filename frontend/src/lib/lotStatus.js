@@ -203,6 +203,9 @@ const TIMELINE_KINDS = {
   request_opened: { label: 'Request opened', tone: 'info' },
   request_resolved: { label: 'Request resolved', tone: 'neutral' },
   towed: { label: 'Towed', tone: 'red' },
+  // Camera sessions (build plan B5): only when the property has a camera.
+  entered: { label: 'Seen entering', tone: 'green' },
+  exited: { label: 'Seen leaving', tone: 'neutral' },
 };
 
 export function timelineKindLabel(kind) {
@@ -226,6 +229,33 @@ export function withLotStatusChip(chips, { isPartner = false } = {}) {
   if (at < 0) return [...list, LOT_STATUS_CHIP];
   return [...list.slice(0, at + 1), LOT_STATUS_CHIP, ...list.slice(at + 1)];
 }
+
+/**
+ * The manager's activity chips (build plan F1), after Lot status: who is on
+ * the property now, what went wrong, and when people come. A partner session
+ * (the tow company) gets Live and Violations - the two that help a truck - but
+ * not Traffic, which is the office's planning view.
+ */
+export const ACTIVITY_CHIPS = Object.freeze([
+  Object.freeze({ id: 'live', label: 'Live' }),
+  Object.freeze({ id: 'violations', label: 'Violations' }),
+  Object.freeze({ id: 'traffic', label: 'Traffic' }),
+]);
+
+export function withActivityChips(chips, { isPartner = false } = {}) {
+  const ids = new Set(ACTIVITY_CHIPS.map(c => c.id));
+  const list = (Array.isArray(chips) ? chips : []).filter(c => !ids.has(c.id));
+  const add = ACTIVITY_CHIPS.filter(c => !isPartner || c.id !== 'traffic');
+  const at = list.findIndex(c => c.id === LOT_STATUS_CHIP.id);
+  if (at < 0) return [...list, ...add];
+  return [...list.slice(0, at + 1), ...add, ...list.slice(at + 1)];
+}
+
+/**
+ * Sections that stand alone on the page: when one of these is the chip, no
+ * other surface renders beside it (and none of them sits under "All").
+ */
+export const SOLO_SECTION_IDS = Object.freeze(['requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
 
 /**
  * What a row tap opens. A hold goes to the Requests section (the request

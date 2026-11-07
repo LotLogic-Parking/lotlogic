@@ -25,12 +25,17 @@ import { RequestsSection } from './property/RequestsSection.jsx';
 import { lockedChips } from '../lib/upsell.js';
 import { UpsellPanel } from './property/UpsellPanel.jsx';
 import { LotStatusTab } from './lot/LotStatusTab.jsx';
-import { withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
+import { SOLO_SECTION_IDS, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
 // parking-log bundle before the operator ever scrolls to it.
 const TruckParkingLog = lazyPage(() => import('./TruckParkingLog.jsx'));
+// The manager's activity tabs (build plan F3–F5): loaded only when their chip
+// is chosen, like every other heavy section.
+const LiveTab = lazyPage(() => import('./lot/LiveTab.jsx'));
+const ViolationsTab = lazyPage(() => import('./lot/ViolationsTab.jsx'));
+const TrafficTab = lazyPage(() => import('./lot/TrafficTab.jsx'));
 
 // Swipeable fullscreen carousel for the matched-vehicle snapshots on
 // No Registration Evidence Package cards. On phones the inline 2-up grid
@@ -232,7 +237,8 @@ function SightingStrip({ sightings, cameras, nowTick }) {
 // truck-plaza property registers passes, by definition.
 //
 // Lot status (task F7) is an apartment chip: first for a partner session, right
-// after Parking Passes for an owner or office session.
+// after Parking Passes for an owner or office session. Live, Violations and
+// Traffic (build plan F1) follow it; a partner gets Live and Violations only.
 export function sectionChipsFor(propertyType, features, { isPartner = false } = {}) {
   const isTruckPlaza = propertyType === 'truck_plaza';
   if (isTruckPlaza) {
@@ -250,7 +256,7 @@ export function sectionChipsFor(propertyType, features, { isPartner = false } = 
   }
   const locked = lockedChips(features);
   const lockedById = new Map(locked.map(c => [c.id, c]));
-  return withLotStatusChip([
+  return withActivityChips(withLotStatusChip([
     // Requests is first and default for an apartment (spec §5.2) — it is the
     // portal's whole point. A truck plaza has no office placing holds, so it
     // does not get the chip and keeps landing on the Parking Log.
@@ -258,7 +264,7 @@ export function sectionChipsFor(propertyType, features, { isPartner = false } = 
     { id: 'all', label: 'All' },
     lockedById.get('log') || { id: 'log', label: 'Parking Passes' },
     ...locked.filter(c => c.id !== 'log'),
-  ], { isPartner });
+  ], { isPartner }), { isPartner });
 }
 
 // Namespaced per property type: an apartment and a truck plaza have different
@@ -400,7 +406,11 @@ export function ALPRPropertyDetailPage({
   // controls … the layout ships without the control, not with a disabled one."
   // The three owner surfaces below (the QR tiles, the add-plate form and the
   // plate list) are not behind a showSection of their own, so they need this.
-  const requestsOnly = sectionFilter === 'requests' || sectionFilter === 'lotstatus';
+  const requestsOnly = SOLO_SECTION_IDS.includes(sectionFilter);
+  // "Request tow" only where the composer it opens will render: the office
+  // (admin / manager) places requests; a viewer or the tow company gets no
+  // such button. Same role rule RequestsSection applies to its composer.
+  const canRequestTow = ['admin', 'manager'].includes(property?.role);
 
   // A Lot status row tap: a hold goes to Requests; a pass goes to the Parking
   // Passes queue, searched for the plate (it reads `?status=&q=` as it mounts).
@@ -878,6 +888,33 @@ export function ALPRPropertyDetailPage({
         </ErrorBoundary>
       )}
 
+      {/* Live, Violations, Traffic (build plan F3–F5): who is on the property
+          now, what went wrong, and when people come. Apartments only; never
+          under All; a partner session gets Live and Violations (no name/unit
+          in its payloads). "Request tow" hands the page the plate exactly as
+          a pass does. */}
+      {sectionFilter === 'live' && !isTruckPlaza && (
+        <ErrorBoundary label="live view">
+          <React.Suspense fallback={<SkeletonCards />}>
+            <LiveTab propertyId={propertyId} propertyName={property?.name || ''} onRequestTow={canRequestTow ? requestTow : undefined} />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
+      {sectionFilter === 'violations' && !isTruckPlaza && (
+        <ErrorBoundary label="violations">
+          <React.Suspense fallback={<SkeletonCards />}>
+            <ViolationsTab propertyId={propertyId} propertyName={property?.name || ''} onRequestTow={canRequestTow ? requestTow : undefined} />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
+      {sectionFilter === 'traffic' && !isTruckPlaza && (
+        <ErrorBoundary label="traffic">
+          <React.Suspense fallback={<SkeletonCards />}>
+            <TrafficTab propertyId={propertyId} propertyName={property?.name || ''} />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
+
       {/* Requests — the portal's home (spec §5.2). Rendered before every
           camera/pass surface because it is the default section. */}
       {showSection('requests') && !isTruckPlaza && (
@@ -1104,7 +1141,7 @@ export function ALPRPropertyDetailPage({
                office (admin / manager) places requests; a viewer or the tow
                company gets no such button. Same role rule RequestsSection
                applies to its composer. */
-            onRequestTow={['admin', 'manager'].includes(property?.role) ? requestTow : undefined}
+            onRequestTow={canRequestTow ? requestTow : undefined}
           />
         </ErrorBoundary>
       ))}

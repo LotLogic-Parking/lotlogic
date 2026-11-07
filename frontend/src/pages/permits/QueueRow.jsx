@@ -7,6 +7,7 @@ import {
   isLongTerm,
   plateText,
   segmentOf,
+  timeLeftMs,
   vehicleLine,
 } from '../../lib/permitsQueue.js';
 import { PlateThumb } from './Evidence.jsx';
@@ -32,12 +33,11 @@ function DocPill({ card }) {
   return <span className="pq-doc is-missing">{missing}</span>;
 }
 
-/** Time left on a live short-term pass, amber in its last hour (the old roster's chip). */
+/** Time left on a live short-term pass (the Approved segment's sort key), red in its last hour. */
 function RemainingTag({ row, now }) {
-  if (!row.valid_until) return null;
-  const left = new Date(row.valid_until).getTime() - now;
-  if (!Number.isFinite(left)) return null;
-  return <Tag tone={left > 0 && left < 3600000 ? 'amber' : left > 0 ? 'green' : 'neutral'}>{fmtPassRemaining(left)}</Tag>;
+  const left = timeLeftMs(row, now);
+  if (left === null) return null;
+  return <Tag tone={left > 0 && left < 3600000 ? 'red' : left > 0 ? 'green' : 'neutral'}>{fmtPassRemaining(left)}</Tag>;
 }
 
 export function QueueRow({ row, now, selected, overLimit, cap, requireLease = true, ageChip, showThumb, showUnit, moreItems, onOpen }) {
