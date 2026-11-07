@@ -128,15 +128,15 @@ test('timelineKindLabel covers every kind in the contract', () => {
 
 import { LOT_STATUS_CHIP, passTarget, rowTarget, withLotStatusChip } from '../src/lib/lotStatus.js';
 
-const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Parking Passes' }, { id: 'qr', label: 'QR codes', locked: true }];
+const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Visitor passes' }, { id: 'qr', label: 'QR codes', locked: true }];
 
-test('withLotStatusChip: first for a partner, right after Parking Passes for an owner', () => {
+test('withLotStatusChip: first for a partner, right after Visitor passes for an owner', () => {
   assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS, { isPartner: true }).map(c => c.id), ['lotstatus', 'requests', 'all', 'log', 'qr']);
   assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS).map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'qr']);
   assert.equal(LOT_STATUS_CHIP.label, 'Lot status');
 });
 
-test('withLotStatusChip: never twice, and lands last when Parking Passes is absent', () => {
+test('withLotStatusChip: never twice, and lands last when Visitor passes is absent', () => {
   const once = withLotStatusChip(APARTMENT_CHIPS);
   assert.equal(withLotStatusChip(once).filter(c => c.id === 'lotstatus').length, 1);
   assert.deepEqual(withLotStatusChip([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'lotstatus']);

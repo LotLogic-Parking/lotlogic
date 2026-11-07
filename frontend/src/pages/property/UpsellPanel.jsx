@@ -5,8 +5,8 @@ import { lockedChips, upsellCopy, upsellTitle, upsellFeatureName } from '../../l
 // ── Greyed upsell tabs (spec §5.6) ───────────────────────────
 //
 // A property with `features.passes=false` and `features.cameras=false`
-// shows a chip row of `Requests · 🔒 Parking passes · 🔒 QR codes ·
-// 🔒 Cameras`. The locked chips are real, keyboard-reachable buttons —
+// shows a chip row of `Requests · Visitor passes · QR codes · Cameras`, the
+// three locked (a text-free lock glyph). The locked chips are real, keyboard-reachable buttons —
 // `ALPRPropertyDetailPage.jsx` renders them muted via `var(--text-muted)`
 // (already ≥ 4.5:1 on both themes) with `aria-describedby="Not included
 // yet"`. Tapping one renders this panel in place of the section it would

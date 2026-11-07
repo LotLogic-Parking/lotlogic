@@ -218,7 +218,7 @@ export const LOT_STATUS_CHIP = Object.freeze({ id: 'lotstatus', label: 'Lot stat
 
 /**
  * The property page's chip row with the Lot status chip placed: first for a
- * partner session (the driver at the curb), right after the Parking Passes
+ * partner session (the driver at the curb), right after the Visitor passes
  * chip for an owner or office session. Apartments only; the caller passes the
  * apartment chip list.
  */
@@ -259,7 +259,7 @@ export const SOLO_SECTION_IDS = Object.freeze(['requests', LOT_STATUS_CHIP.id, .
 
 /**
  * What a row tap opens. A hold goes to the Requests section (the request
- * detail lives there); everything else to the Parking Passes queue searched
+ * detail lives there); everything else to the Visitor passes queue searched
  * for that plate, on the segment its reason belongs to (pending stays under
  * "Needs review", the rest under "Approved"). The pass detail is where the
  * office sees the unit and documents.
@@ -270,7 +270,7 @@ export function rowTarget(row, list) {
   return { section: 'log', status, q: String(row?.plate ?? '') };
 }
 
-/** "Open pass" from the Live tab: the Parking Passes queue, Approved, searched for the plate. */
+/** "Open pass" from the Live tab: the Visitor passes queue, Approved, searched for the plate. */
 export function passTarget(plate) {
   return { section: 'log', status: 'approved', q: String(plate ?? '') };
 }

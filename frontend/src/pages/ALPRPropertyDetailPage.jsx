@@ -229,15 +229,15 @@ function SightingStrip({ sightings, cameras, nowTick }) {
 // can never be selected.
 //
 // `features` (spec §5.6, `/auth/me.properties[].features {passes, qr,
-// cameras}`) locks the Parking Passes chip — relabelled "🔒 Parking passes"
-// — when this property has never had a pass flow switched on, and adds two
-// chips that otherwise don't exist on this row at all: "🔒 QR codes" and
-// "🔒 Cameras". `lockedChips` (UpsellPanel.jsx) is the single source for
+// cameras}`) locks the Visitor passes chip — rendered with a text-free lock
+// glyph — when this property has never had a pass flow switched on, and adds
+// two chips that otherwise don't exist on this row at all: "QR codes" and
+// "Cameras", locked the same way. `lockedChips` (UpsellPanel.jsx) is the single source for
 // which of the three are locked; truck plazas never show them — every
 // truck-plaza property registers passes, by definition.
 //
 // Lot status (task F7) is an apartment chip: first for a partner session, right
-// after Parking Passes for an owner or office session. Live, Violations and
+// after Visitor passes for an owner or office session. Live, Violations and
 // Traffic (build plan F1) follow it; a partner gets Live and Violations only.
 export function sectionChipsFor(propertyType, features, { isPartner = false } = {}) {
   const isTruckPlaza = propertyType === 'truck_plaza';
@@ -262,7 +262,10 @@ export function sectionChipsFor(propertyType, features, { isPartner = false } = 
     // does not get the chip and keeps landing on the Parking Log.
     ...(isTruckPlaza ? [] : [{ id: 'requests', label: 'Requests' }]),
     { id: 'all', label: 'All' },
-    lockedById.get('log') || { id: 'log', label: 'Parking Passes' },
+    // Gabe, 2026-11-07: "parking passes should be visitor passes" — the chip
+    // (and the section heading that mirrors it) is the one place the word is
+    // allowed; every pass type still reads Short-term / Long-term.
+    lockedById.get('log') || { id: 'log', label: 'Visitor passes' },
     ...locked.filter(c => c.id !== 'log'),
   ], { isPartner }), { isPartner });
 }
@@ -270,6 +273,18 @@ export function sectionChipsFor(propertyType, features, { isPartner = false } = 
 // Namespaced per property type: an apartment and a truck plaza have different
 // chips, and one global key meant opening an apartment after a truck plaza
 // landed on a section that does not exist there.
+// The text-free lock on a locked chip (the emoji it replaced was read aloud
+// as "locked" and drawn differently on every platform). The chip's
+// `aria-describedby` ("Not included yet") carries the meaning.
+function LockGlyph() {
+  return (
+    <svg aria-hidden="true" focusable="false" width="11" height="12" viewBox="0 0 11 12" style={{ marginRight: 5, verticalAlign: '-1px' }}>
+      <rect x="1" y="5" width="9" height="6.5" rx="1.5" fill="currentColor" />
+      <path d="M3 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
 export function sectionStorageKey(propertyType) {
   return `lotlogic_pd_section:${propertyType || 'unknown'}`;
 }
@@ -425,7 +440,7 @@ export function ALPRPropertyDetailPage({
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, []);
   const openLotRow = useCallback((row, list) => openTarget(rowTarget(row, list)), [openTarget]);
-  // "Open pass" on a Live row: the Parking Passes queue, Approved, searched
+  // "Open pass" on a Live row: the Visitor passes queue, Approved, searched
   // for the plate (the queue selects the first match as it mounts).
   const openPass = useCallback((plate) => openTarget(passTarget(plate)), [openTarget]);
 
@@ -859,7 +874,7 @@ export function ALPRPropertyDetailPage({
                   whiteSpace: 'nowrap',
                   transition: 'background .12s ease, border-color .12s ease',
                 }}
-              >{locked ? `🔒 ${c.label}` : c.label}</button>
+              >{locked && <LockGlyph />}{c.label}</button>
             );
           });
         })()}
@@ -1137,8 +1152,8 @@ export function ALPRPropertyDetailPage({
       ) : features?.passes === false ? (
         // Portal-only (spec §5.6): this property has never had a pass flow
         // switched on, so there is no roster to show — the chip itself
-        // read "🔒 Parking passes" above. Same upsell card the locked "QR
-        // codes" and "Cameras" chips render.
+        // read as locked "Visitor passes" above. Same upsell card the locked
+        // "QR codes" and "Cameras" chips render.
         <UpsellPanel feature="passes" propertyName={property.name} propertyId={propertyId} />
       ) : (
         // Apartment permit registry (M3): pending approval queue + resident /

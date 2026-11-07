@@ -504,7 +504,8 @@ export function ApartmentPermits({ property, onRequestTow }) {
         <div className="pq-sr" role="status" aria-live="polite">{announcement}</div>
 
         <div className="pq-head" hidden={phoneDetail}>
-          <h2 className="pq-title">Parking pass requests</h2>
+          {/* Mirrors the chip (Gabe, 2026-11-07: "parking passes should be visitor passes"). */}
+          <h2 className="pq-title">Visitor passes</h2>
           <div className="pq-controls">
             <div className="pq-segments" role="group" aria-label="Show requests">
               {SEGMENTS.map(s => (
