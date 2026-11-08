@@ -54,7 +54,6 @@ const TARGET_FILES = [
   // The manager's activity tabs (build plan F3–F5): the pure halves. The
   // tabs themselves live under src/pages/lot, already a target directory.
   'src/lib/presence.js',
-  'src/lib/violations.js',
   'src/lib/traffic.js',
   // The tow company's Team (spec 2026-10-18-tow-company-team §1.4): the
   // section and its pure half. The `driver` role value stays a bare token,

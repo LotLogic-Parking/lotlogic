@@ -206,7 +206,7 @@ export const getLotStatus = (propertyId) =>
 export const getPlateTimeline = (propertyId, plate) =>
   get(`/apartment/passes/timeline${query({ property_id: propertyId, plate })}`);
 
-// ── /apartment/passes/history, /presence, /violations, /metrics ──
+// ── /apartment/passes/history, /presence, /metrics ──
 //
 // The manager's activity reads (manager-dashboard-build-plan B1–B4). Each is
 // scoped to one property; a tow-partner session gets the same shapes without
@@ -224,9 +224,6 @@ export const getPermits = (propertyId) =>
 export const getPresence = (propertyId) =>
   get(`/apartment/passes/presence${query({ property_id: propertyId })}`);
 
-/** GET /apartment/passes/violations?property_id=&days= → `{as_of, days, items}`, newest first (cap 200). */
-export const getViolations = (propertyId, days) =>
-  get(`/apartment/passes/violations${query({ property_id: propertyId, days })}`);
 
 /** GET /apartment/passes/metrics?property_id=&days= → `{source, registrations, traffic}` (days 1..90). */
 export const getPassMetrics = (propertyId, days) =>
@@ -304,7 +301,7 @@ export const requestsApi = {
   inviteMember, updateMember, removeMember, approveMember, declineMember,
   joinProperty, resendJoinRequest, createApartmentProperty, updateApartmentProperty,
   archiveApartmentProperty, listPartnerProperties, verifyPartnerProperty,
-  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getViolations, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
+  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
   deleteSlackIdentity, setSlackFeedChannel, getRequestAction, postRequestAction,
   listTeam, inviteTeammate, patchTeammate, removeTeammate, resendTeammate, assignProperties,
 };

@@ -275,6 +275,20 @@ export function detailSections(row, { permitsRow = null, list = 'on_property', n
 }
 
 /**
+ * How a photo URL is loaded. The backend's own photo routes (an entry photo
+ * served by the API) need the session's Bearer header, which an `<img src>`
+ * cannot carry; a camera frame is a public storage URL.
+ * @returns {'none'|'api'|'direct'}
+ */
+export function photoSource(url, api = '') {
+  const u = String(url ?? '').trim();
+  if (!u) return 'none';
+  if (u.startsWith('/')) return 'api';
+  if (api && u.startsWith(api)) return 'api';
+  return 'direct';
+}
+
+/**
  * The document cards the Live panel shows for a person: the pass's evidence
  * without the lease. The lease is reviewed when the pass is approved and is
  * not part of who is on the property.

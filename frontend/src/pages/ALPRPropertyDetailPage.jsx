@@ -34,7 +34,6 @@ const TruckParkingLog = lazyPage(() => import('./TruckParkingLog.jsx'));
 // The manager's activity tabs (build plan F3–F5): loaded only when their chip
 // is chosen, like every other heavy section.
 const LiveTab = lazyPage(() => import('./lot/LiveTab.jsx'));
-const ViolationsTab = lazyPage(() => import('./lot/ViolationsTab.jsx'));
 const TrafficTab = lazyPage(() => import('./lot/TrafficTab.jsx'));
 
 // Swipeable fullscreen carousel for the matched-vehicle snapshots on
@@ -237,8 +236,8 @@ function SightingStrip({ sightings, cameras, nowTick }) {
 // truck-plaza property registers passes, by definition.
 //
 // Lot status (task F7) is an apartment chip: first for a partner session, right
-// after Visitor passes for an owner or office session. Live, Violations and
-// Traffic (build plan F1) follow it; a partner gets Live and Violations only.
+// after Visitor passes for an owner or office session. Live and Traffic
+// (build plan F1) follow it; a partner gets Live only.
 export function sectionChipsFor(propertyType, features, { isPartner = false } = {}) {
   const isTruckPlaza = propertyType === 'truck_plaza';
   if (isTruckPlaza) {
@@ -906,11 +905,10 @@ export function ALPRPropertyDetailPage({
         </ErrorBoundary>
       )}
 
-      {/* Live, Violations, Traffic (build plan F3–F5): who is on the property
-          now, what went wrong, and when people come. Apartments only; never
-          under All; a partner session gets Live and Violations (no name/unit
-          in its payloads). "Request tow" hands the page the plate exactly as
-          a pass does. */}
+      {/* Live and Traffic (build plan F3, F5): who is on the property now and
+          when people come. Apartments only; never under All; a partner
+          session gets Live (no name/unit in its payload). "Request tow"
+          hands the page the plate exactly as a pass does. */}
       {sectionFilter === 'live' && !isTruckPlaza && (
         <ErrorBoundary label="live view">
           <React.Suspense fallback={<SkeletonCards />}>
@@ -920,13 +918,6 @@ export function ALPRPropertyDetailPage({
               onOpenPass={openPass}
               onRequestTow={canRequestTow ? requestTow : undefined}
             />
-          </React.Suspense>
-        </ErrorBoundary>
-      )}
-      {sectionFilter === 'violations' && !isTruckPlaza && (
-        <ErrorBoundary label="violations">
-          <React.Suspense fallback={<SkeletonCards />}>
-            <ViolationsTab propertyId={propertyId} propertyName={property?.name || ''} onRequestTow={canRequestTow ? requestTow : undefined} />
           </React.Suspense>
         </ErrorBoundary>
       )}

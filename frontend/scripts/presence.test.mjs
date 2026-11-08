@@ -117,12 +117,21 @@ import {
   matchesSearch,
   peopleRows,
   personName,
+  photoSource,
   rowSummary,
   rowTitle,
   timeLeftText,
 } from '../src/lib/presence.js';
 
 const NOW = Date.parse('2026-11-07T16:00:00Z');
+
+test('photoSource: the backend\'s own photo needs the session, a storage URL does not', () => {
+  assert.equal(photoSource('/apartment/requests/T-1/photo', 'https://api.example'), 'api');
+  assert.equal(photoSource('https://api.example/apartment/requests/T-1/photo', 'https://api.example'), 'api');
+  assert.equal(photoSource('https://cdn.example/c3.jpg', 'https://api.example'), 'direct');
+  assert.equal(photoSource(null), 'none');
+  assert.equal(photoSource('  '), 'none');
+});
 const PEOPLE = [
   { session_id: 'a', plate: 'ZED001', vehicle: 'blue Kia Soul', minutes_here: 5, pass: { kind: 'long_term', id: 'r2', status: 'approved', name: 'Zoe Adams', unit: '101' } },
   { session_id: 'b', plate: 'ABC1234', vehicle: 'white Honda Civic', minutes_here: 72, entered_at: '2026-11-07T14:48:00Z', camera_name: 'Front gate',

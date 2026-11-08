@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API, getSessionToken } from '../../lib/api.js';
-import { photoSource } from '../../lib/violations.js';
+import { photoSource } from '../../lib/presence.js';
 
 // ── A 72 × 54 photo frame with a plate badge behind it ────────
 //

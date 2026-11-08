@@ -154,26 +154,27 @@ test('rowTarget: holds open Requests, passes open the queue searched by plate', 
 // ── The manager's activity chips (build plan F1) ─────────────
 import { ACTIVITY_CHIPS, SOLO_SECTION_IDS, withActivityChips } from '../src/lib/lotStatus.js';
 
-test('withActivityChips: Live, Violations, Traffic right after Lot status for the office', () => {
+test('withActivityChips: Live and Traffic right after Lot status for the office; no Violations tab', () => {
   const office = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
-  assert.deepEqual(office.map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'live', 'violations', 'traffic', 'qr']);
-  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['Live', 'Violations', 'Traffic']);
+  assert.deepEqual(office.map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'live', 'traffic', 'qr']);
+  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['Live', 'Traffic']);
+  assert.ok(!office.some(c => /violation|enforcement/i.test(c.label)), 'enforcement is the tow company\'s job, not a tab');
 });
 
-test('withActivityChips: a partner gets Live and Violations, not Traffic', () => {
+test('withActivityChips: a partner gets Live, not Traffic', () => {
   const partner = withActivityChips(withLotStatusChip(APARTMENT_CHIPS, { isPartner: true }), { isPartner: true });
-  assert.deepEqual(partner.map(c => c.id), ['lotstatus', 'live', 'violations', 'requests', 'all', 'log', 'qr']);
+  assert.deepEqual(partner.map(c => c.id), ['lotstatus', 'live', 'requests', 'all', 'log', 'qr']);
 });
 
 test('withActivityChips: never twice, and lands last when Lot status is absent', () => {
   const once = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
   assert.equal(withActivityChips(once).filter(c => c.id === 'live').length, 1);
-  assert.deepEqual(withActivityChips([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'live', 'violations', 'traffic']);
-  assert.deepEqual(withActivityChips(null).map(c => c.id), ['live', 'violations', 'traffic']);
+  assert.deepEqual(withActivityChips([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'live', 'traffic']);
+  assert.deepEqual(withActivityChips(null).map(c => c.id), ['live', 'traffic']);
 });
 
 test('the activity sections stand alone, like Requests and Lot status (never under All)', () => {
-  assert.deepEqual([...SOLO_SECTION_IDS], ['requests', 'lotstatus', 'live', 'violations', 'traffic']);
+  assert.deepEqual([...SOLO_SECTION_IDS], ['requests', 'lotstatus', 'live', 'traffic']);
 });
 
 test('timeline: camera sessions read "Seen entering" / "Seen leaving" (build plan B5)', () => {

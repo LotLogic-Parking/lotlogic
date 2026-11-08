@@ -232,13 +232,13 @@ export function withLotStatusChip(chips, { isPartner = false } = {}) {
 
 /**
  * The manager's activity chips (build plan F1), after Lot status: who is on
- * the property now, what went wrong, and when people come. A partner session
- * (the tow company) gets Live and Violations - the two that help a truck - but
- * not Traffic, which is the office's planning view.
+ * the property now, and when people come. A partner session (the tow
+ * company) gets Live - the one that helps a truck - but not Traffic, which
+ * is the office's planning view. Enforcement is the tow company's job and
+ * has no tab here (Gabe, 2026-11-07).
  */
 export const ACTIVITY_CHIPS = Object.freeze([
   Object.freeze({ id: 'live', label: 'Live' }),
-  Object.freeze({ id: 'violations', label: 'Violations' }),
   Object.freeze({ id: 'traffic', label: 'Traffic' }),
 ]);
 

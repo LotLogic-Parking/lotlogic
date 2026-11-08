@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getLotStatus, getPassHistory, getPassMetrics, getPermits, getPlateTimeline, getPresence, getViolations, requestsApi } from '../src/lib/requestsApi.js';
+import { getLotStatus, getPassHistory, getPassMetrics, getPermits, getPlateTimeline, getPresence, requestsApi } from '../src/lib/requestsApi.js';
 
 async function seenUrl(call) {
   const realFetch = globalThis.fetch;
@@ -43,11 +43,9 @@ test('getPresence asks for the property and nothing else', async () => {
   assert.equal(requestsApi.getPresence, getPresence);
 });
 
-test('getViolations and getPassMetrics carry the day window', async () => {
-  assert.ok((await seenUrl(() => getViolations('p1', 30))).endsWith('/apartment/passes/violations?property_id=p1&days=30'));
+test('getPassMetrics carries the day window', async () => {
   assert.ok((await seenUrl(() => getPassMetrics('p1', 7))).endsWith('/apartment/passes/metrics?property_id=p1&days=7'));
   assert.ok((await seenUrl(() => getPassMetrics('p1'))).endsWith('/apartment/passes/metrics?property_id=p1'), 'no days: the server default');
-  assert.equal(requestsApi.getViolations, getViolations);
   assert.equal(requestsApi.getPassMetrics, getPassMetrics);
 });
 
