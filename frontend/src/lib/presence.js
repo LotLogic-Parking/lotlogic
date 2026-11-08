@@ -228,7 +228,7 @@ const when = (iso, now) => {
  * partner payload (no name, unit, phone, email) simply shows fewer lines.
  * `permitsRow` is the matching approval-queue row when the page has it.
  */
-export function detailSections(row, { permitsRow = null, list = 'on_property', now = Date.now(), requireLease = true } = {}) {
+export function detailSections(row, { permitsRow = null, list = 'on_property', now = Date.now() } = {}) {
   const pass = row?.pass && typeof row.pass === 'object' ? row.pass : null;
   const pr = permitsRow || {};
   const group = (key, label, items) => {
@@ -267,11 +267,20 @@ export function detailSections(row, { permitsRow = null, list = 'on_property', n
     { label: 'Stayed', value: exits ? spanPhrase(row?.minutes_stayed) : '' },
   ]);
 
-  const documents = permitsRow ? group('documents', 'Documents', evidenceCards(permitsRow, { requireLease }).map(c => ({
-    label: c.title, value: c.present ? 'Provided' : c.notRequired ? 'Not required' : 'Not provided',
+  const documents = permitsRow ? group('documents', 'Documents', liveDocumentCards(permitsRow).map(c => ({
+    label: c.title, value: c.present ? 'Provided' : 'Not provided',
   }))) : null;
 
   return [contact, vehicle, passGroup, presence, documents].filter(Boolean);
+}
+
+/**
+ * The document cards the Live panel shows for a person: the pass's evidence
+ * without the lease. The lease is reviewed when the pass is approved and is
+ * not part of who is on the property.
+ */
+export function liveDocumentCards(permitsRow) {
+  return evidenceCards(permitsRow).filter(c => c.which !== 'lease');
 }
 
 /** Whether the matching permits row is a long-term pass (its document set differs). */

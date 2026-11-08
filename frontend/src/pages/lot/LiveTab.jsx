@@ -10,7 +10,6 @@ import { DocCacheContext, fetchDocBlob } from '../permits/docs.js';
 import { DocViewerModal } from '../permits/DocViewerModal.jsx';
 import { EvidenceCard } from '../permits/Evidence.jsx';
 import { UnitHistory } from '../permits/UnitHistory.jsx';
-import { evidenceCards } from '../../lib/permitsQueue.js';
 import {
   EMPTY_COPY,
   LIST_SEGMENTS,
@@ -18,6 +17,7 @@ import {
   detailSections,
   filterPeople,
   findPermitsRow,
+  liveDocumentCards,
   passChip,
   peopleRows,
   presenceTiles,
@@ -64,10 +64,10 @@ function DetailGroup({ group }) {
   );
 }
 
-function PersonPanel({ row, list, propertyId, permitsRow, requireLease, now, onZoom, onOpenPass, onRequestTow }) {
-  const groups = useMemo(() => detailSections(row, { permitsRow, list, now, requireLease }), [row, permitsRow, list, now, requireLease]);
+function PersonPanel({ row, list, propertyId, permitsRow, now, onZoom, onOpenPass, onRequestTow }) {
+  const groups = useMemo(() => detailSections(row, { permitsRow, list, now }), [row, permitsRow, list, now]);
   const unit = String(row.pass?.unit ?? permitsRow?.unit_number ?? permitsRow?.host_unit ?? '').trim();
-  const cards = permitsRow ? evidenceCards(permitsRow, { requireLease }) : [];
+  const cards = permitsRow ? liveDocumentCards(permitsRow) : [];
   return (
     <div className="ls-panel">
       {row.entry_photo_url && (
@@ -129,7 +129,7 @@ function PersonRow({ row, list, open, onToggle, panelId, now, ...panel }) {
   );
 }
 
-export function LiveTab({ propertyId, propertyName = '', requireLease = true, onRequestTow, onOpenPass }) {
+export function LiveTab({ propertyId, propertyName = '', onRequestTow, onOpenPass }) {
   const [data, setData] = useState(null);
   const [permits, setPermits] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -211,7 +211,6 @@ export function LiveTab({ propertyId, propertyName = '', requireLease = true, on
       now,
       propertyId,
       permitsRow: findPermitsRow(permits, row.pass),
-      requireLease,
       onZoom: setDocView,
       onOpenPass,
       onRequestTow,

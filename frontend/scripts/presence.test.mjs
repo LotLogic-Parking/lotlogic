@@ -213,14 +213,15 @@ test('detailSections: labelled groups, empty values and empty groups left out', 
   assert.ok(groups.every(g => g.label && g.items.every(i => i.label && i.value)));
 });
 
-test('detailSections: a long-term pass carries the back plate, who approved, and the long-term documents', () => {
-  const groups = detailSections(PEOPLE[0], { permitsRow: findPermitsRow(PERMITS, PEOPLE[0].pass), now: NOW, requireLease: false });
+test('detailSections: a long-term pass carries the back plate, who approved, and the long-term documents, never the lease', () => {
+  const groups = detailSections(PEOPLE[0], { permitsRow: findPermitsRow(PERMITS, PEOPLE[0].pass), now: NOW });
   const by = Object.fromEntries(groups.map(g => [g.key, Object.fromEntries(g.items.map(i => [i.label, i.value]))]));
   assert.equal(by.vehicle['Back plate'], 'ZED001B');
   assert.equal(by.pass.Kind, 'Long-term');
   assert.equal(by.pass.Approved, 'Fri Oct 2, 8:00 AM ET by Breanna');
   assert.equal(by.pass['Time left'], undefined, 'a long-term pass has no time left');
-  assert.deepEqual(by.documents, { 'Plate photo': 'Provided', 'Vehicle photo': 'Provided', Registration: 'Not provided', 'Photo ID': 'Provided', Lease: 'Not required' });
+  assert.deepEqual(by.documents, { 'Plate photo': 'Provided', 'Vehicle photo': 'Provided', Registration: 'Not provided', 'Photo ID': 'Provided' });
+  assert.ok(!('Lease' in by.documents), 'the lease is not shown on the Live panel');
 });
 
 test('detailSections: no pass on file, no permits row, a partner payload - fewer lines, never a blank one', () => {

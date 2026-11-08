@@ -917,7 +917,6 @@ export function ALPRPropertyDetailPage({
             <LiveTab
               propertyId={propertyId}
               propertyName={property?.name || ''}
-              requireLease={property?.require_lease !== false}
               onOpenPass={openPass}
               onRequestTow={canRequestTow ? requestTow : undefined}
             />
