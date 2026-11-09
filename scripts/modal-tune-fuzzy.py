@@ -227,7 +227,7 @@ def tune_fuzzy(
 
     # 5. Commit to GitHub via Contents API.
     gh_pat = os.environ.get("GITHUB_PAT")
-    gh_owner = os.environ.get("GITHUB_OWNER", "getlotlogic")
+    gh_owner = os.environ.get("GITHUB_OWNER", "LotLogic-Parking")
     gh_repo = os.environ.get("GITHUB_REPO", "lotlogic")
     gh_branch = os.environ.get("GITHUB_BRANCH", "main")
     gh_path = "supabase/functions/camera-snapshot/auto-fuzzy-config.json"
