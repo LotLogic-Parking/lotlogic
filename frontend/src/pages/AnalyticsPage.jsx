@@ -141,7 +141,7 @@ export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavi
                 {r.invoicable_tows > 0 && (
                   <button
                     onClick={() => onNavigate && onNavigate('invoices')}
-                    style={{fontSize:12, padding:'6px 10px', borderRadius:6, border:'1px solid rgba(59,130,246,.4)', background:'rgba(59,130,246,.1)', color:'var(--accent)', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap'}}
+                    style={{fontSize:12, padding:'6px 10px', borderRadius:6, border:'1px solid rgba(59,130,246,.4)', background:'rgba(59,130,246,.1)', color: 'var(--accent-text)', cursor:'pointer', fontWeight:600, whiteSpace:'nowrap'}}
                   >
                     Invoice {r.invoicable_tows} · {fmtMoney(r.invoicable_gross)}
                   </button>
@@ -201,7 +201,7 @@ export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavi
           {Array.from({length: 24}, (_, hour) => {
             const avg = utilData.hourly[hour] || 0;
             const pct = Math.min((avg / totalSpaces) * 100, 100);
-            const color = pct > 80 ? '#ef4444' : pct > 50 ? '#fbbf24' : '#4ade80';
+            const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--accent)' : 'var(--green)';
             return (
               <div key={hour} className="utilization-bar-row">
                 <div className="utilization-bar-label">{hour.toString().padStart(2, '0')}:00</div>

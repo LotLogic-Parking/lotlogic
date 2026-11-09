@@ -8,8 +8,8 @@
 // 'go'/'stop' to the `--verdict-go`/`--verdict-stop` tokens (dashboard.html
 // :root/.theme-light) with fixed inks (#0E0F11 on go, #F5F5F0 on stop —
 // these never flip with theme: a solid safety color needs the same ink in
-// both themes), and 'amber' to the existing `--accent` token with the new
-// `--verdict-amber-ink` token. A verdict is for ONE property — spec §5.5's
+// both themes), and 'amber' (the hold / eligible tone — a solid blue
+// `--accent` card) to the `--verdict-amber-ink` (white) token. A verdict is for ONE property — spec §5.5's
 // opening rule — so nothing here ever renders a cross-property match as a
 // green DO NOT TOW; that's why `on_file_elsewhere` and `grouped` exist.
 
@@ -129,7 +129,7 @@ export function verdictPresentation(verdict, detail, scope) {
 // client-side overlay (spec §5.5, final paragraph): when scope = All and
 // the remembered property isn't among the matches, a single signal word
 // would read as a verdict for THIS lot when it isn't one, so the Lookup
-// page renders the amber "on file elsewhere" card instead. With no
+// page renders the blue "on file elsewhere" card instead. With no
 // remembered property to compare against, there's no "this lot" to protect
 // — render the backend's own answer unchanged.
 //

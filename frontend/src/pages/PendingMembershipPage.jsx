@@ -58,12 +58,9 @@ export function PendingMembershipPage({ me, user, onLogout, onAddProperty }) {
           onClick={resend}
           disabled={resendDisabled}
           style={{
-            background: resendDisabled ? 'rgba(59,130,246,.15)' : 'var(--accent)',
-            // Dark theme's --accent is a light gold (#FBBF24) — white text on
-            // it fails contrast (axe: 1.64:1). `#1A1206` is the dark-ink
-            // pairing AccountPage's PartnerFeeEditor Save button already
-            // uses against the same token.
-            color: resendDisabled ? 'var(--text-faint)' : '#1A1206',
+            background: resendDisabled ? 'var(--accent-tint)' : 'var(--accent)',
+            // `--on-accent` is white on the blue fill: 5.2:1 in both themes.
+            color: resendDisabled ? 'var(--text-faint)' : 'var(--on-accent)',
             border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700,
             cursor: resendDisabled ? 'default' : 'pointer', fontFamily: 'inherit',
           }}
@@ -77,7 +74,7 @@ export function PendingMembershipPage({ me, user, onLogout, onAddProperty }) {
       {onAddProperty && (
         <div style={{ marginTop: 24, fontSize: 13, color: 'var(--text-muted)' }}>
           Not the right property?{' '}
-          <button onClick={onAddProperty} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
+          <button onClick={onAddProperty} style={{ background: 'transparent', border: 'none', color: 'var(--accent-text)', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
             Add a different property
           </button>
         </div>

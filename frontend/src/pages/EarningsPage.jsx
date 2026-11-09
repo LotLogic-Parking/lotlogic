@@ -102,7 +102,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
             </div>
             <div style={{background:'var(--bg-inset)', border:'1px solid var(--border)', borderRadius:8, padding:'6px 12px', fontSize:12}}>
               <span style={{color:'var(--text-muted)'}}>LotLogic </span>
-              <strong style={{color:'var(--accent)'}}>{fmtMoney(totalOurs)}</strong>
+              <strong style={{color: 'var(--accent-text)'}}>{fmtMoney(totalOurs)}</strong>
             </div>
           </div>
         )}
@@ -134,7 +134,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
               {invoicableTows.length} tow{invoicableTows.length !== 1 ? 's' : ''} · {fmtMoney(invoicableGross)}
             </div>
           </div>
-          <div style={{fontSize: 13, color: 'var(--accent)', fontWeight: 700, whiteSpace: 'nowrap'}}>
+          <div style={{fontSize: 13, color: 'var(--accent-text)', fontWeight: 700, whiteSpace: 'nowrap'}}>
             Review &amp; invoice →
           </div>
         </div>
@@ -169,7 +169,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
                 <div className="bar-chart-track">
                   <div className="bar-chart-fill" style={{
                     width: `${Math.max((d.value / maxDailyRev) * 100, d.value > 0 ? 8 : 0)}%`,
-                    background: d.value > 0 ? 'linear-gradient(90deg, #FBBF24, #C4940F)' : 'transparent',
+                    background: d.value > 0 ? 'linear-gradient(90deg, var(--accent), var(--accent-dark))' : 'transparent',
                   }}>
                     {d.value > 0 && fmtMoney(d.value)}
                   </div>
@@ -186,7 +186,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
         <div className="earnings-breakdown" style={{marginBottom:16}}>
           <div className="breakdown-header">By Action</div>
           {actionEntries.map(([action, count]) => {
-            const colors = { boots: '#fbbf24', tows: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
+            const colors = { boots: 'var(--accent-text)', tows: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
             return (
               <div key={action} className="breakdown-row">
                 <div style={{display:'flex', alignItems:'center', gap:8}}>

@@ -35,7 +35,7 @@ import { GOOGLE_MAPS_KEY, loadPlacesScript } from '../lib/places.js';
 
 const INPUT_STYLE = { padding: '10px 12px', background: 'var(--bg-inset)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, width: '100%', boxSizing: 'border-box' };
 const LABEL_STYLE = { display: 'block', fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', marginBottom: 4, marginTop: 10 };
-const LINK_BTN_STYLE = { background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '6px 0', textAlign: 'left' };
+const LINK_BTN_STYLE = { background: 'transparent', border: 'none', color: 'var(--accent-text)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '6px 0', textAlign: 'left' };
 
 function MatchCard({ title, candidates, onJoin, joiningId, extra }) {
   return (
@@ -47,7 +47,7 @@ function MatchCard({ title, candidates, onJoin, joiningId, extra }) {
             {c.name}{c.street_line ? ` · ${c.street_line}` : ''}{c.manager_first_name ? ` · managed on LotLogic by ${c.manager_first_name}` : ''}
           </div>
           <button type="button" disabled={joiningId === c.id} onClick={() => onJoin(c.id)}
-            style={{ background: 'var(--accent)', color: '#1A1206', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: joiningId === c.id ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+            style={{ background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontWeight: 700, cursor: joiningId === c.id ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
             {joiningId === c.id ? 'Sending…' : "That's mine — ask to join"}
           </button>
         </div>
@@ -277,10 +277,9 @@ export function AddPropertyForm({ slug = null, onSuccess, onJoined, onCancel, su
         {onCancel && (
           <button type="button" onClick={onCancel} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-faint)', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
         )}
-        {/* `--accent` is a light gold in the dark theme (#FBBF24) — '#1A1206'
-            is the dark-ink pairing used elsewhere against the same token
-            (AccountPage's Save button); white text here fails contrast. */}
-        <button type="submit" disabled={!canSubmit} style={{ flex: 2, padding: '10px', background: 'var(--accent)', color: '#1A1206', border: 'none', borderRadius: 8, fontWeight: 700, cursor: canSubmit ? 'pointer' : 'default', opacity: canSubmit ? 1 : 0.6, fontFamily: 'inherit' }}>
+        {/* `--on-accent` is white on the blue `--accent` fill (5.2:1 in both
+            themes) — never a literal ink. */}
+        <button type="submit" disabled={!canSubmit} style={{ flex: 2, padding: '10px', background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 8, fontWeight: 700, cursor: canSubmit ? 'pointer' : 'default', opacity: canSubmit ? 1 : 0.6, fontFamily: 'inherit' }}>
           {submitting ? 'Adding…' : submitLabel}
         </button>
       </div>

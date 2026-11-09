@@ -346,7 +346,7 @@ export function minutesLeft(expiresAt, now) {
 
 /**
  * The hold row's second line (spec §5.2): `until <ET> · 22h`, and under an
- * hour the amber `until <ET> · ⚠ 48 min left — Extend?`.
+ * hour the blue-warning `until <ET> · ⚠ 48 min left — Extend?`.
  *
  * `expiresLocal` is the server's own `expires_local` string. When present it
  * wins over the client's rendering — the server resolved the real

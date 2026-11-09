@@ -22,8 +22,8 @@ function fmtTagDate(s) {
 
 // Tone (from verdicts.js) -> the actual fill/ink pair. 'go'/'stop' are fixed
 // safety colors (never theme-swapped — see dashboard.html's :root comment);
-// 'amber' reuses the already-themed --accent token with the one new ink
-// token; 'neutral' is the grouped card, same chrome as any other card.
+// 'amber' is a solid --accent (blue) card with the --verdict-amber-ink (white)
+// ink; 'neutral' is the grouped card, same chrome as any other card.
 const TONE_STYLE = {
   go: { fill: 'var(--verdict-go)', ink: '#0E0F11' },
   stop: { fill: 'var(--verdict-stop)', ink: '#F5F5F0' },
@@ -317,7 +317,7 @@ export function PlateLookupPage({ user, plate: deepPlate = null, property: deepP
                 {history.entries.map((e, i) => {
                   const statusColor = e.status === 'active' || e.status === 'approved' ? '#4ade80'
                     : e.status === 'rejected' ? '#ef4444'
-                    : e.status === 'pending' ? '#fbbf24' : 'var(--text-muted)';
+                    : e.status === 'pending' ? 'var(--yellow)' : 'var(--text-muted)';
                   const fmt = (v) => v ? new Date(v).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
                   return (
                     <div key={e.id} style={{ padding: '10px 14px', borderTop: i ? '1px solid var(--border-subtle)' : 'none', display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>

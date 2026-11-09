@@ -9,7 +9,7 @@ export function useTheme() {
     localStorage.setItem('lotlogic_theme', theme);
     // Update meta theme-color for mobile browsers
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = theme === 'dark' ? '#0c0e14' : '#f8f9fb';
+    if (meta) meta.content = theme === 'dark' ? '#0B1220' : '#F5F7FB';
   }, [theme]);
   const toggle = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
   return { theme, toggle };

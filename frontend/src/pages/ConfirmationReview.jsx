@@ -80,7 +80,7 @@ const REVIEW_QUEUES = [
 
 const TONE_COLORS = {
   red:   { fg: '#ef4444', bg: 'rgba(239,68,68,.12)',  border: 'rgba(239,68,68,.3)' },
-  amber: { fg: '#f59e0b', bg: 'rgba(245,158,11,.12)', border: 'rgba(245,158,11,.3)' },
+  amber: { fg: 'var(--accent-text)', bg: 'var(--accent-tint)', border: 'var(--accent-line)' },
   green: { fg: '#10b981', bg: 'rgba(16,185,129,.12)', border: 'rgba(16,185,129,.3)' },
   gray:  { fg: '#9ca3af', bg: 'rgba(156,163,175,.12)',border: 'rgba(156,163,175,.3)' },
   blue:  { fg: '#60a5fa', bg: 'rgba(96,165,250,.12)', border: 'rgba(96,165,250,.3)' },
@@ -744,13 +744,13 @@ export function ConfirmationReviewView({ user, lots, partnersProp }) {
         fontSize: 13, color: 'var(--text-primary)', display: 'flex', gap: 10, alignItems: 'flex-start',
       }
     },
-      React.createElement('span', { 'aria-hidden': true, style: { fontSize: 14, color: '#FBBF24', lineHeight: 1.2 } }, '\u2139' /* ℹ */),
+      React.createElement('span', { 'aria-hidden': true, style: { fontSize: 14, color: 'var(--accent-text)', lineHeight: 1.2 } }, '\u2139' /* ℹ */),
       React.createElement('div', null,
         React.createElement('strong', { style: { fontWeight: 700 } }, 'Read-only.'),
         ' Your owner handles billing overrides. To contest a row, ',
         React.createElement('a', {
           href: 'mailto:gabriel@lotlogicparking.com?subject=Billing%20review%20question',
-          style: { color: '#FBBF24', textDecoration: 'underline', fontWeight: 600 },
+          style: { color: 'var(--accent-text)', textDecoration: 'underline', fontWeight: 600 },
         }, 'email LotView support'),
         '.',
       ),

@@ -136,7 +136,7 @@ export function LoginPage({ onLogin }) {
           Forgot password? Email me a setup link.
         </button>
         <div className="login-note" style={{marginTop:16,fontSize:13,color:'var(--text-muted)'}}>
-          New property? <a href="/join" style={{color:'var(--accent)',fontWeight:700}}>Create your account</a>
+          New property? <a href="/join" style={{color: 'var(--accent-text)',fontWeight:700}}>Create your account</a>
         </div>
       </div>
     </div>

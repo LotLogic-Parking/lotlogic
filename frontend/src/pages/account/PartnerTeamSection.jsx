@@ -24,7 +24,7 @@ import {
 // P2 (spec §2.2, §2.3): each member's **Properties** row — "All properties"
 // for an Admin or Dispatch, a checklist with Save for a Truck when the
 // viewer may assign (Admin, Dispatch), read-only text otherwise; "No
-// properties yet" in amber for a Truck with none. The checklist lists the
+// properties yet" in the warning ink for a Truck with none. The checklist lists the
 // company's live properties as the VIEWER's `/auth/me.properties` gives them
 // (an Admin or Dispatch is unrestricted, so that is every one), read through
 // `db.getProperties` so a platform admin's View as Partner gets the viewed
@@ -47,9 +47,10 @@ const rowBtn = {
 // `--red` on the card passes 4.5:1 in both themes; the office section's
 // #f87171-on-pink does not in the light theme (axe: color-contrast).
 const removeBtn = { ...rowBtn, color: 'var(--red)', border: '1px solid var(--red)' };
-// `--yellow` is the dashboard's amber, 4.5:1 or better on `--bg-card` in
-// both themes (the Requests tab's "not yet confirmed" uses it the same way).
-const AMBER = 'var(--yellow)';
+// `--yellow` is the dashboard's warning ink (blue), 4.5:1 or better on
+// `--bg-card` in both themes (the Requests tab's "not yet confirmed" uses it
+// the same way).
+const WARN = 'var(--yellow)';
 // Read by a screen reader, not shown: the dashboard shell has no class for it.
 const VISUALLY_HIDDEN = {
   position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden',
@@ -217,7 +218,7 @@ export function PartnerTeamSection({ user }) {
             type="button"
             onClick={() => { setShowInvite(v => !v); setError(''); }}
             aria-expanded={showInvite}
-            style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--accent-text)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             {showInvite ? 'Cancel' : 'Add a teammate'}
           </button>
@@ -350,7 +351,7 @@ function MemberProperties({ member, row, properties, picked, busy, saving, error
     return (
       <div style={wrap} data-testid="member-properties">
         {label}
-        <div style={{ fontSize: 13, fontWeight: row.empty ? 700 : 600, color: row.empty ? AMBER : 'var(--text-primary)' }}>{row.text}</div>
+        <div style={{ fontSize: 13, fontWeight: row.empty ? 700 : 600, color: row.empty ? WARN : 'var(--text-primary)' }}>{row.text}</div>
       </div>
     );
   }
@@ -362,7 +363,7 @@ function MemberProperties({ member, row, properties, picked, busy, saving, error
       <legend style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 4, padding: 0 }}>
         Properties<span style={VISUALLY_HIDDEN}> for {member.name}</span>
       </legend>
-      {row.note && <div style={{ fontSize: 13, fontWeight: 700, color: AMBER, marginBottom: 6 }}>{row.note}</div>}
+      {row.note && <div style={{ fontSize: 13, fontWeight: 700, color: WARN, marginBottom: 6 }}>{row.note}</div>}
       {properties === null && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading properties…</div>}
       {properties !== null && list.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Your company has no properties to assign yet.</div>

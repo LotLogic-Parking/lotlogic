@@ -119,7 +119,7 @@ function BillingQuickBooksView({ partnersProp, lots }) {
   }
 
   const statusColor = {
-    pending_review:     { bg: 'rgba(251,191,36,.15)',  fg: '#f59e0b' },
+    pending_review:     { bg: 'var(--accent-tint)',  fg: 'var(--accent-text)' },
     emailed_for_review: { bg: 'rgba(59,130,246,.15)',  fg: '#3b82f6' },
     sent:               { bg: 'rgba(16,185,129,.15)',  fg: '#10b981' },
     voided:             { bg: 'rgba(107,114,128,.2)',  fg: '#6b7280' },

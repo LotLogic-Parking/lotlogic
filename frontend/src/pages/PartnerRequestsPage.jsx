@@ -203,7 +203,7 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
           REQUESTS
         </h2>
         {toDo > 0 && (
-          <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>
+          <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: 'var(--accent-text)' }}>
             {toDo} to do
           </span>
         )}
@@ -262,7 +262,7 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
             type="button"
             onClick={() => load()}
             style={{
-              background: 'transparent', border: 'none', color: 'var(--accent)',
+              background: 'transparent', border: 'none', color: 'var(--accent-text)',
               fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', padding: 0,
             }}
           >

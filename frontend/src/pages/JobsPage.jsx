@@ -129,14 +129,14 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
     : null;
 
   const actionLabels = { boot: 'Boot', tow: 'Tow', dismissed: 'Dismiss', already_gone: 'Already Gone', no_action: 'No Action' };
-  const actionColors = { boot: '#fbbf24', tow: '#ef4444', dismissed: '#a78bfa', already_gone: '#6b7280', no_action: '#6b7280' };
+  const actionColors = { boot: 'var(--accent-text)', tow: '#ef4444', dismissed: '#a78bfa', already_gone: '#6b7280', no_action: '#6b7280' };
 
   // Status badge config for dedup state machine
   const statusBadge = {
     alerted:      { label: 'Active',         color: '#ef4444', bg: 'rgba(239,68,68,.12)',  icon: '●' },
     pending:      { label: 'Active',         color: '#ef4444', bg: 'rgba(239,68,68,.12)',  icon: '●' },
-    dispatched:   { label: 'Awaiting tow co', color: '#fbbf24', bg: 'rgba(251,191,36,.14)', icon: '🟠' },
-    acknowledged: { label: 'Acknowledged',   color: '#f59e0b', bg: 'rgba(245,158,11,.12)', icon: '🟡' },
+    dispatched:   { label: 'Awaiting tow co', color: 'var(--accent-text)', bg: 'var(--accent-tint)', icon: '🟠' },
+    acknowledged: { label: 'Acknowledged',   color: 'var(--accent-text)', bg: 'var(--accent-tint)', icon: '🟡' },
     cleared:      { label: 'Cleared',      color: '#4ade80', bg: 'rgba(74,222,128,.12)', icon: '✓' },
     resolved:     { label: 'Resolved',     color: '#4ade80', bg: 'rgba(74,222,128,.12)', icon: '✓' },
     departed:     { label: 'Cancelled — Vehicle Left', color: '#6b7280', bg: 'rgba(107,114,128,.12)', icon: '🚫' },
@@ -435,7 +435,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
           </div>
           {colorDetRate != null && (
             <div className="cam-det-chip" style={{padding:'5px 10px', background: colorDetRate >= 60 ? 'rgba(74,222,128,.08)' : colorDetRate >= 30 ? 'rgba(251,191,36,.08)' : 'rgba(239,68,68,.08)', border: `1px solid ${colorDetRate >= 60 ? 'rgba(74,222,128,.2)' : colorDetRate >= 30 ? 'rgba(251,191,36,.2)' : 'rgba(239,68,68,.2)'}`}}>
-              <span style={{width:7, height:7, borderRadius:'50%', background: colorDetRate >= 60 ? '#4ade80' : colorDetRate >= 30 ? '#fbbf24' : '#ef4444', flexShrink:0}} /> {colorDetRate}% color detected
+              <span style={{width:7, height:7, borderRadius:'50%', background: colorDetRate >= 60 ? 'var(--green)' : colorDetRate >= 30 ? 'var(--yellow)' : 'var(--red)', flexShrink:0}} /> {colorDetRate}% color detected
             </div>
           )}
         </div>
@@ -444,13 +444,13 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
       {/* AI Detection Health banner - only show for owners when quality is poor */}
       {isOwner && aiHealthScore != null && aiHealthScore < 50 && (
         <div style={{
-          background:'rgba(245,158,11,.06)', border:'1px solid rgba(245,158,11,.2)', borderRadius:10,
+          background:'var(--accent-tint)', border:'1px solid var(--accent-line)', borderRadius:10,
           padding:'10px 14px', marginBottom:14, display:'flex', alignItems:'flex-start', gap:10
         }}>
           <div style={{fontSize:16, flexShrink:0, marginTop:1}}>⚠</div>
           <div>
-            <div style={{fontSize:13, fontWeight:700, color:'#f59e0b', marginBottom:2}}>AI Detection Quality: {aiHealthScore}%</div>
-            <div style={{fontSize:11, color:'#92400e', lineHeight:1.4}}>
+            <div style={{fontSize:13, fontWeight:700, color:'var(--accent-text)', marginBottom:2}}>AI Detection Quality: {aiHealthScore}%</div>
+            <div style={{fontSize:11, color:'var(--text-secondary)', lineHeight:1.4}}>
               {(colorDetRate || 0) < 30 && 'Color detection is low — may improve with higher resolution snapshots. '}
               {violsWithType.length === 0 && 'Vehicle types show as "car" — finer classification (sedan/SUV/truck) may improve with higher resolution. '}
             </div>
@@ -494,7 +494,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
         }} role="status">
           <div style={{fontSize:16, flexShrink:0, marginTop:1}} aria-hidden="true">⚠</div>
           <div style={{flex:1, minWidth:0}}>
-            <div style={{fontSize:13, fontWeight:700, color:'#fbbf24', marginBottom:2}}>
+            <div style={{fontSize:13, fontWeight:700, color:'var(--accent-text)', marginBottom:2}}>
               Add your tow-truck plates so billing auto-releases after each tow.
             </div>
             <div style={{fontSize:11, color:'var(--text-muted)', lineHeight:1.4}}>
@@ -512,8 +512,8 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
             }}
             style={{
               fontSize:12, padding:'6px 12px', borderRadius:6, cursor:'pointer', fontWeight:700,
-              border:'1px solid rgba(251,191,36,.5)', background:'rgba(251,191,36,.12)',
-              color:'#fbbf24', whiteSpace:'nowrap', flexShrink:0,
+              border:'1px solid var(--accent-line)', background:'var(--accent-tint)',
+              color:'var(--accent-text)', whiteSpace:'nowrap', flexShrink:0,
             }}
           >Add plates →</button>
         </div>
@@ -528,7 +528,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
         return (
           <div style={{marginBottom:18}}>
             <div className="section-header">
-              <div className="section-title" style={{color:'#fbbf24'}}>
+              <div className="section-title" style={{color:'var(--accent-text)'}}>
                 {awaiting.length} dispatch{awaiting.length === 1 ? '' : 'es'} awaiting your response
               </div>
               <div className="section-count">{awaiting.length}</div>
@@ -794,15 +794,15 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
                   const pct = Math.min(100, Math.round((streak / DEPARTED_STREAK) * 100));
                   return (
                     <div style={{
-                      background:'rgba(251,191,36,.08)', borderBottom:'1px solid rgba(251,191,36,.2)',
+                      background:'var(--accent-tint)', borderBottom:'1px solid var(--accent-line)',
                       padding:'6px 16px', display:'flex', flexDirection:'column', gap:4,
                     }}>
-                      <span style={{color:'#fbbf24', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:6}}>
+                      <span style={{color:'var(--accent-text)', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:6}}>
                         <div className="spin" style={{width:10, height:10, borderWidth:2}} />
                         Checking if vehicle left ({streak}/{DEPARTED_STREAK})
                       </span>
-                      <div style={{height:2, borderRadius:2, background:'rgba(251,191,36,.15)', overflow:'hidden'}}>
-                        <div style={{height:'100%', width:`${pct}%`, background:'#fbbf24', borderRadius:2, transition:'width .3s ease'}} />
+                      <div style={{height:2, borderRadius:2, background:'var(--accent-tint)', overflow:'hidden'}}>
+                        <div style={{height:'100%', width:`${pct}%`, background:'var(--accent)', borderRadius:2, transition:'width .3s ease'}} />
                       </div>
                     </div>
                   );
@@ -943,7 +943,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
                     <button className="action-btn" disabled={anyActing || acking === v.id}
                       onClick={(e) => { e.stopPropagation(); handleAcknowledge(v.id); }}
                       aria-label="Acknowledge"
-                      style={{background:'rgba(245,158,11,.12)', border:'1px solid rgba(245,158,11,.3)', color:'#f59e0b'}}>
+                      style={{background:'var(--accent-tint)', border:'1px solid var(--accent-line)', color:'var(--accent-text)'}}>
                       {acking === v.id ? '…' : 'Acknowledge'}
                     </button>
                   )}
@@ -980,7 +980,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
           </div>
           {recent.map(v => {
             const lot = lotMap[v.lot_id];
-            const actionColor = { boot: '#fbbf24', tow: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
+            const actionColor = { boot: 'var(--accent-text)', tow: '#f87171', dismissed: '#a78bfa', no_action: '#6b7280', already_gone: '#6b7280' };
             const col = actionColor[v.action_taken?.toLowerCase()] || '#9ca3af';
             return (
               <div key={v.id} className="job-card" style={{position:'relative'}}>
