@@ -333,6 +333,11 @@ function teardown() {
 function render(key, { initial = false, focusId = null } = {}) {
   teardown();
   screen = key;
+  // The short-term form (and its confirmation, which replaces it in place)
+  // wears the blue-and-white theme of the universal sign; styles/theme-blue.css.
+  // (The unit tests' stub document has no documentElement.)
+  const root = document.documentElement;
+  if (root && root.classList) root.classList.toggle('theme-blue', key === 'guest');
   const step = parseStep(key);
   if (key === 'landing') renderLanding();
   else if (key === 'guest') showGuestForm();
@@ -1416,9 +1421,9 @@ function showGuestForm() {
     return `<option value="${h}"${sel}>${label}${h === 72 ? ' (maximum)' : ''}</option>`;
   });
   app.innerHTML = `
-    ${logoHtml()}
+    ${brandHeadHtml()}
     <div class="property-name">
-      Registration<br>
+      Parking registration<br>
       <strong>${escapeHtml(property.name)}</strong>
     </div>
     <form id="guestForm">
@@ -1594,6 +1599,15 @@ async function handleGuestSubmit(e) {
   }
 }
 
+// The LotLogic logo lockup over a blue rule (styles/theme-blue.css), as on /park.
+function brandHeadHtml() {
+  return `
+    <div class="brand-head">
+      <img src="/lotlogic-mark.svg" alt="" width="52" height="39">
+      <span class="wm"><b>LotLogic</b><small>PARKING MANAGEMENT</small></span>
+    </div>`;
+}
+
 // The short-term form's confirmation (the long-term request has its own receipt, S6).
 function showSuccess(opts) {
   const refId = opts && opts.refId;
@@ -1604,6 +1618,7 @@ function showSuccess(opts) {
   const live = !!validUntil;
   const untilText = live ? new Date(validUntil).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null;
   app.innerHTML = `
+    ${brandHeadHtml()}
     <div class="success-card">
       <div class="success-icon">
         <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
