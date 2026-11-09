@@ -1,0 +1,159 @@
+/* The LotLogic blue-and-white theme (logo, blue rule, white page), matching
+   the 2026 letterhead and the universal sign's /park page. Everything here is
+   scoped to html.theme-blue, so it changes nothing until a page opts in:
+   src/apt.js sets it for the short-term form and its confirmation only. Loaded
+   last on apt.html, after brand.css, register.css and apt.css. */
+
+html.theme-blue {
+  --paper: #FFFFFF;
+  --paper-2: #F4F7FD;
+  --paper-3: #E6EDFB;
+  --ink: #0B0D10;
+  --ink-2: #4A505C;
+  --ink-3: #5B606B;
+  --ink-4: #5B606B;
+  --amber: #1F5FE0;
+  --amber-soft: #E6EDFB;
+  --terra: #1F5FE0;
+  --terra-deep: #174BB5;
+  --line: #D7DAE0;
+  --blue: #1F5FE0;
+  --blue-deep: #174BB5;
+}
+
+html.theme-blue body {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #FFFFFF;
+  background-image: none;
+  letter-spacing: 0;
+}
+@media (min-width: 520px) { html.theme-blue body { background: #F4F7FD; } }
+
+html.theme-blue .card {
+  background: #FFFFFF;
+  border: 0;
+  padding: 0;
+}
+@media (min-width: 520px) {
+  html.theme-blue .card { border: 1px solid var(--line); border-radius: 14px; padding: 32px; box-shadow: 0 1px 2px rgba(11,13,16,.04); }
+}
+
+/* ── header: the logo lockup over a blue rule, like the letterhead ───────── */
+.brand-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 4px solid var(--blue, #1F5FE0);
+}
+.brand-head img { width: 52px; height: 39px; display: block; flex: none; }
+.brand-head .wm { display: flex; flex-direction: column; line-height: 1; }
+.brand-head .wm b {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -.02em;
+  color: #0B0D10;
+}
+.brand-head .wm small {
+  margin-top: 6px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: .22em;
+  color: var(--blue, #1F5FE0);
+}
+
+/* ── the property name ─────────────────────────────────────────────────── */
+html.theme-blue .property-name {
+  text-align: left;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+html.theme-blue .property-name strong {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-variation-settings: normal;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  text-transform: none;
+  color: var(--ink);
+}
+
+/* ── fields ────────────────────────────────────────────────────────────── */
+html.theme-blue label { font-family: 'Inter', system-ui, sans-serif; color: var(--ink); }
+html.theme-blue input,
+html.theme-blue select {
+  background: #FFFFFF;
+  border: 1.5px solid #B9BEC8;
+  border-radius: 10px;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+html.theme-blue input:hover,
+html.theme-blue select:hover { border-color: #8A909C; }
+html.theme-blue input:focus,
+html.theme-blue select:focus {
+  background: #FFFFFF;
+  border-color: var(--blue);
+  outline: 3px solid rgba(31,95,224,.25);
+  outline-offset: 0;
+}
+html.theme-blue input[aria-invalid="true"],
+html.theme-blue select[aria-invalid="true"] { border-color: var(--status-no); }
+html.theme-blue .plate-input {
+  font-family: 'JetBrains Mono', 'DM Mono', ui-monospace, monospace;
+  background: #FFFFFF;
+  border: 2px solid var(--ink);
+}
+html.theme-blue .plate-input:focus { background: #FFFFFF; border-color: var(--blue); }
+html.theme-blue .select-wrap::after { border-color: var(--blue); }
+html.theme-blue input[type=file] { font-family: 'Inter', system-ui, sans-serif; border-style: dashed; }
+html.theme-blue input[type=file]::file-selector-button { background: var(--blue); color: #FFFFFF; border-radius: 8px; }
+html.theme-blue .check-row input[type=checkbox] { accent-color: var(--blue); }
+
+/* ── actions ───────────────────────────────────────────────────────────── */
+html.theme-blue .submit-btn {
+  margin-top: 28px;
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #FFFFFF;
+  border-radius: 10px;
+  font-size: 17px;
+  font-weight: 700;
+}
+html.theme-blue .submit-btn:hover:not(:disabled) { background: var(--blue-deep); border-color: var(--blue-deep); }
+html.theme-blue a:focus-visible,
+html.theme-blue button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+html.theme-blue .back-link { color: var(--blue); font-family: 'Inter', system-ui, sans-serif; }
+html.theme-blue .error { border-radius: 10px; background: #FEF3F2; }
+
+/* ── the confirmation ─────────────────────────────────────────────────── */
+html.theme-blue .success-card { text-align: left; }
+html.theme-blue .success-icon { background: var(--blue); border: 0; width: 56px; height: 56px; }
+html.theme-blue .success-icon svg { stroke: #FFFFFF; }
+html.theme-blue .success-card h2,
+html.theme-blue .success-card p em {
+  font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  font-variation-settings: normal;
+  font-style: normal;
+}
+html.theme-blue .success-card h2 { font-weight: 700; letter-spacing: -.02em; }
+html.theme-blue .success-card h2 em { font-style: normal; color: var(--blue); }
+html.theme-blue .success-card p em { font-weight: 700; color: var(--ink); }
+html.theme-blue .success-ref {
+  font-family: 'JetBrains Mono', 'DM Mono', ui-monospace, monospace;
+  background: var(--paper-3);
+  border: 0;
+  border-left: 4px solid var(--blue);
+  border-radius: 8px;
+  font-size: 18px;
+}
+html.theme-blue .pending-badge { border-radius: 999px; border-color: var(--blue); color: var(--blue); background: var(--paper-2); }
