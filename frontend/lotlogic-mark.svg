@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48" role="img" aria-label="LotLogic">
+  <!-- The LotLogic mark: two corner brackets framing an eye (redrawn from the 2026 authorization letterhead). -->
+  <path fill="#0B0D10" d="M2 8h8v30h18v8H2z"/>
+  <path fill="#0B0D10" d="M36 2h26v34h-8V10H36z"/>
+  <path fill="#0B0D10" d="M14 24c4.6-6.4 10.6-9.6 18-9.6s13.4 3.2 18 9.6c-4.6 6.4-10.6 9.6-18 9.6S18.6 30.4 14 24z"/>
+  <circle cx="32" cy="24" r="7" fill="#FFFFFF"/>
+  <circle cx="32" cy="24" r="5.4" fill="#1F5FE0"/>
+  <circle cx="30.2" cy="22.4" r="1.8" fill="#FFFFFF"/>
+</svg>

@@ -6,6 +6,7 @@
     { "source": "/lookup", "destination": "/app?tab=lookup", "permanent": true }
   ],
   "rewrites": [
+    { "source": "/park", "destination": "/park.html" },
     { "source": "/temp/:path*", "destination": "/visit.html" },
     { "source": "/perm/:path*", "destination": "/resident.html" },
     { "source": "/visit/:path*", "destination": "/visit.html" },
