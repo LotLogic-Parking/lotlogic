@@ -7,7 +7,8 @@
 // to Task 22's Requests components.
 //
 // A property with no pass flow switched on and no cameras shows the chip
-// row `Requests · 🔒 Parking passes · 🔒 QR codes · 🔒 Cameras` — real,
+// row `Requests · Visitor passes · QR codes · Cameras`, the three locked
+// (a text-free lock glyph, no emoji) — real,
 // keyboard-reachable buttons, muted via `var(--text-muted)` (≥ 4.5:1 on both
 // themes), `aria-describedby="Not included yet"`. Tapping one renders
 // `UpsellPanel.jsx` in place of the section it would otherwise show: one
@@ -20,7 +21,10 @@
 
 /** Chip id -> display label, in the order the spec's example row lists them. */
 const CHIP_DEFS = [
-  { feature: 'passes', id: 'log', label: 'Parking passes' },
+  // Gabe, 2026-11-07 ruling: the apartment chip reads "Visitor passes" (it
+  // was "Parking passes"). The exact label is the one allowed use of the
+  // word; see the naming guards in scripts/.
+  { feature: 'passes', id: 'log', label: 'Visitor passes' },
   { feature: 'qr', id: 'qr', label: 'QR codes' },
   { feature: 'cameras', id: 'cameras', label: 'Cameras' },
 ];
@@ -56,7 +60,7 @@ export function upsellCopy(feature) {
   }
 }
 
-/** The card title for a locked feature — the chip label, unlocked of its 🔒. */
+/** The card title for a locked feature — the chip label. */
 export function upsellTitle(feature) {
   return CHIP_DEFS.find((c) => c.feature === feature)?.label ?? feature;
 }

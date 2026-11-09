@@ -51,6 +51,10 @@ const TARGET_FILES = [
   // State of the lot (task F7): the pure half and the folder holding the tab
   // and the timeline.
   'src/lib/lotStatus.js',
+  // The manager's activity tabs (build plan F3–F5): the pure halves. The
+  // tabs themselves live under src/pages/lot, already a target directory.
+  'src/lib/presence.js',
+  'src/lib/traffic.js',
   // The tow company's Team (spec 2026-10-18-tow-company-team §1.4): the
   // section and its pure half. The `driver` role value stays a bare token,
   // which isNotCopy() lets through; what is read is "Truck".
@@ -313,12 +317,20 @@ export function isNotCopy(text) {
   return NOT_COPY.test(text.trim());
 }
 
+// The one allowed use of a banned word, as an EXACT literal — not a wider
+// rule. Gabe, 2026-11-07: "parking passes should be visitor passes": the
+// apartment chip (and the section heading that mirrors it) reads
+// "Visitor passes". Every pass type still reads Short-term / Long-term, and a
+// sentence that merely contains the phrase is still a failure.
+export const ALLOWED_EXACT = new Set(['Visitor passes']);
+
 /** Every banned-word hit in one file's copy, as reportable lines. */
 export function hits(rel) {
   const src = readFileSync(path.join(ROOT, rel), 'utf8');
   const found = [];
   for (const lit of copyLiterals(src)) {
     if (lit.kind === 'string' && isNotCopy(lit.text)) continue;
+    if (ALLOWED_EXACT.has(lit.text.trim())) continue;
     const m = lit.text.match(WORDS);
     if (m) found.push(`${rel}:${lit.line} uses "${m[0]}" in ${lit.kind}: ${JSON.stringify(lit.text.trim().slice(0, 140))}`);
   }
@@ -336,6 +348,17 @@ test('no portal copy string uses a banned word', () => {
     'Visitor / Permanent / Temporary / Guest / Driver (the Slack roles read ' +
     '"Office" and "Truck"). Offending copy:\n  ' + failures.join('\n  '),
   );
+});
+
+test('the allow is the exact chip label and nothing wider', () => {
+  assert.deepEqual([...ALLOWED_EXACT], ['Visitor passes']);
+  // The same scanner path hits() uses, minus the filesystem: the exact label
+  // passes, a sentence containing it does not, and the pass types never do.
+  const scan = (src) => copyLiterals(src).filter(l => !(l.kind === 'string' && isNotCopy(l.text)) && !ALLOWED_EXACT.has(l.text.trim()) && WORDS.test(l.text));
+  assert.deepEqual(scan('<h2>Visitor passes</h2>'), []);
+  assert.deepEqual(scan("const label = 'Visitor passes';"), []);
+  assert.equal(scan('<p>Your visitor passes are ready</p>').length, 1);
+  assert.equal(scan("const t = 'Visitor pass';").length, 1);
 });
 
 test('the directory walk descends into subdirectories', () => {

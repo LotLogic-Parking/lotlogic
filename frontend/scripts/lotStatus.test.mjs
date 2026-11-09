@@ -126,17 +126,17 @@ test('timelineKindLabel covers every kind in the contract', () => {
   assert.equal(timelineKindLabel('something_new').label, 'Update');
 });
 
-import { LOT_STATUS_CHIP, rowTarget, withLotStatusChip } from '../src/lib/lotStatus.js';
+import { LOT_STATUS_CHIP, passTarget, rowTarget, withLotStatusChip } from '../src/lib/lotStatus.js';
 
-const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Parking Passes' }, { id: 'qr', label: 'QR codes', locked: true }];
+const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Visitor passes' }, { id: 'qr', label: 'QR codes', locked: true }];
 
-test('withLotStatusChip: first for a partner, right after Parking Passes for an owner', () => {
+test('withLotStatusChip: first for a partner, right after Visitor passes for an owner', () => {
   assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS, { isPartner: true }).map(c => c.id), ['lotstatus', 'requests', 'all', 'log', 'qr']);
   assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS).map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'qr']);
   assert.equal(LOT_STATUS_CHIP.label, 'Lot status');
 });
 
-test('withLotStatusChip: never twice, and lands last when Parking Passes is absent', () => {
+test('withLotStatusChip: never twice, and lands last when Visitor passes is absent', () => {
   const once = withLotStatusChip(APARTMENT_CHIPS);
   assert.equal(withLotStatusChip(once).filter(c => c.id === 'lotstatus').length, 1);
   assert.deepEqual(withLotStatusChip([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'lotstatus']);
@@ -149,4 +149,40 @@ test('rowTarget: holds open Requests, passes open the queue searched by plate', 
   assert.deepEqual(rowTarget({ plate: 'ABC1234', reason: 'short_term' }, 'do_not_tow'), { section: 'log', status: 'approved', q: 'ABC1234' });
   assert.deepEqual(rowTarget({ plate: 'XYZ789', kind: 'long_term' }, 'towable'), { section: 'log', status: 'approved', q: 'XYZ789' });
   assert.deepEqual(rowTarget({ plate: 'XYZ789', kind: 'short_term' }, 'expiring_soon'), { section: 'log', status: 'approved', q: 'XYZ789' });
+});
+
+// ── The manager's activity chips (build plan F1) ─────────────
+import { ACTIVITY_CHIPS, SOLO_SECTION_IDS, withActivityChips } from '../src/lib/lotStatus.js';
+
+test('withActivityChips: Live and Traffic right after Lot status for the office; no Violations tab', () => {
+  const office = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
+  assert.deepEqual(office.map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'live', 'traffic', 'qr']);
+  assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['Live', 'Traffic']);
+  assert.ok(!office.some(c => /violation|enforcement/i.test(c.label)), 'enforcement is the tow company\'s job, not a tab');
+});
+
+test('withActivityChips: a partner gets Live, not Traffic', () => {
+  const partner = withActivityChips(withLotStatusChip(APARTMENT_CHIPS, { isPartner: true }), { isPartner: true });
+  assert.deepEqual(partner.map(c => c.id), ['lotstatus', 'live', 'requests', 'all', 'log', 'qr']);
+});
+
+test('withActivityChips: never twice, and lands last when Lot status is absent', () => {
+  const once = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
+  assert.equal(withActivityChips(once).filter(c => c.id === 'live').length, 1);
+  assert.deepEqual(withActivityChips([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'live', 'traffic']);
+  assert.deepEqual(withActivityChips(null).map(c => c.id), ['live', 'traffic']);
+});
+
+test('the activity sections stand alone, like Requests and Lot status (never under All)', () => {
+  assert.deepEqual([...SOLO_SECTION_IDS], ['requests', 'lotstatus', 'live', 'traffic']);
+});
+
+test('timeline: camera sessions read "Seen entering" / "Seen leaving" (build plan B5)', () => {
+  assert.deepEqual(timelineKindLabel('entered'), { label: 'Seen entering', tone: 'green' });
+  assert.deepEqual(timelineKindLabel('exited'), { label: 'Seen leaving', tone: 'neutral' });
+});
+
+test('passTarget: "Open pass" lands on the queue, Approved, searched for the plate', () => {
+  assert.deepEqual(passTarget('ABC1234'), { section: 'log', status: 'approved', q: 'ABC1234' });
+  assert.deepEqual(passTarget(null), { section: 'log', status: 'approved', q: '' });
 });

@@ -203,6 +203,9 @@ const TIMELINE_KINDS = {
   request_opened: { label: 'Request opened', tone: 'info' },
   request_resolved: { label: 'Request resolved', tone: 'neutral' },
   towed: { label: 'Towed', tone: 'red' },
+  // Camera sessions (build plan B5): only when the property has a camera.
+  entered: { label: 'Seen entering', tone: 'green' },
+  exited: { label: 'Seen leaving', tone: 'neutral' },
 };
 
 export function timelineKindLabel(kind) {
@@ -215,7 +218,7 @@ export const LOT_STATUS_CHIP = Object.freeze({ id: 'lotstatus', label: 'Lot stat
 
 /**
  * The property page's chip row with the Lot status chip placed: first for a
- * partner session (the driver at the curb), right after the Parking Passes
+ * partner session (the driver at the curb), right after the Visitor passes
  * chip for an owner or office session. Apartments only; the caller passes the
  * apartment chip list.
  */
@@ -228,8 +231,35 @@ export function withLotStatusChip(chips, { isPartner = false } = {}) {
 }
 
 /**
+ * The manager's activity chips (build plan F1), after Lot status: who is on
+ * the property now, and when people come. A partner session (the tow
+ * company) gets Live - the one that helps a truck - but not Traffic, which
+ * is the office's planning view. Enforcement is the tow company's job and
+ * has no tab here (Gabe, 2026-11-07).
+ */
+export const ACTIVITY_CHIPS = Object.freeze([
+  Object.freeze({ id: 'live', label: 'Live' }),
+  Object.freeze({ id: 'traffic', label: 'Traffic' }),
+]);
+
+export function withActivityChips(chips, { isPartner = false } = {}) {
+  const ids = new Set(ACTIVITY_CHIPS.map(c => c.id));
+  const list = (Array.isArray(chips) ? chips : []).filter(c => !ids.has(c.id));
+  const add = ACTIVITY_CHIPS.filter(c => !isPartner || c.id !== 'traffic');
+  const at = list.findIndex(c => c.id === LOT_STATUS_CHIP.id);
+  if (at < 0) return [...list, ...add];
+  return [...list.slice(0, at + 1), ...add, ...list.slice(at + 1)];
+}
+
+/**
+ * Sections that stand alone on the page: when one of these is the chip, no
+ * other surface renders beside it (and none of them sits under "All").
+ */
+export const SOLO_SECTION_IDS = Object.freeze(['requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
+
+/**
  * What a row tap opens. A hold goes to the Requests section (the request
- * detail lives there); everything else to the Parking Passes queue searched
+ * detail lives there); everything else to the Visitor passes queue searched
  * for that plate, on the segment its reason belongs to (pending stays under
  * "Needs review", the rest under "Approved"). The pass detail is where the
  * office sees the unit and documents.
@@ -238,4 +268,9 @@ export function rowTarget(row, list) {
   if (list === 'do_not_tow' && row?.reason === 'hold') return { section: 'requests' };
   const status = list === 'do_not_tow' && row?.reason === 'pending' ? 'pending' : 'approved';
   return { section: 'log', status, q: String(row?.plate ?? '') };
+}
+
+/** "Open pass" from the Live tab: the Visitor passes queue, Approved, searched for the plate. */
+export function passTarget(plate) {
+  return { section: 'log', status: 'approved', q: String(plate ?? '') };
 }

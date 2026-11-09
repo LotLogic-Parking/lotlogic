@@ -25,12 +25,16 @@ import { RequestsSection } from './property/RequestsSection.jsx';
 import { lockedChips } from '../lib/upsell.js';
 import { UpsellPanel } from './property/UpsellPanel.jsx';
 import { LotStatusTab } from './lot/LotStatusTab.jsx';
-import { withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
+import { SOLO_SECTION_IDS, passTarget, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
 // parking-log bundle before the operator ever scrolls to it.
 const TruckParkingLog = lazyPage(() => import('./TruckParkingLog.jsx'));
+// The manager's activity tabs (build plan F3–F5): loaded only when their chip
+// is chosen, like every other heavy section.
+const LiveTab = lazyPage(() => import('./lot/LiveTab.jsx'));
+const TrafficTab = lazyPage(() => import('./lot/TrafficTab.jsx'));
 
 // Swipeable fullscreen carousel for the matched-vehicle snapshots on
 // No Registration Evidence Package cards. On phones the inline 2-up grid
@@ -224,15 +228,16 @@ function SightingStrip({ sightings, cameras, nowTick }) {
 // can never be selected.
 //
 // `features` (spec §5.6, `/auth/me.properties[].features {passes, qr,
-// cameras}`) locks the Parking Passes chip — relabelled "🔒 Parking passes"
-// — when this property has never had a pass flow switched on, and adds two
-// chips that otherwise don't exist on this row at all: "🔒 QR codes" and
-// "🔒 Cameras". `lockedChips` (UpsellPanel.jsx) is the single source for
+// cameras}`) locks the Visitor passes chip — rendered with a text-free lock
+// glyph — when this property has never had a pass flow switched on, and adds
+// two chips that otherwise don't exist on this row at all: "QR codes" and
+// "Cameras", locked the same way. `lockedChips` (UpsellPanel.jsx) is the single source for
 // which of the three are locked; truck plazas never show them — every
 // truck-plaza property registers passes, by definition.
 //
 // Lot status (task F7) is an apartment chip: first for a partner session, right
-// after Parking Passes for an owner or office session.
+// after Visitor passes for an owner or office session. Live and Traffic
+// (build plan F1) follow it; a partner gets Live only.
 export function sectionChipsFor(propertyType, features, { isPartner = false } = {}) {
   const isTruckPlaza = propertyType === 'truck_plaza';
   if (isTruckPlaza) {
@@ -250,20 +255,35 @@ export function sectionChipsFor(propertyType, features, { isPartner = false } = 
   }
   const locked = lockedChips(features);
   const lockedById = new Map(locked.map(c => [c.id, c]));
-  return withLotStatusChip([
+  return withActivityChips(withLotStatusChip([
     // Requests is first and default for an apartment (spec §5.2) — it is the
     // portal's whole point. A truck plaza has no office placing holds, so it
     // does not get the chip and keeps landing on the Parking Log.
     ...(isTruckPlaza ? [] : [{ id: 'requests', label: 'Requests' }]),
     { id: 'all', label: 'All' },
-    lockedById.get('log') || { id: 'log', label: 'Parking Passes' },
+    // Gabe, 2026-11-07: "parking passes should be visitor passes" — the chip
+    // (and the section heading that mirrors it) is the one place the word is
+    // allowed; every pass type still reads Short-term / Long-term.
+    lockedById.get('log') || { id: 'log', label: 'Visitor passes' },
     ...locked.filter(c => c.id !== 'log'),
-  ], { isPartner });
+  ], { isPartner }), { isPartner });
 }
 
 // Namespaced per property type: an apartment and a truck plaza have different
 // chips, and one global key meant opening an apartment after a truck plaza
 // landed on a section that does not exist there.
+// The text-free lock on a locked chip (the emoji it replaced was read aloud
+// as "locked" and drawn differently on every platform). The chip's
+// `aria-describedby` ("Not included yet") carries the meaning.
+function LockGlyph() {
+  return (
+    <svg aria-hidden="true" focusable="false" width="11" height="12" viewBox="0 0 11 12" style={{ marginRight: 5, verticalAlign: '-1px' }}>
+      <rect x="1" y="5" width="9" height="6.5" rx="1.5" fill="currentColor" />
+      <path d="M3 5V3.5a2.5 2.5 0 0 1 5 0V5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
 export function sectionStorageKey(propertyType) {
   return `lotlogic_pd_section:${propertyType || 'unknown'}`;
 }
@@ -400,12 +420,15 @@ export function ALPRPropertyDetailPage({
   // controls … the layout ships without the control, not with a disabled one."
   // The three owner surfaces below (the QR tiles, the add-plate form and the
   // plate list) are not behind a showSection of their own, so they need this.
-  const requestsOnly = sectionFilter === 'requests' || sectionFilter === 'lotstatus';
+  const requestsOnly = SOLO_SECTION_IDS.includes(sectionFilter);
+  // "Request tow" only where the composer it opens will render: the office
+  // (admin / manager) places requests; a viewer or the tow company gets no
+  // such button. Same role rule RequestsSection applies to its composer.
+  const canRequestTow = ['admin', 'manager'].includes(property?.role);
 
   // A Lot status row tap: a hold goes to Requests; a pass goes to the Parking
   // Passes queue, searched for the plate (it reads `?status=&q=` as it mounts).
-  const openLotRow = useCallback((row, list) => {
-    const target = rowTarget(row, list);
+  const openTarget = useCallback((target) => {
     if (target.section === 'log') {
       try {
         const { pathname, search, hash } = window.location;
@@ -415,6 +438,10 @@ export function ALPRPropertyDetailPage({
     setSectionFilter(target.section);
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, []);
+  const openLotRow = useCallback((row, list) => openTarget(rowTarget(row, list)), [openTarget]);
+  // "Open pass" on a Live row: the Visitor passes queue, Approved, searched
+  // for the plate (the queue selects the first match as it mounts).
+  const openPass = useCallback((plate) => openTarget(passTarget(plate)), [openTarget]);
 
   // "Request tow" on a parking pass: open Requests the way its chip does, with
   // the composer on Tow and the plate filled in. The composer sits at the top
@@ -846,7 +873,7 @@ export function ALPRPropertyDetailPage({
                   whiteSpace: 'nowrap',
                   transition: 'background .12s ease, border-color .12s ease',
                 }}
-              >{locked ? `🔒 ${c.label}` : c.label}</button>
+              >{locked && <LockGlyph />}{c.label}</button>
             );
           });
         })()}
@@ -875,6 +902,30 @@ export function ALPRPropertyDetailPage({
       {sectionFilter === 'lotstatus' && !isTruckPlaza && (
         <ErrorBoundary label="lot status">
           <LotStatusTab propertyId={propertyId} propertyName={property?.name || ''} onOpenRow={openLotRow} />
+        </ErrorBoundary>
+      )}
+
+      {/* Live and Traffic (build plan F3, F5): who is on the property now and
+          when people come. Apartments only; never under All; a partner
+          session gets Live (no name/unit in its payload). "Request tow"
+          hands the page the plate exactly as a pass does. */}
+      {sectionFilter === 'live' && !isTruckPlaza && (
+        <ErrorBoundary label="live view">
+          <React.Suspense fallback={<SkeletonCards />}>
+            <LiveTab
+              propertyId={propertyId}
+              propertyName={property?.name || ''}
+              onOpenPass={openPass}
+              onRequestTow={canRequestTow ? requestTow : undefined}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
+      {sectionFilter === 'traffic' && !isTruckPlaza && (
+        <ErrorBoundary label="traffic">
+          <React.Suspense fallback={<SkeletonCards />}>
+            <TrafficTab propertyId={propertyId} propertyName={property?.name || ''} />
+          </React.Suspense>
         </ErrorBoundary>
       )}
 
@@ -1091,8 +1142,8 @@ export function ALPRPropertyDetailPage({
       ) : features?.passes === false ? (
         // Portal-only (spec §5.6): this property has never had a pass flow
         // switched on, so there is no roster to show — the chip itself
-        // read "🔒 Parking passes" above. Same upsell card the locked "QR
-        // codes" and "Cameras" chips render.
+        // read as locked "Visitor passes" above. Same upsell card the locked
+        // "QR codes" and "Cameras" chips render.
         <UpsellPanel feature="passes" propertyName={property.name} propertyId={propertyId} />
       ) : (
         // Apartment permit registry (M3): pending approval queue + resident /
@@ -1104,7 +1155,7 @@ export function ALPRPropertyDetailPage({
                office (admin / manager) places requests; a viewer or the tow
                company gets no such button. Same role rule RequestsSection
                applies to its composer. */
-            onRequestTow={['admin', 'manager'].includes(property?.role) ? requestTow : undefined}
+            onRequestTow={canRequestTow ? requestTow : undefined}
           />
         </ErrorBoundary>
       ))}

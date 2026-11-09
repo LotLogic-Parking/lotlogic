@@ -3302,6 +3302,208 @@
     @media (min-width: 640px) {
       .ls-controls { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
     }
+
+    /* ── LotLogic blue + white (manager activity: Live, Violations, Traffic;
+       History / Visits in the pass detail). Ruling 2026-11-07: everything
+       LotLogic is blue and white. These tokens are the brand palette the rest
+       of the dashboard adopts in a follow-up retheme; today every `.ls--blue`
+       surface (and the `.ls-blue` pieces inside the pass detail) reads from
+       them. Blue is the one accent; red and green stay semantic and small. ── */
+    :root {
+      --ll-blue: #2563EB;                 /* the app icon's blue: active segment, busiest bar, links, focus */
+      --ll-blue-deep: #1D4ED8;            /* hover / pressed */
+      --ll-blue-tint: rgba(37,99,235,.10); /* tinted backgrounds, the heat ramp's first step */
+      --ll-white: #FFFFFF;                /* cards, the plate badge */
+      --ll-page: #F5F7FB;                 /* the page tint behind white cards */
+      --ll-ink: #0F172A;                  /* primary text on white */
+      --ll-ink-2: #475569;                /* secondary text */
+      --ll-ink-3: #94A3B8;                /* muted text, ticks */
+      --ll-hairline: #E2E8F0;             /* borders */
+      --ll-red: #DC2626;                  /* towable / failed, chips only */
+      --ll-green: #16A34A;                /* covered / ok, chips only */
+      /* How the blue surfaces map onto the theme in force: the dark theme
+         keeps its own backgrounds and text, the light theme is white + ink. */
+      --ll-surface: var(--bg-card);
+      --ll-surface-2: var(--bg-inset);
+      --ll-line: var(--border);
+      --ll-text: var(--text-primary);
+      --ll-text-2: var(--text-secondary);
+      --ll-text-3: var(--text-muted);
+      --ll-link: #60A5FA;                 /* blue that holds 4.5:1 on the dark cards */
+      --ll-red-text: #F87171;
+      --ll-green-text: #4ADE80;
+    }
+    .theme-light {
+      --ll-surface: var(--ll-white);
+      --ll-surface-2: var(--ll-page);
+      --ll-line: var(--ll-hairline);
+      --ll-text: var(--ll-ink);
+      --ll-text-2: var(--ll-ink-2);
+      --ll-text-3: var(--ll-ink-3);
+      --ll-link: var(--ll-blue);
+      --ll-red-text: var(--ll-red);
+      --ll-green-text: var(--ll-green);
+    }
+
+    .ls--blue { gap: 16px; color: var(--ll-text); }
+    .ls--blue .pq-title { color: var(--ll-text); }
+    .ls--blue .ls-asof { color: var(--ll-text-2); }
+    .ls--blue .ls-refresh { color: var(--ll-link); text-decoration: none; }
+    .ls--blue .ls-refresh:hover { color: var(--ll-blue-deep); text-decoration: underline; }
+    .ls--blue :is(button, input, [tabindex]):focus-visible { outline: 2px solid var(--ll-blue); outline-offset: 2px; }
+
+    /* Tiles: one row that wraps; every number has its label. */
+    .ls-tiles--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (min-width: 640px) { .ls-tiles--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .ls-tiles--wrap { display: flex; flex-wrap: wrap; }
+    .ls-tiles--wrap .ls-tile { flex: 1 1 150px; }
+    .ls--blue .ls-tile { padding: 14px 16px; background: var(--ll-surface); border-color: var(--ll-line); }
+    .ls--blue .ls-tile.is-stop { border-color: var(--ll-red); }
+    .ls--blue .ls-tile-n { font-size: 24px; color: var(--ll-text); }
+    .ls--blue .ls-tile-l { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
+
+    /* Segments and the day picker: blue is the one selected state. */
+    .ls--blue .pq-segment { color: var(--ll-text-2); }
+    .ls--blue .pq-segment[aria-pressed="true"] { background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); box-shadow: none; }
+    .ls--blue .pq-segment[aria-pressed="true"]:hover { background: var(--ll-blue-deep); border-color: var(--ll-blue-deep); }
+    .ls--blue .pq-search input { background: var(--ll-surface); border-color: var(--ll-line); color: var(--ll-text); }
+    .ls--blue .pq-search input:focus { border-color: var(--ll-blue); }
+    .ls-days { display: inline-flex; gap: 4px; padding: 3px; background: var(--ll-surface-2); border: 1px solid var(--ll-line); border-radius: 10px; }
+    .ls-day {
+      min-height: 38px; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; background: none;
+      color: var(--ll-text-2); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    .ls-day[aria-pressed="true"] { background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); }
+    .ls-day[aria-pressed="true"]:hover { background: var(--ll-blue-deep); }
+
+    /* Rows: 14 px padding, a fixed photo frame, the plate, then one sentence. */
+    .ls--blue .ls-rows { gap: 10px; }
+    .ls--blue .ls-row { padding: 14px 16px; gap: 14px; background: var(--ll-surface); border-color: var(--ll-line); }
+    .ls--blue .ls-row-main { gap: 5px; }
+    .ls--blue .ls-plate { font-size: 20px; color: var(--ll-text); }
+    .ls--blue .ls-car { font-size: 13px; color: var(--ll-text-2); }
+    .ls--blue .ls-sub { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ll-text-3); }
+    .ls--blue .ls-note { color: var(--ll-text-2); }
+    .ls-btn {
+      flex: 0 0 auto; align-self: center; min-height: 40px; padding: 8px 14px; border: 1px solid var(--ll-blue); border-radius: 999px;
+      background: var(--ll-blue); color: var(--ll-white); font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer; white-space: nowrap;
+    }
+    .ls-btn:hover { background: var(--ll-blue-deep); border-color: var(--ll-blue-deep); }
+    .ls-btn--quiet { background: none; color: var(--ll-link); }
+    .ls-btn--quiet:hover { background: var(--ll-blue-tint); color: var(--ll-blue-deep); }
+
+    /* Tags inside the blue surfaces: amber never; "under review" is blue. */
+    .ls--blue .pq-tag--neutral, .ls-blue .pq-tag--neutral { background: var(--ll-surface-2); color: var(--ll-text-2); border-color: var(--ll-line); }
+    .ls--blue .pq-tag--info, .ls-blue .pq-tag--info,
+    .ls--blue .pq-tag--amber, .ls-blue .pq-tag--amber { background: var(--ll-blue-tint); color: var(--ll-link); border-color: rgba(37,99,235,.35); }
+    .ls--blue .pq-tag--green, .ls-blue .pq-tag--green { background: rgba(22,163,74,.12); color: var(--ll-green-text); border-color: rgba(22,163,74,.35); }
+    .ls--blue .pq-tag--red, .ls-blue .pq-tag--red { background: rgba(220,38,38,.10); color: var(--ll-red-text); border-color: rgba(220,38,38,.35); }
+
+    /* The photo frame: 72 × 54, rounded, a white plate badge when there is no picture. */
+    .ls-thumb {
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 72px; height: 54px;
+      border: 1px solid var(--ll-line); border-radius: 8px; background: var(--ll-surface-2); overflow: hidden;
+    }
+    .ls-thumb--lg { width: 96px; height: 72px; }
+    .ls-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ls-thumb--empty { background: var(--ll-white); }
+    .ls-badge {
+      max-width: 100%; padding: 2px 6px; border: 1px solid var(--ll-hairline); border-radius: 4px; background: var(--ll-white);
+      font-family: 'DM Mono', ui-monospace, 'Courier New', monospace; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+      color: var(--ll-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* Empty states and the error card, on the blue surfaces. */
+    .ls--blue .pq-empty { background: var(--ll-surface); border-color: var(--ll-line); }
+    .ls--blue .pq-empty-title { color: var(--ll-text); }
+    .ls--blue .pq-empty-body { color: var(--ll-text-2); }
+    .ls--blue .pq-empty--error { border-color: var(--ll-red); }
+    .ls--blue .pq-banner { background: var(--ll-blue-tint); border-color: rgba(37,99,235,.35); color: var(--ll-text); }
+    .ls--blue .pq-btn--quiet { color: var(--ll-link); }
+
+    /* Traffic: the source line, a card per chart, the bar strip, the heat grid. */
+    .ls-source { margin: 0; font-size: 13px; color: var(--ll-text-2); }
+    .ls-source-main { font-weight: 800; color: var(--ll-text); }
+    .ls-card { padding: 16px; background: var(--ll-surface); border: 1px solid var(--ll-line); border-radius: 12px; }
+    .ls-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 12px; }
+    .ls-card-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
+    .ls-card-note { font-size: 12px; font-weight: 700; color: var(--ll-text-3); }
+    .ls-bars { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; align-items: end; }
+    .ls-bar { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; }
+    .ls-bar-track { display: block; height: 96px; border-radius: 3px; background: var(--ll-surface-2); position: relative; overflow: hidden; }
+    .ls-bar-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 3px 3px 0 0; background: rgba(37,99,235,.45); }
+    .ls-bar.is-busiest .ls-bar-fill { background: var(--ll-blue); }
+    .ls-bar:hover .ls-bar-fill { background: var(--ll-blue-deep); }
+    .ls-bar-tick { height: 12px; font-size: 10px; font-weight: 700; line-height: 12px; text-align: center; color: var(--ll-text-3); white-space: nowrap; overflow: visible; }
+    .ls-heat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
+    .ls-heat { border-collapse: separate; border-spacing: 3px; min-width: 560px; width: 100%; table-layout: fixed; }
+    .ls-heat th { font-size: 10px; font-weight: 700; color: var(--ll-text-3); text-align: center; padding: 0; white-space: nowrap; }
+    .ls-heat-corner, .ls-heat-d { width: 34px; }
+    .ls-heat-d { text-align: left !important; font-size: 11px !important; color: var(--ll-text-2) !important; }
+    .ls-heat-cell { height: 20px; border-radius: 4px; background: var(--ll-surface-2); border: 1px solid transparent; }
+    .ls-heat-cell.lvl-1 { background: var(--ll-blue-tint); }
+    .ls-heat-cell.lvl-2 { background: rgba(37,99,235,.32); }
+    .ls-heat-cell.lvl-3 { background: rgba(37,99,235,.62); }
+    .ls-heat-cell.lvl-4 { background: var(--ll-blue); }
+    .ls-heat-cell:hover, .ls-heat-cell:focus-visible { border-color: var(--ll-blue-deep); outline: none; }
+
+    /* Live: the people list. A row is a button that expands, one at a time,
+       into a white panel with hairlines; the open row carries a blue left rule. */
+    .ls-list-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
+    .ls-divider { margin: 16px 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
+    .ls-divider-n { font-weight: 600; color: var(--ll-text-3); }
+    .ls-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .ls-person { border: 1px solid var(--ll-line); border-left: 3px solid transparent; border-radius: 12px; background: var(--ll-surface); overflow: hidden; }
+    .ls-person.is-open { border-left-color: var(--ll-blue); }
+    .ls-person-btn {
+      display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 14px 16px; box-sizing: border-box;
+      background: none; border: 0; color: inherit; font-family: inherit; font-size: 13px; text-align: left; cursor: pointer;
+    }
+    .ls-person-btn:hover { background: var(--ll-blue-tint); }
+    .ls-person-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .ls-person-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .ls-person-name { font-size: 16px; font-weight: 800; line-height: 1.25; color: var(--ll-text); overflow-wrap: anywhere; }
+    .ls-person-sum { font-size: 13px; line-height: 1.45; color: var(--ll-text-2); overflow-wrap: anywhere; }
+    .ls-person-caret { flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ll-line); border-radius: 999px; font-size: 16px; font-weight: 700; color: var(--ll-link); }
+    .ls-person.is-open .ls-person-caret { background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); }
+    .ls-panel { display: flex; flex-direction: column; gap: 16px; padding: 4px 16px 16px; border-top: 1px solid var(--ll-line); }
+    .ls-panel-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 640px) { .ls-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .ls-panel-group { display: flex; flex-direction: column; gap: 8px; }
+    .ls-panel-label { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
+    .ls-panel-dl { margin: 0; border: 1px solid var(--ll-line); border-radius: 10px; overflow: hidden; }
+    .ls-panel-item { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 12px; font-size: 13px; line-height: 1.45; }
+    .ls-panel-item + .ls-panel-item { border-top: 1px solid var(--ll-line); }
+    .ls-panel-item dt { margin: 0; color: var(--ll-text-2); }
+    .ls-panel-item dd { margin: 0; font-weight: 700; color: var(--ll-text); overflow-wrap: anywhere; }
+    .ls-panel-evidence { margin-top: 0; }
+    .ls-panel .ls-timeline { margin-top: 0; }
+    .ls-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .ls-panel-actions:empty { display: none; }
+    .ls-thumb--wide { display: block; width: 100%; max-width: 360px; height: auto; aspect-ratio: 4 / 3; border-radius: 10px; }
+    .ls-details { border: 1px solid var(--ll-line); border-radius: 12px; background: var(--ll-surface); margin-top: 16px; }
+    .ls-details-summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 12px 16px; box-sizing: border-box; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); cursor: pointer; }
+    .ls-details-summary::-webkit-details-marker { display: none; }
+    .ls-details-summary::before { content: '+'; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ll-line); border-radius: 999px; font-size: 14px; color: var(--ll-link); letter-spacing: 0; }
+    .ls-details[open] > .ls-details-summary::before { content: '−'; background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); }
+    .ls-details-body { padding: 0 16px 16px; }
+
+    /* History at this unit, and Visits, inside the pass detail. */
+    .ls-blue { margin-top: 20px; }
+    .ls-hist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--ll-line); border-radius: 12px; overflow: hidden; background: var(--ll-surface); }
+    .ls-hist-row { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 12px; padding: 12px 14px; }
+    .ls-hist-row + .ls-hist-row { border-top: 1px solid var(--ll-line); }
+    .ls-hist-main { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .ls-hist-line { font-size: 13px; font-weight: 700; color: var(--ll-text); overflow-wrap: anywhere; }
+    .ls-hist-when { font-size: 12px; color: var(--ll-text-2); }
+    .ls-hist-reason { font-size: 12px; font-weight: 700; color: var(--ll-red-text); }
+    .ls-blue .ls-event { flex-direction: row; align-items: flex-start; gap: 12px; padding: 12px 14px; }
+    .ls-blue .ls-event-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .ls-blue .ls-events { border-color: var(--ll-line); background: var(--ll-surface); }
+    .ls-blue .ls-event + .ls-event { border-top-color: var(--ll-line); }
+    .ls-blue .ls-event-detail { color: var(--ll-text); }
+    .ls-blue .ls-event-when { color: var(--ll-text-2); }
+    .ls-blue .ls-timeline-title { color: var(--ll-text-2); }
   </style>
 </head>
 <body>

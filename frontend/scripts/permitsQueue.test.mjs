@@ -989,3 +989,79 @@ test('Request tow is offered on a short-term pass that is Approved or History, a
   assert.equal(canRequestTow(by['guest:g'], NOW), false, 'denied short-term: no');
   assert.equal(canRequestTow(rowsOf([], [shortTerm('p')])[0], NOW), false, 'pending short-term: no');
 });
+
+// ── Time left and the Approved order (build plan F2) ─────────
+import {
+  UNIT_HISTORY_EMPTY,
+  historyEntryLine,
+  historyKindLabel,
+  historyStatusTag,
+  historyWhenLine,
+  timeLeftMs,
+  unitHistoryRows,
+} from '../src/lib/permitsQueue.js';
+
+const inHours = (h) => new Date(NOW + h * HOUR).toISOString();
+
+test('timeLeftMs: a live short-term pass only, measured from the clock', () => {
+  const [lt, live, noEnd, ended, waiting] = rowsOf(
+    [longTerm('lt', { status: 'approved' })],
+    [
+      shortTerm('live', { status: 'active', valid_until: inHours(2) }),
+      shortTerm('noend', { status: 'active', valid_until: null }),
+      shortTerm('ended', { status: 'active', valid_until: ago(1) }),
+      shortTerm('wait', { status: 'pending', valid_until: inHours(5) }),
+    ],
+  );
+  assert.equal(timeLeftMs(live, NOW), 2 * HOUR);
+  assert.equal(timeLeftMs(lt, NOW), null, 'a long-term pass has no end');
+  assert.equal(timeLeftMs(noEnd, NOW), null);
+  assert.equal(timeLeftMs(ended, NOW), null, 'past its end it is History, not Approved');
+  assert.equal(timeLeftMs(waiting, NOW), null, 'still waiting: not Approved');
+});
+
+test('approved: short-term passes first, soonest to lapse at the top, then long-term by latest decision', () => {
+  const rows = rowsOf(
+    [
+      longTerm('old', { status: 'approved', reviewed_at: ago(48) }),
+      longTerm('new', { status: 'approved', reviewed_at: ago(1) }),
+    ],
+    [
+      shortTerm('later', { status: 'active', reviewed_at: ago(1), valid_until: inHours(20) }),
+      shortTerm('soon', { status: 'active', reviewed_at: ago(10), valid_until: inHours(1) }),
+      shortTerm('noend', { status: 'active', reviewed_at: ago(2), valid_until: null }),
+      shortTerm('gone', { status: 'active', reviewed_at: ago(2), valid_until: ago(1) }),
+    ],
+  );
+  // A short-term pass with no end has nothing to lapse: it sorts with the long-term rows, by decision.
+  assert.deepEqual(keys(decidedRows(rows, 'approved', '', NOW)), ['guest:soon', 'guest:later', 'resident:new', 'guest:noend', 'resident:old']);
+  assert.deepEqual(keys(decidedRows(rows, 'history', '', NOW)), ['guest:gone']);
+});
+
+test('unit history: newest first, without the request being read', () => {
+  const payload = { entries: [
+    { id: 'a', kind: 'temporary', status: 'expired', plate: 'ABC1234', name: 'Pat Example', unit: '214', created_at: ago(100), valid_until: ago(76) },
+    { id: 'me', kind: 'permanent', status: 'pending', plate: 'XYZ789', unit: '214', created_at: ago(1) },
+    { id: 'b', kind: 'permanent', status: 'rejected', plate: 'XYZ789', unit: '214', created_at: ago(500), reject_reason: 'No lease on file' },
+  ] };
+  assert.deepEqual(unitHistoryRows(payload, { excludeId: 'me' }).map(e => e.id), ['a', 'b']);
+  assert.deepEqual(unitHistoryRows(payload).map(e => e.id), ['me', 'a', 'b']);
+  assert.deepEqual(unitHistoryRows(null), []);
+  assert.deepEqual(unitHistoryRows({ entries: [null] }), []);
+});
+
+test('unit history lines read Long-term / Short-term, the plate and the name when the payload has one', () => {
+  const entry = { id: 'a', kind: 'temporary', status: 'expired', plate: 'ABC1234', name: 'Pat Example', created_at: '2026-10-08T01:14:00Z', valid_until: '2026-10-09T01:14:00Z' };
+  assert.equal(historyEntryLine(entry), 'Short-term pass · ABC1234 · Pat Example');
+  assert.equal(historyEntryLine({ kind: 'permanent', plate: 'XYZ789' }), 'Long-term pass · XYZ789', 'a partner payload has no name');
+  assert.equal(historyKindLabel({ kind: 'resident' }), 'Long-term pass');
+  assert.equal(historyKindLabel({ kind: 'guest' }), 'Short-term pass');
+  assert.equal(historyWhenLine(entry), 'Filed Wed Oct 7, 9:14 PM ET · ended Thu Oct 8, 9:14 PM ET');
+  assert.equal(historyWhenLine({ created_at: '2026-10-08T01:14:00Z' }), 'Filed Wed Oct 7, 9:14 PM ET');
+  assert.equal(historyWhenLine({}), '');
+  assert.deepEqual(historyStatusTag('active'), { tone: 'green', text: 'Approved' });
+  assert.deepEqual(historyStatusTag('rejected'), { tone: 'red', text: 'Denied' });
+  assert.deepEqual(historyStatusTag('expired'), { tone: 'neutral', text: 'Ended' });
+  assert.deepEqual(historyStatusTag('???'), { tone: 'neutral', text: 'Unknown status' });
+  assert.equal(UNIT_HISTORY_EMPTY, 'No earlier parking passes at this unit.');
+});

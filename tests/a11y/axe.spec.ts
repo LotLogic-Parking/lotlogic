@@ -576,9 +576,9 @@ test.describe('upsell chips @a11y', () => {
       const harness = page.locator('#upsell-harness');
       await expect(harness).toContainText('Sunset Ridge Apartments');
 
-      const lockedParkingPasses = harness.getByRole('button', { name: '🔒 Parking passes' });
-      const lockedQr = harness.getByRole('button', { name: '🔒 QR codes' });
-      const lockedCameras = harness.getByRole('button', { name: '🔒 Cameras' });
+      const lockedParkingPasses = harness.getByRole('button', { name: 'Visitor passes', exact: true });
+      const lockedQr = harness.getByRole('button', { name: 'QR codes', exact: true });
+      const lockedCameras = harness.getByRole('button', { name: 'Cameras', exact: true });
       await expect(lockedParkingPasses).toBeVisible();
       await expect(lockedQr).toBeVisible();
       await expect(lockedCameras).toBeVisible();

@@ -14,7 +14,7 @@ const ids = chips => chips.map(c => c.id);
 test('all three locked when every flag reads explicit false', () => {
   const chips = lockedChips({ passes: false, qr: false, cameras: false });
   assert.deepEqual(ids(chips), ['log', 'qr', 'cameras']);
-  assert.deepEqual(chips.map(c => c.label), ['Parking passes', 'QR codes', 'Cameras']);
+  assert.deepEqual(chips.map(c => c.label), ['Visitor passes', 'QR codes', 'Cameras']);
   assert.ok(chips.every(c => c.locked === true));
 });
 
@@ -55,7 +55,7 @@ test('upsellCopy is the spec\'s verbatim sentence, one per feature', () => {
 });
 
 test('upsellTitle matches the chip label', () => {
-  assert.equal(upsellTitle('passes'), 'Parking passes');
+  assert.equal(upsellTitle('passes'), 'Visitor passes');
   assert.equal(upsellTitle('qr'), 'QR codes');
   assert.equal(upsellTitle('cameras'), 'Cameras');
 });
@@ -70,13 +70,18 @@ test('upsellFeatureName reads naturally mid-sentence, for the FeedbackModal pref
 // The only user-facing pass word is "parking pass" — never "Resident",
 // "Visitor", "Permanent", "Temporary", "Guest" or "Driver" (constraints.md).
 // "Parking passes" / "parking pass" are explicitly allowed; this regex does
-// not match either word.
+// not match either word. The ONE exception, as an exact phrase and nothing
+// wider: the apartment chip reads "Visitor passes" (Gabe, 2026-11-07:
+// "parking passes should be visitor passes"); it is blanked out before the
+// regex runs, so a sentence that merely contains it still fails.
 const BANNED = /\b(resident|visitor|permanent|temporary|guest|driver)s?\b/i;
+const ALLOWED_EXACT = 'Visitor passes';
+const unallowed = (text) => text.split(ALLOWED_EXACT).join(' ');
 
 test('no locked-chip label or upsell sentence uses a banned word', () => {
   const allChips = lockedChips({ passes: false, qr: false, cameras: false });
   for (const c of allChips) {
-    assert.equal(c.label.match(BANNED), null, `chip label "${c.label}" uses a banned word`);
+    assert.ok(c.label === ALLOWED_EXACT || c.label.match(BANNED) === null, `chip label "${c.label}" uses a banned word`);
   }
   for (const feature of ['passes', 'qr', 'cameras']) {
     const sentence = upsellCopy(feature);
@@ -89,7 +94,7 @@ test('no locked-chip label or upsell sentence uses a banned word', () => {
 test('neither upsell source file carries a banned word', () => {
   for (const rel of ['../src/lib/upsell.js', '../src/pages/property/UpsellPanel.jsx']) {
     const file = path.resolve(import.meta.dirname, rel);
-    const hit = readFileSync(file, 'utf8').match(BANNED);
+    const hit = unallowed(readFileSync(file, 'utf8')).match(BANNED);
     assert.equal(hit, null, `${rel} uses "${hit?.[0]}" — say "parking pass"`);
   }
 });

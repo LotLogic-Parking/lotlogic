@@ -206,6 +206,29 @@ export const getLotStatus = (propertyId) =>
 export const getPlateTimeline = (propertyId, plate) =>
   get(`/apartment/passes/timeline${query({ property_id: propertyId, plate })}`);
 
+// ── /apartment/passes/history, /presence, /metrics ──
+//
+// The manager's activity reads (manager-dashboard-build-plan B1–B4). Each is
+// scoped to one property; a tow-partner session gets the same shapes without
+// `name` / `unit`, and the tabs render without them.
+
+/** GET /apartment/passes/history?property_id=&plate=|unit=|name= → `{entries}` (cap 100). At least one of the three. */
+export const getPassHistory = (propertyId, { plate, unit, name } = {}) =>
+  get(`/apartment/passes/history${query({ property_id: propertyId, plate, unit, name })}`);
+
+/** GET /apartment/passes/permits?property_id= → `{residents, guests}` — the approval queue's payload */
+export const getPermits = (propertyId) =>
+  get(`/apartment/passes/permits${query({ property_id: propertyId })}`);
+
+/** GET /apartment/passes/presence?property_id= → `{has_cameras, counts, on_property, recent_exits}` */
+export const getPresence = (propertyId) =>
+  get(`/apartment/passes/presence${query({ property_id: propertyId })}`);
+
+
+/** GET /apartment/passes/metrics?property_id=&days= → `{source, registrations, traffic}` (days 1..90). */
+export const getPassMetrics = (propertyId, days) =>
+  get(`/apartment/passes/metrics${query({ property_id: propertyId, days })}`);
+
 // ── /partner/slack/* ─────────────────────────────────────────
 
 /** GET /partner/slack/status → `{connected, team_name, feed_channel_set, revoked}` */
@@ -278,7 +301,7 @@ export const requestsApi = {
   inviteMember, updateMember, removeMember, approveMember, declineMember,
   joinProperty, resendJoinRequest, createApartmentProperty, updateApartmentProperty,
   archiveApartmentProperty, listPartnerProperties, verifyPartnerProperty,
-  rejectPartnerProperty, getLotStatus, getPlateTimeline, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
+  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
   deleteSlackIdentity, setSlackFeedChannel, getRequestAction, postRequestAction,
   listTeam, inviteTeammate, patchTeammate, removeTeammate, resendTeammate, assignProperties,
 };
