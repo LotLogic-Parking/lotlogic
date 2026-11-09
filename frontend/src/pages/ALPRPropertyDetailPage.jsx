@@ -454,17 +454,6 @@ export function ALPRPropertyDetailPage({
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, []);
 
-  // "Request tow" on a parking pass: open Requests the way its chip does, with
-  // the composer on Tow and the plate filled in. The composer sits at the top
-  // of the section, so the page scrolls to the top and the composer brings its
-  // plate field into view once the prefill lands. The tap on "Request tow" in
-  // the composer stays the attestation — nothing is posted from here.
-  const requestTow = useCallback((row) => {
-    setRequestPrefill({ kind: 'tow', plate: plateText(row), nonce: Date.now() });
-    setSectionFilter('requests');
-    try { window.scrollTo(0, 0); } catch { /* ignore */ }
-  }, []);
-
   const loadAll = useCallback(async () => {
     if (!propertyId) return;
     setLoading(true);
