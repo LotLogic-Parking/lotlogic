@@ -35,15 +35,20 @@ export function RequestDetail({
   saving,
   moreItems,
   nextKey,
+  // The page's tick: History (a live short-term pass past its end) depends on it.
+  now = Date.now(),
   onBack,
   onApprove,
   onDeny,
   onNext,
   onZoom,
+  // Given only when this pass can be towed (see ApartmentPermits); the page
+  // opens the Requests composer pre-filled, and the tap there is the signature.
+  onRequestTow,
 }) {
   const headingId = useUid('pq-detail');
-  const segment = segmentOf(row);
-  const status = statusTag(row);
+  const segment = segmentOf(row, now);
+  const status = statusTag(row, now);
   const longTerm = isLongTerm(row);
   const name = holderName(row);
   const unit = unitText(row);
@@ -154,6 +159,9 @@ export function RequestDetail({
           <>
             <p className="pq-actions-note">{saving ? 'Saving…' : decisionLine(row)}</p>
             <MoreMenu label="More actions for this parking pass" items={moreItems} />
+            {onRequestTow && (
+              <button type="button" className="pq-btn pq-btn--quiet" onClick={() => onRequestTow(row)}>Request tow</button>
+            )}
             {nextKey && (
               <button type="button" className="pq-btn pq-btn--quiet" onClick={() => onNext(nextKey)}>Next request</button>
             )}

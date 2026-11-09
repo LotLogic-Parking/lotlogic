@@ -76,6 +76,9 @@ export function RequestsSection({
   upload: deepUpload = false,
   onAskUpsell,
   addToast,
+  // `{kind, plate, nonce}` from the page's "Request tow" on a parking pass;
+  // handed to the composer, which fills itself in on each new nonce.
+  prefill = null,
 }) {
   const [active, setActive] = useState(null);     // null = never loaded
   const [recent, setRecent] = useState([]);
@@ -286,6 +289,9 @@ export function RequestsSection({
           expiryFor={expiryFor}
           addToast={addToast}
           plateInputRef={plateRef}
+          initialKind={prefill?.kind}
+          initialPlate={prefill?.plate}
+          prefillNonce={prefill?.nonce}
         />
       )}
 

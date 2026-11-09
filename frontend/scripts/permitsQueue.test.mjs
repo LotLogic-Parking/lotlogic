@@ -9,8 +9,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  SEGMENTS,
   queueRows,
   segmentOf,
+  canRequestTow,
+  historyChip,
+  leftServiceMs,
   normalizeUnit,
   normalizePlate,
   matchesSearch,
@@ -137,9 +141,9 @@ test('every row keeps its status and gets a kind and a key; rejected rows are no
     'resident:r1', 'resident:r2', 'resident:r3', 'resident:r4',
     'guest:g1', 'guest:g2', 'guest:g3', 'guest:g4',
   ]);
-  assert.deepEqual(rows.map(segmentOf), [
-    'pending', 'approved', 'denied', null,
-    'pending', 'approved', 'denied', null,
+  assert.deepEqual(rows.map(r => segmentOf(r, NOW)), [
+    'pending', 'approved', 'denied', 'history',
+    'pending', 'approved', 'denied', 'history',
   ]);
   assert.equal(rows[0].plate_text, 'TEST001', 'the server columns ride along untouched');
 });
@@ -149,10 +153,24 @@ test('a payload missing one list is an empty list, not a crash', () => {
   assert.deepEqual(queueRows(null), []);
 });
 
-test('short-term statuses that are not decisions fall out of every segment', () => {
-  for (const status of ['revoked', 'cancelled', 'towed', 'void']) {
-    assert.equal(segmentOf(rowsOf([], [shortTerm('g', { status })])[0]), null, status);
+test('statuses that are not decisions are History, never one of the three review segments', () => {
+  for (const status of ['revoked', 'cancelled', 'towed', 'void', 'voided', 'expired']) {
+    assert.equal(segmentOf(rowsOf([], [shortTerm('g', { status })])[0], NOW), 'history', status);
   }
+  assert.equal(segmentOf(rowsOf([longTerm('r', { status: 'void' })])[0], NOW), 'history');
+  assert.equal(segmentOf(rowsOf([longTerm('r', { status: 'bogus' })])[0], NOW), null, 'an unknown status is still nowhere');
+  assert.deepEqual(SEGMENTS.map(s => s.id), ['pending', 'approved', 'denied', 'history']);
+});
+
+test('a live short-term pass is Approved until its end, then History — by the clock it is given', () => {
+  const [live] = rowsOf([], [shortTerm('g', { status: 'active', reviewed_at: ago(3), valid_until: new Date(NOW + HOUR).toISOString() })]);
+  assert.equal(segmentOf(live, NOW), 'approved');
+  assert.equal(segmentOf(live, NOW + HOUR), 'history', 'at valid_until it has ended');
+  assert.equal(segmentOf(live, NOW + 2 * HOUR), 'history');
+  const [noEnd] = rowsOf([], [shortTerm('g', { status: 'active', valid_until: null })]);
+  assert.equal(segmentOf(noEnd, NOW), 'approved', 'no end on file: still approved');
+  const [longApproved] = rowsOf([longTerm('r', { status: 'approved' })]);
+  assert.equal(segmentOf(longApproved, NOW + 9999 * HOUR), 'approved', 'a long-term pass has no end');
 });
 
 // ── Normalisation and search ─────────────────────────────────
@@ -301,9 +319,9 @@ test('the queue lists, groups and counts only the requests whose car matches the
   assert.deepEqual(listed('red'), [], 'a denied request is not in Needs review');
   assert.deepEqual(keys(decidedRows(rows, 'approved', 'white')), ['resident:d']);
   assert.deepEqual(keys(decidedRows(rows, 'denied', 'honda accord')), ['resident:e']);
-  assert.deepEqual(segmentCounts(rows, 'white'), { pending: 1, approved: 1, denied: 0 });
-  assert.deepEqual(segmentCounts(rows, 'honda'), { pending: 1, approved: 0, denied: 1 });
-  assert.deepEqual(segmentCounts(rows), { pending: 3, approved: 1, denied: 1 });
+  assert.deepEqual(segmentCounts(rows, 'white'), { pending: 1, approved: 1, denied: 0, history: 0 });
+  assert.deepEqual(segmentCounts(rows, 'honda'), { pending: 1, approved: 0, denied: 1, history: 0 });
+  assert.deepEqual(segmentCounts(rows), { pending: 3, approved: 1, denied: 1, history: 0 });
 });
 
 // ── The vehicle cap ──────────────────────────────────────────
@@ -469,8 +487,8 @@ test('approved lists long-term approved and live short-term passes, latest decis
 
 test('segment counts follow the search', () => {
   const rows = groupFixture();
-  assert.deepEqual(segmentCounts(rows), { pending: 4, approved: 2, denied: 0 });
-  assert.deepEqual(segmentCounts(rows, '214'), { pending: 2, approved: 1, denied: 0 });
+  assert.deepEqual(segmentCounts(rows), { pending: 4, approved: 2, denied: 0, history: 0 });
+  assert.deepEqual(segmentCounts(rows, '214'), { pending: 2, approved: 1, denied: 0, history: 0 });
 });
 
 // ── The 72-hour review window ────────────────────────────────
@@ -891,4 +909,83 @@ test('F8: a property without the lease requirement shows "not required", not a m
   assert.deepEqual(missingDocs(none, {}), ['lease']);
   assert.equal(initialDenyReason(none, { requireLease: false }), null);
   assert.equal(initialDenyReason(none, {}), 'document_missing');
+});
+
+// ── History ──────────────────────────────────────────────────
+
+function historyFixture() {
+  return rowsOf(
+    [
+      longTerm('ok', { status: 'approved', reviewed_at: ago(48) }),
+      longTerm('wait', { status: 'pending' }),
+      longTerm('no', { status: 'rejected', reviewed_at: ago(2) }),
+      longTerm('v', { status: 'void', reviewed_at: ago(5) }),
+    ],
+    [
+      shortTerm('live', { status: 'active', reviewed_at: ago(3), valid_until: new Date(NOW + 2 * HOUR).toISOString() }),
+      shortTerm('over', { status: 'active', reviewed_at: ago(30), valid_until: ago(1) }),
+      shortTerm('x', { status: 'expired', reviewed_at: ago(40), valid_until: ago(10) }),
+      shortTerm('c', { status: 'cancelled', reviewed_at: ago(2), valid_until: ago(1) }),
+      shortTerm('t', { status: 'towed', reviewed_at: null, valid_until: ago(20) }),
+      shortTerm('g', { status: 'rejected', reviewed_at: ago(1) }),
+    ],
+  );
+}
+
+test('segment counts include History, and the three review segments keep their counts', () => {
+  const rows = historyFixture();
+  assert.deepEqual(segmentCounts(rows, '', NOW), { pending: 1, approved: 2, denied: 2, history: 5 });
+  // Two hours later the live pass has ended: Approved loses one, History gains it.
+  assert.deepEqual(segmentCounts(rows, '', NOW + 2 * HOUR), { pending: 1, approved: 1, denied: 2, history: 6 });
+  assert.deepEqual(segmentCounts(rows, 'TEST900', NOW), { pending: 0, approved: 1, denied: 1, history: 4 }, 'the search applies');
+});
+
+test('History lists newest-departed first: the end of an expired pass, the review stamp of a voided one', () => {
+  const rows = historyFixture();
+  assert.deepEqual(keys(decidedRows(rows, 'history', '', NOW)), ['guest:over', 'guest:c', 'resident:v', 'guest:x', 'guest:t']);
+  assert.deepEqual(keys(decidedRows(rows, 'history', '', NOW + 2 * HOUR)), ['guest:live', 'guest:over', 'guest:c', 'resident:v', 'guest:x', 'guest:t']);
+  assert.deepEqual(keys(decidedRows(rows, 'approved', '', NOW)), ['guest:live', 'resident:ok'], 'Approved is unchanged');
+  assert.deepEqual(keys(decidedRows(rows, 'denied', '', NOW)), ['guest:g', 'resident:no'], 'a denied request is never History');
+  assert.deepEqual(keys(decidedRows(rows, 'history', '214', NOW)).length, 5, 'the search applies');
+});
+
+test('the moment a pass left service: valid_until for an ended short-term pass, else the review stamp', () => {
+  const rows = historyFixture();
+  const by = Object.fromEntries(rows.map(r => [r.key, r]));
+  assert.equal(leftServiceMs(by['guest:x']), Date.parse(ago(10)));
+  assert.equal(leftServiceMs(by['guest:over']), Date.parse(ago(1)));
+  assert.equal(leftServiceMs(by['resident:v']), Date.parse(ago(5)));
+  assert.equal(leftServiceMs(by['guest:t']), Date.parse(ago(20)), 'no review stamp: the end of the pass');
+  assert.equal(leftServiceMs({ kind: 'guest', status: 'towed', created_at: ago(7) }), Date.parse(ago(7)), 'last resort: when it was filed');
+});
+
+test('the History chip says why and when, in Eastern time', () => {
+  const [expired] = rowsOf([], [shortTerm('x', { status: 'expired', valid_until: '2026-11-06T20:10:00Z' })]);
+  const [ended] = rowsOf([], [shortTerm('e', { status: 'active', valid_until: '2026-11-06T20:10:00Z' })]);
+  const [voided] = rowsOf([longTerm('v', { status: 'void', reviewed_at: '2026-11-05T23:30:00Z' })]);
+  const [towed] = rowsOf([], [shortTerm('t', { status: 'towed', reviewed_at: '2026-11-04T15:00:00Z' })]);
+  const later = Date.parse('2026-11-07T00:00:00Z');
+  assert.deepEqual(historyChip(expired, later), { tone: 'neutral', text: 'Expired Nov 6, 3:10 PM' });
+  assert.deepEqual(historyChip(ended, later), { tone: 'neutral', text: 'Expired Nov 6, 3:10 PM' });
+  assert.deepEqual(historyChip(voided, later), { tone: 'neutral', text: 'Voided Nov 5' });
+  assert.deepEqual(historyChip(towed, later), { tone: 'neutral', text: 'Towed Nov 4' });
+  assert.equal(historyChip(ended, Date.parse('2026-11-06T20:00:00Z')), null, 'still live: no History chip');
+  const [denied] = rowsOf([longTerm('d', { status: 'rejected', reviewed_at: '2026-11-05T23:30:00Z' })]);
+  assert.equal(historyChip(denied, later), null, 'Denied is not History');
+  assert.equal(statusTag(ended, later).text, 'Ended', 'the status tag follows the clock');
+  assert.equal(statusTag(ended, Date.parse('2026-11-06T20:00:00Z')).text, 'Approved');
+});
+
+test('Request tow is offered on a short-term pass that is Approved or History, a long-term one only in History', () => {
+  const rows = historyFixture();
+  const by = Object.fromEntries(rows.map(r => [r.key, r]));
+  assert.equal(canRequestTow(by['guest:live'], NOW), true, 'approved short-term');
+  assert.equal(canRequestTow(by['guest:over'], NOW), true, 'ended short-term');
+  assert.equal(canRequestTow(by['guest:x'], NOW), true, 'expired short-term');
+  assert.equal(canRequestTow(by['resident:v'], NOW), true, 'voided long-term');
+  assert.equal(canRequestTow(by['resident:ok'], NOW), false, 'approved long-term: no');
+  assert.equal(canRequestTow(by['resident:wait'], NOW), false, 'pending: no');
+  assert.equal(canRequestTow(by['resident:no'], NOW), false, 'denied: no');
+  assert.equal(canRequestTow(by['guest:g'], NOW), false, 'denied short-term: no');
+  assert.equal(canRequestTow(rowsOf([], [shortTerm('p')])[0], NOW), false, 'pending short-term: no');
 });

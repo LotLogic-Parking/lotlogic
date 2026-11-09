@@ -91,3 +91,49 @@ test('RequestActionPage has a no-token view distinct from the expired one', () =
   assert.match(src, /Open the link from your email again\./);
   assert.match(src, /kind: 'no_token'/);
 });
+
+// --- Parking rules: the four apartment keys diff typed, never as strings ----
+
+const rulesBaseline = { guest_auto_approve: false, require_lease: true, require_vehicle_registration: false, max_vehicles_per_unit: null };
+
+test('the four parking-rule keys are editable', () => {
+  for (const k of ['guest_auto_approve', 'require_lease', 'require_vehicle_registration', 'max_vehicles_per_unit']) {
+    assert.ok(EDITABLE_PROPERTY_KEYS.includes(k), k);
+  }
+});
+
+test('a boolean flipped from false to true is a change, sent as a real boolean', () => {
+  assert.deepEqual(changedSettings(rulesBaseline, { ...rulesBaseline, guest_auto_approve: true }), { guest_auto_approve: true });
+  assert.deepEqual(changedSettings(rulesBaseline, { ...rulesBaseline, require_lease: false }), { require_lease: false });
+  const out = changedSettings(rulesBaseline, { ...rulesBaseline, require_vehicle_registration: 'true' });
+  assert.deepEqual(out, { require_vehicle_registration: true });
+  assert.equal(typeof out.require_vehicle_registration, 'boolean', 'a form string becomes a boolean');
+});
+
+test('a boolean left alone, or missing from the baseline and off in the draft, is not a change', () => {
+  assert.deepEqual(changedSettings(rulesBaseline, { ...rulesBaseline }), {});
+  assert.deepEqual(changedSettings({}, { guest_auto_approve: false, require_vehicle_registration: '' }), {});
+});
+
+test('the cap goes null → number and number → null, as a number or null', () => {
+  const up = changedSettings(rulesBaseline, { ...rulesBaseline, max_vehicles_per_unit: '3' });
+  assert.deepEqual(up, { max_vehicles_per_unit: 3 });
+  assert.equal(typeof up.max_vehicles_per_unit, 'number', 'the select\'s string becomes a number');
+  assert.deepEqual(changedSettings({ ...rulesBaseline, max_vehicles_per_unit: 3 }, { ...rulesBaseline, max_vehicles_per_unit: '' }), { max_vehicles_per_unit: null });
+  assert.deepEqual(changedSettings({ ...rulesBaseline, max_vehicles_per_unit: 3 }, { ...rulesBaseline, max_vehicles_per_unit: 4 }), { max_vehicles_per_unit: 4 });
+});
+
+test('a null cap against the select\'s empty "No limit" value is not a change', () => {
+  assert.deepEqual(changedSettings(rulesBaseline, { ...rulesBaseline, max_vehicles_per_unit: '' }), {});
+  assert.deepEqual(changedSettings({ ...rulesBaseline, max_vehicles_per_unit: 2 }, { ...rulesBaseline, max_vehicles_per_unit: '2' }), {});
+});
+
+test('invalid_field on each parking rule is a readable sentence', () => {
+  const e = (field) => Object.assign(new Error('invalid_field'), { code: 'invalid_field', body: { field } });
+  assert.equal(settingsSaveErrorMessage(e('max_vehicles_per_unit')), 'Vehicles per unit must be between 1 and 10, or no limit.');
+  for (const field of ['guest_auto_approve', 'require_lease', 'require_vehicle_registration']) {
+    const text = settingsSaveErrorMessage(e(field));
+    assert.doesNotMatch(text, /_/, field);
+    assert.notEqual(text, 'One of those values is not valid.', field);
+  }
+});

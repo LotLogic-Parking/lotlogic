@@ -13,10 +13,12 @@ import {
   allCaughtUpLine,
   approvedPatch,
   approvedVehicleCount,
+  canRequestTow,
   capChip,
   capOf,
   createDocCache,
   decidedRows,
+  historyChip,
   initialDenyReason,
   isLongTerm,
   nextPendingKey,
@@ -45,13 +47,20 @@ import { Tag } from './permits/parts.jsx';
 
 // ── The manager's approval queue (Passes tab, task F4) ───────
 //
-// Needs review / Approved / Denied over the whole permits payload, a plate-or-
-// unit search, requests grouped by unit against the property's vehicle cap,
-// each request's documents inline beside the values they prove, one-tap
-// Approve (optimistic; the row comes back if the server says no), Deny through
-// a reason sheet that previews the email, and Void / Extend behind a "More
-// actions" menu with real confirms. The pure rules live in
-// `lib/permitsQueue.js` (scripts/permitsQueue.test.mjs).
+// Needs review / Approved / Denied / History over the whole permits payload, a
+// plate-or-unit search, requests grouped by unit against the property's
+// vehicle cap, each request's documents inline beside the values they prove,
+// one-tap Approve (optimistic; the row comes back if the server says no), Deny
+// through a reason sheet that previews the email, and Void / Extend behind a
+// "More actions" menu with real confirms. History holds what left service
+// (void, expired, cancelled, revoked, towed, and a live short-term pass past
+// its end), newest first, each with a chip saying why and when. The pure
+// rules live in `lib/permitsQueue.js` (scripts/permitsQueue.test.mjs).
+//
+// `onRequestTow(row)`, when the page passes it, adds "Request tow" to a pass
+// that is or was on the lot (approved short-term; anything in History): the
+// page opens the Requests composer pre-filled, and the tap there is the
+// attestation. Without the prop no such control renders.
 //
 // Layout: at 1024 px and up a 360 px list beside a sticky detail pane; below
 // that the detail replaces the list, pushed onto history so the browser or
@@ -82,7 +91,7 @@ function replaceQuery(state) {
   } catch { /* history blocked: the view still works, it just will not survive a refresh */ }
 }
 
-export function ApartmentPermits({ property }) {
+export function ApartmentPermits({ property, onRequestTow }) {
   const propertyId = property?.id;
   const propertyName = property?.name || '';
   const cap = capOf(property);
@@ -179,9 +188,11 @@ export function ApartmentPermits({ property }) {
 
   // ── Derived lists ──
   const overKeys = useMemo(() => overLimitKeys(rows, cap), [rows, cap]);
-  const counts = useMemo(() => segmentCounts(rows, q), [rows, q]);
+  // History depends on the clock (a live short-term pass past its end), so the
+  // page's tick threads through everything that segments a row.
+  const counts = useMemo(() => segmentCounts(rows, q, now), [rows, q, now]);
   const groups = useMemo(() => (segment === 'pending' ? reviewGroups(rows, { q, cap }) : []), [rows, q, cap, segment]);
-  const decided = useMemo(() => (segment === 'pending' ? [] : decidedRows(rows, segment, q)), [rows, segment, q]);
+  const decided = useMemo(() => (segment === 'pending' ? [] : decidedRows(rows, segment, q, now)), [rows, segment, q, now]);
   const visible = segment === 'pending' ? groups.flatMap(g => g.rows) : decided;
   const selectedRow = selectedKey ? rows.find(r => r.key === selectedKey) || null : null;
   const sheetRow = sheet ? rows.find(r => r.key === sheet.key) || null : null;
@@ -342,12 +353,14 @@ export function ApartmentPermits({ property }) {
   useEffect(() => { if (sheet && !sheetRow) setSheet(null); }, [sheet, sheetRow]);
 
   const moreItemsFor = useCallback((row) => {
-    if (segmentOf(row) !== 'approved') return [];
     const items = [];
-    if (!isLongTerm(row)) items.push({ id: 'extend', label: 'Extend…', onSelect: () => setSheet({ type: 'extend', key: row.key }) });
-    items.push({ id: 'void', label: 'Void pass…', danger: true, onSelect: () => setSheet({ type: 'void', key: row.key }) });
+    if (segmentOf(row, now) === 'approved') {
+      if (!isLongTerm(row)) items.push({ id: 'extend', label: 'Extend…', onSelect: () => setSheet({ type: 'extend', key: row.key }) });
+      items.push({ id: 'void', label: 'Void pass…', danger: true, onSelect: () => setSheet({ type: 'void', key: row.key }) });
+    }
+    if (onRequestTow && canRequestTow(row, now)) items.push({ id: 'tow', label: 'Request tow…', onSelect: () => onRequestTow(row) });
     return items;
-  }, []);
+  }, [now, onRequestTow]);
 
   const copyLink = useCallback(async () => {
     const link = registrationLink(window.location.origin, property?.qr_code_id);
@@ -368,7 +381,9 @@ export function ApartmentPermits({ property }) {
     overLimit: overKeys.has(row.key),
     cap,
     requireLease,
-    ageChip: ageChip(row, now),
+    // The one chip slot: the review window while a request waits, the
+    // "Expired Nov 6, 3:10 PM" / "Voided Nov 5" reason once it is History.
+    ageChip: ageChip(row, now) || historyChip(row, now),
     showThumb,
     showUnit,
     moreItems: moreItemsFor(row),
@@ -402,7 +417,11 @@ export function ApartmentPermits({ property }) {
       </div>
     ) : (
       <div className="pq-empty">
-        <p className="pq-empty-title">{segment === 'approved' ? 'No approved parking passes yet.' : 'No denied requests.'}</p>
+        <p className="pq-empty-title">
+          {segment === 'approved' ? 'No approved parking passes yet.'
+            : segment === 'history' ? 'No parking passes have ended yet.'
+              : 'No denied requests.'}
+        </p>
       </div>
     );
   } else if (segment === 'pending') {
@@ -440,16 +459,18 @@ export function ApartmentPermits({ property }) {
         cap={cap}
         requireLease={requireLease}
         overLimit={overKeys.has(selectedRow.key)}
-        ageChip={ageChip(selectedRow, now)}
+        ageChip={ageChip(selectedRow, now) || historyChip(selectedRow, now)}
         unitChip={unitChip}
         saving={savingKeys.has(selectedRow.key)}
         moreItems={moreItemsFor(selectedRow)}
-        nextKey={segmentOf(selectedRow) === 'pending' ? null : nextPendingKey(rows, { cap, q, after: selectedRow.key })}
+        nextKey={segmentOf(selectedRow, now) === 'pending' ? null : nextPendingKey(rows, { cap, q, after: selectedRow.key })}
+        now={now}
         onBack={closeDetail}
         onApprove={approve}
         onDeny={openDeny}
         onNext={goNext}
         onZoom={setDocView}
+        onRequestTow={onRequestTow && canRequestTow(selectedRow, now) ? onRequestTow : undefined}
       />
     );
   })() : null;
