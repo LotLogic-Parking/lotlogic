@@ -35,7 +35,7 @@ import { GOOGLE_MAPS_KEY, loadPlacesScript } from '../lib/places.js';
 
 const INPUT_STYLE = { padding: '10px 12px', background: 'var(--bg-inset)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 14, width: '100%', boxSizing: 'border-box' };
 const LABEL_STYLE = { display: 'block', fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', marginBottom: 4, marginTop: 10 };
-const LINK_BTN_STYLE = { background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '6px 0', textAlign: 'left' };
+const LINK_BTN_STYLE = { background: 'transparent', border: 'none', color: 'var(--accent-text)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '6px 0', textAlign: 'left' };
 
 function MatchCard({ title, candidates, onJoin, joiningId, extra }) {
   return (

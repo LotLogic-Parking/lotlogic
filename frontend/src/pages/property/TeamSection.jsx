@@ -97,7 +97,7 @@ export function TeamSection({ property, user }) {
       <div className="settings-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>Who can authorize requests — {property?.name}</span>
         {isAdmin && (
-          <button onClick={() => setShowInvite(v => !v)} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <button onClick={() => setShowInvite(v => !v)} style={{ background: 'transparent', border: 'none', color: 'var(--accent-text)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             {showInvite ? 'Cancel' : '+ Add a teammate'}
           </button>
         )}

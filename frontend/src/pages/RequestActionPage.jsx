@@ -137,7 +137,7 @@ export function RequestActionPage({ token }) {
         )}
         {needsSignIn(view) && (
           <div className="login-note" style={{ marginTop: 16, fontSize: 13 }}>
-            <a href={signInHref(request)} style={{ color: 'var(--accent)', fontWeight: 700 }}>Sign in</a>
+            <a href={signInHref(request)} style={{ color: 'var(--accent-text)', fontWeight: 700 }}>Sign in</a>
           </div>
         )}
         {offline && <div className="login-error" role="alert">Can't reach LotLogic — try again.</div>}

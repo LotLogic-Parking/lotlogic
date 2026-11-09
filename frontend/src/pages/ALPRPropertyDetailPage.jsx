@@ -818,7 +818,7 @@ export function ALPRPropertyDetailPage({
 
   return (
     <div className="page-enter">
-      <button onClick={onBack} style={{background:'none',border:'none',color:'var(--accent)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>
+      <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>
 
       <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:12,padding:'16px',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>

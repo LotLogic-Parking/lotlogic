@@ -74,7 +74,7 @@ export function PendingMembershipPage({ me, user, onLogout, onAddProperty }) {
       {onAddProperty && (
         <div style={{ marginTop: 24, fontSize: 13, color: 'var(--text-muted)' }}>
           Not the right property?{' '}
-          <button onClick={onAddProperty} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
+          <button onClick={onAddProperty} style={{ background: 'transparent', border: 'none', color: 'var(--accent-text)', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
             Add a different property
           </button>
         </div>

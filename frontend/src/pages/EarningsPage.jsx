@@ -102,7 +102,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
             </div>
             <div style={{background:'var(--bg-inset)', border:'1px solid var(--border)', borderRadius:8, padding:'6px 12px', fontSize:12}}>
               <span style={{color:'var(--text-muted)'}}>LotLogic </span>
-              <strong style={{color:'var(--accent)'}}>{fmtMoney(totalOurs)}</strong>
+              <strong style={{color: 'var(--accent-text)'}}>{fmtMoney(totalOurs)}</strong>
             </div>
           </div>
         )}
@@ -134,7 +134,7 @@ export function EarningsPage({ violations, lots, isOwner, user, onNavigate }) {
               {invoicableTows.length} tow{invoicableTows.length !== 1 ? 's' : ''} · {fmtMoney(invoicableGross)}
             </div>
           </div>
-          <div style={{fontSize: 13, color: 'var(--accent)', fontWeight: 700, whiteSpace: 'nowrap'}}>
+          <div style={{fontSize: 13, color: 'var(--accent-text)', fontWeight: 700, whiteSpace: 'nowrap'}}>
             Review &amp; invoice →
           </div>
         </div>

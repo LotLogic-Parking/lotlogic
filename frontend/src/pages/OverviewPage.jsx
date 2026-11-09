@@ -182,7 +182,7 @@ export function OverviewPage({ violations, lots, partners, lotStates, onViewAs }
               <span style={{width:8, height:8, borderRadius:'50%', background:'var(--accent)', flexShrink:0}} />
               <span style={{fontSize:15, fontWeight:700, color:'var(--text-primary)'}}>LotLogic Cut</span>
             </div>
-            <div style={{fontSize:15, fontWeight:700, color:'var(--accent)'}}>{fmtMoney(totalOurs)}</div>
+            <div style={{fontSize:15, fontWeight:700, color: 'var(--accent-text)'}}>{fmtMoney(totalOurs)}</div>
           </div>
           {operatorStats.map(os => os.partnerPay > 0 && (
             <div key={os.partner.id} className="breakdown-row">

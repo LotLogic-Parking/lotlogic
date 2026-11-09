@@ -218,7 +218,7 @@ export function PartnerTeamSection({ user }) {
             type="button"
             onClick={() => { setShowInvite(v => !v); setError(''); }}
             aria-expanded={showInvite}
-            style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--accent-text)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             {showInvite ? 'Cancel' : 'Add a teammate'}
           </button>
