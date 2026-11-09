@@ -296,7 +296,7 @@ jobs:
       - name: Check out lotlogic-backend
         uses: actions/checkout@v4
         with:
-          repository: getlotlogic/lotlogic-backend
+          repository: LotLogic-Parking/lotlogic-backend
           ref: ${{ vars.PORTAL_BACKEND_REF || 'main' }}
           path: backend
           token: ${{ secrets.BACKEND_REPO_TOKEN || github.token }}
