@@ -41,6 +41,11 @@ const PR_MIN_SCORE = Number(Deno.env.get("PR_MIN_SCORE") ?? "0.8");
 // Plate Recognizer `regions` hint for the main call. The truck-plaza path has
 // always sent "us"; the apartment path sent nothing (2026-11-11). Empty = none.
 const PR_REGIONS = Deno.env.get("PR_REGIONS") ?? "us";
+// Apartment read floor. Mayfield 2026-11-11: real 6-8 character plates came
+// back at 0.70-0.79 with the plate only ~30 px wide in the frame, under the
+// 0.80 floor. This knob lets the floor move without a deploy while the
+// cameras are brought closer to the lane. Unset = PR_MIN_SCORE.
+const PR_MIN_SCORE_APARTMENT = Number(Deno.env.get("PR_MIN_SCORE_APARTMENT") ?? String(PR_MIN_SCORE));
 // Per-camera PR_MIN_SCORE override. JSON map { "<camera_id>": <floor> }.
 // When a camera_id is in the map, its plate reads bypass BOTH the
 // length-scaled confidence ladder AND the vehicle-detection gate, and
@@ -2150,7 +2155,7 @@ function isPlausiblePlate(r: PrResult, cameraId: string, propertyType: string | 
   // reads). Apartment traffic is ordinary rear plates; a 6-character read in
   // the low 80s is a plate, not a decal, and the 0.85 rung was dropping them
   // (Mayfield, 2026-11-11). Apartments use the flat PR_MIN_SCORE floor.
-  if (propertyType === "apartment") return r.score >= PR_MIN_SCORE;
+  if (propertyType === "apartment") return r.score >= PR_MIN_SCORE_APARTMENT;
   const minConf = normalized.length === 5 ? 0.95
                 : normalized.length === 6 ? 0.85
                 : 0.80;
