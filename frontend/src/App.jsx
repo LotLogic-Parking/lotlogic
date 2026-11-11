@@ -342,7 +342,12 @@ export function App() {
   })();
 
   // When viewing as a partner, filter lots/violations to that partner's lots
-  const effectiveUser = viewAs ? { ...viewAs, _role: 'partner' } : owner;
+  // `_platformAdmin` rides on the user object so the property page can tell
+  // Gabe's account (keeps the owner "All" surfaces) from a manager's.
+  const effectiveUser = useMemo(
+    () => (viewAs ? { ...viewAs, _role: 'partner' } : (owner ? { ...owner, _platformAdmin: isPlatformAdmin } : owner)),
+    [viewAs, owner, isPlatformAdmin],
+  );
   // A Truck signed in (tow-company team spec §2.3, P2). Their token carries
   // no `partner_id`, so every PostgREST read is empty for them: they get
   // Lookup · Requests · Account, and no page that reads `supabase.from(...)`
@@ -386,7 +391,7 @@ export function App() {
     ]
     : [];
   const navTabs = (() => {
-    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null });
+    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin });
     const account = base.filter(t => t.id === 'account');
     return [...base.filter(t => t.id !== 'account'), ...navExtras, ...account];
   })();
@@ -1135,7 +1140,7 @@ export function App() {
           {tab === 'lots' && !truck && <ALPRPropertiesPage
             user={effectiveUser}
             impersonating={!!viewAs}
-            initialSelectedId={deepLink.property}
+            initialSelectedId={deepLink.property || ((isOwner && !isPlatformAdmin && (properties || []).length === 1) ? properties[0].id : undefined)}
             initialSection={deepLink.section}
             request={deepLink.request}
             upload={deepLink.upload}
