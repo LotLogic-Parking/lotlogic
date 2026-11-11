@@ -34,6 +34,7 @@ jobs:
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
         with:
+          # v3 of the CLI asks for confirmation on deploy; --yes answers it.
           version: latest
 
       - name: Deploy camera-snapshot
@@ -42,4 +43,5 @@ jobs:
         run: |
           supabase functions deploy camera-snapshot \
             --project-ref nzdkoouoaedbbccraoti \
-            --no-verify-jwt
+            --no-verify-jwt \
+            --yes

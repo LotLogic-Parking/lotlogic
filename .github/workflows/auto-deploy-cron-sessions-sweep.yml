@@ -27,6 +27,7 @@ jobs:
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
         with:
+          # v3 of the CLI asks for confirmation on deploy; --yes answers it.
           version: latest
 
       - name: Deploy cron-sessions-sweep
@@ -35,4 +36,5 @@ jobs:
         run: |
           supabase functions deploy cron-sessions-sweep \
             --project-ref nzdkoouoaedbbccraoti \
-            --no-verify-jwt
+            --no-verify-jwt \
+            --yes
