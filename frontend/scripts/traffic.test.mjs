@@ -132,8 +132,8 @@ test('fmtMinutes', () => {
 
 test('counters: every number has a label; camera counters only with a camera', () => {
   const withCam = counters(CAMERA);
-  assert.deepEqual(withCam.map(c => c.key), ['entries', 'unique', 'registrations', 'kinds', 'decisions', 'median']);
-  assert.deepEqual(withCam.map(c => c.value), ['26', '11', '7', '5 / 2', '6 / 1', '2 h 05 m']);
+  assert.deepEqual(withCam.map(c => c.key), ['entries', 'registrations', 'kinds', 'decisions', 'median']);
+  assert.deepEqual(withCam.map(c => c.value), ['26', '7', '5 / 2', '6 / 1', '2 h 05 m']);
   assert.ok(withCam.every(c => typeof c.label === 'string' && c.label.length > 0));
   const without = counters(NO_CAMERA);
   assert.deepEqual(without.map(c => c.key), ['registrations', 'kinds', 'decisions', 'median']);
