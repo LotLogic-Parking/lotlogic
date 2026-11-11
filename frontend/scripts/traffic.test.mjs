@@ -130,15 +130,16 @@ test('fmtMinutes', () => {
   assert.equal(fmtMinutes(null), '');
 });
 
-test('counters: every number has a label; camera counters only with a camera', () => {
-  const withCam = counters(CAMERA);
-  assert.deepEqual(withCam.map(c => c.key), ['entries', 'registrations', 'kinds', 'decisions', 'median']);
-  assert.deepEqual(withCam.map(c => c.value), ['26', '7', '5 / 2', '6 / 1', '2 h 05 m']);
+test('counters: visits, today and average stay with a camera; passes filed without one', () => {
+  const withCam = counters(CAMERA, { total: 26, today: 3, avgStayMinutes: 125 });
+  assert.deepEqual(withCam.map(c => c.key), ['visits', 'today', 'stay']);
+  assert.deepEqual(withCam.map(c => c.value), ['26', '3', '2 h 05 m']);
   assert.ok(withCam.every(c => typeof c.label === 'string' && c.label.length > 0));
+  assert.deepEqual(counters(CAMERA, null).map(c => c.value), ['0', '0', '—']);
   const without = counters(NO_CAMERA);
-  assert.deepEqual(without.map(c => c.key), ['registrations', 'kinds', 'decisions', 'median']);
-  assert.equal(counters({ registrations: { total: 0, median_minutes_to_decision: null } }).find(c => c.key === 'median').value, '—');
-  assert.deepEqual(counters(null).map(c => c.value), ['0', '0 / 0', '0 / 0', '—']);
+  assert.deepEqual(without.map(c => c.key), ['registrations']);
+  assert.deepEqual(without.map(c => c.value), ['7']);
+  assert.deepEqual(counters(null).map(c => c.value), ['0']);
 });
 
 test('busiestLine names the weekday and the hour', () => {

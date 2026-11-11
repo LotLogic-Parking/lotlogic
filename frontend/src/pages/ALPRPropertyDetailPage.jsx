@@ -1637,9 +1637,17 @@ export function ALPRPropertyDetailPage({
           // how many frames are hidden. Click to expand inline.
           let displayRows;
           if (groupBySession) {
+            // Frames with no session (stray reads, paired-read rows) still
+            // belong to one physical car when they are seconds apart on one
+            // camera with a similar plate: bundle them so a six-frame burst
+            // is one row, the same way the plaza log does.
+            const strayKey = new Map();
+            for (const b of bundleVehicleEvents(events.filter(e => !e.session_id))) {
+              for (const id of b._bundle.plate_event_ids) strayKey.set(id, b.id);
+            }
             const groups = new Map();
             for (const ev of events) {
-              const key = ev.session_id || ev.id; // events without a session stand alone
+              const key = ev.session_id || strayKey.get(ev.id) || ev.id;
               if (!groups.has(key)) groups.set(key, []);
               groups.get(key).push(ev);
             }

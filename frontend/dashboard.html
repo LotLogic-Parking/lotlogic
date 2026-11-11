@@ -3467,6 +3467,17 @@
     .ls--blue .pq-btn--quiet { color: var(--ll-link); }
 
     /* Traffic: the source line, a card per chart, the bar strip, the heat grid. */
+    /* Traffic › Visits: one row per car per pass, entry photo then exit photo. */
+    .ls-visits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .ls-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 10px 0; border-top: 1px solid var(--ll-line, #E2E8F0); }
+    .ls-visit:first-child { border-top: 0; padding-top: 0; }
+    .ls-visit-photos { display: flex; gap: 14px; }
+    .ls-visit-photo { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+    .ls-visit-photo figcaption { font-size: 12px; color: var(--ll-text-2, #475569); white-space: nowrap; }
+    .ls-visit-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+    .ls-visit-stay { font-size: 13px; color: var(--ll-text-2, #475569); }
+    .ls-visit-pass { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 12px; background: rgba(22,163,74,.12); color: #15803D; }
+    .ls-visit--here .ls-visit-photo:last-child figcaption { color: var(--ll-blue, #2563EB); font-weight: 600; }
     .ls-source { margin: 0; font-size: 13px; color: var(--ll-text-2); }
     .ls-source-main { font-weight: 800; color: var(--ll-text); }
     .ls-card { padding: 16px; background: var(--ll-surface); border: 1px solid var(--ll-line); border-radius: 12px; }

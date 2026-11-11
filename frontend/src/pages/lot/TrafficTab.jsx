@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getPassMetrics } from '../../lib/requestsApi.js';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { asOfLine } from '../../lib/lotStatus.js';
+import { db } from '../../lib/db.js';
+import { PhotoFrame } from './Photo.jsx';
+import { VISITS_EMPTY, visitMetrics, visitRows, visitsSummary } from '../../lib/visits.js';
 import {
   DAY_OPTIONS,
   DEFAULT_DAYS,
@@ -31,6 +34,7 @@ import {
 export function TrafficTab({ propertyId, propertyName = '' }) {
   const [days, setDays] = useState(DEFAULT_DAYS);
   const [data, setData] = useState(null);
+  const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState(null);
   const token = useRef(0);
@@ -40,9 +44,13 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
     const mine = ++token.current;
     setLoading(true);
     try {
-      const res = await getPassMetrics(propertyId, days);
+      const [res, vis] = await Promise.all([
+        getPassMetrics(propertyId, days),
+        db.getVisits(propertyId, days).catch(() => []),
+      ]);
       if (mine !== token.current) return;
       setData(res);
+      setVisits(vis);
       setLoadErr(null);
     } catch (e) {
       if (mine !== token.current) return;
@@ -62,7 +70,9 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
   const series = useMemo(() => pickSeries(data), [data]);
   const bars = useMemo(() => hourBars(series.by_hour), [series]);
   const grid = useMemo(() => heatGrid(series), [series]);
-  const tiles = useMemo(() => counters(data), [data]);
+  const rows = useMemo(() => visitRows(visits), [visits]);
+  const stats = useMemo(() => visitMetrics(visits), [visits]);
+  const tiles = useMemo(() => counters(data, stats), [data, stats]);
   const total = series.by_hour.reduce((a, b) => a + b, 0);
   const asOf = data?.as_of;
 
@@ -149,6 +159,42 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
             </div>
           </section>
         )}
+
+        {/* Visits: one row per car per pass. The entry photo and the exit photo
+            are the ones the pipeline chose for the visit, not every frame. */}
+        <section className="ls-card" aria-labelledby="ls-visits-title" data-testid="traffic-visits">
+          <div className="ls-card-head">
+            <h3 id="ls-visits-title" className="ls-card-title">Visits</h3>
+            {rows.length > 0 && <span className="ls-card-note">{visitsSummary(rows)}</span>}
+          </div>
+          {rows.length === 0 ? (
+            <p className="ls-note">{VISITS_EMPTY}</p>
+          ) : (
+            <ol className="ls-visits" aria-label="Visits, newest first">
+              {rows.map(r => (
+                <li key={r.id} className={`ls-visit ls-visit--${r.status}`} data-testid="traffic-visit">
+                  <div className="ls-visit-photos">
+                    <figure className="ls-visit-photo">
+                      <PhotoFrame url={r.in.photo} plate={r.plate} alt={`Entering, ${r.plate}`} />
+                      <figcaption>{r.in.label}</figcaption>
+                    </figure>
+                    <figure className="ls-visit-photo">
+                      {r.out
+                        ? <PhotoFrame url={r.out.photo} plate={r.plate} alt={`Leaving, ${r.plate}`} />
+                        : <span className="ls-thumb ls-thumb--empty" aria-hidden="true" />}
+                      <figcaption>{r.out ? r.out.label : 'Still on the property'}</figcaption>
+                    </figure>
+                  </div>
+                  <div className="ls-visit-meta">
+                    <span className="ls-badge">{r.plate || '—'}</span>
+                    {r.stay && <span className="ls-visit-stay">{r.stay}</span>}
+                    {r.covered && <span className="ls-visit-pass">Parking pass</span>}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
       </>
     );
   }
