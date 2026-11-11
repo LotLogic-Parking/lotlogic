@@ -38,6 +38,9 @@ const PR_MMC_BACKOFF_MINUTES       = Number(Deno.env.get("PR_MMC_BACKOFF_MINUTES
 // without a second PR round-trip). Default false.
 const PR_MMC_ENFORCEMENT_SITES_ONLY = (Deno.env.get("PR_MMC_ENFORCEMENT_SITES_ONLY") ?? "false").toLowerCase() === "true";
 const PR_MIN_SCORE = Number(Deno.env.get("PR_MIN_SCORE") ?? "0.8");
+// Plate Recognizer `regions` hint for the main call. The truck-plaza path has
+// always sent "us"; the apartment path sent nothing (2026-11-11). Empty = none.
+const PR_REGIONS = Deno.env.get("PR_REGIONS") ?? "us";
 // Per-camera PR_MIN_SCORE override. JSON map { "<camera_id>": <floor> }.
 // When a camera_id is in the map, its plate reads bypass BOTH the
 // length-scaled confidence ladder AND the vehicle-detection gate, and
@@ -884,7 +887,7 @@ Deno.serve(async (req: Request) => {
     // and (3) length-scaled confidence thresholds. Rejects trailer IDs,
     // police unit numbers, URLs, decals, and industrial labels that PR
     // OCRs as plate-shaped text.
-    let surviving = results.filter((r: PrResult) => isPlausiblePlate(r, camera.id));
+    let surviving = results.filter((r: PrResult) => isPlausiblePlate(r, camera.id, propertyType));
 
     // Burst mode: if a recent frame had no usable plate, usdot_active_until
     // is set N seconds in the future. USDOT OCR only fires when THIS frame
@@ -969,6 +972,14 @@ Deno.serve(async (req: Request) => {
             _source: `camera-snapshot:${extracted.source}:rejected`,
             _sidecar_reason: "pr_no_plate",
             _pr_results_count: results.length,
+            // What PR actually returned, so a rejected frame can be explained
+            // without re-running it (plate text and score; never the image).
+            _pr_results: results.slice(0, 3).map((r: PrResult) => ({
+              plate: r.plate, score: r.score, dscore: (r as { dscore?: number }).dscore ?? null,
+              vehicle_score: r.vehicle?.score ?? null, box: r.box ?? null,
+            })),
+            _rotated: rotateDir ?? null,
+            _regions: PR_REGIONS || null,
             _pr_call_made: true,
             _pr_source: prResp.source,
             _usdot_called: USDOT_ENABLED && !!USDOT_TOKEN,
@@ -1674,6 +1685,7 @@ async function callPlateRecognizer(
     ) as ArrayBuffer;
     fd.append("upload", new Blob([imagePart], { type: "image/jpeg" }), "snap.jpg");
     fd.append("camera_id", cameraId);
+    if (PR_REGIONS) fd.append("regions", PR_REGIONS);
     if (withMmc) fd.append("mmc", "true");
     return fd;
   };
@@ -2107,7 +2119,7 @@ async function maybePairedMotionExitHint(
   else console.log(`exit inferred (paired-motion) session=${sessionId} gate=${camera.gate_id}`);
 }
 
-function isPlausiblePlate(r: PrResult, cameraId: string): boolean {
+function isPlausiblePlate(r: PrResult, cameraId: string, propertyType: string | null = null): boolean {
   const normalized = normalizePlate(r.plate ?? "");
 
   // ─── Layer 2: plate SHAPE ──────────────────────────────────────────
@@ -2134,6 +2146,11 @@ function isPlausiblePlate(r: PrResult, cameraId: string): boolean {
   if (r.score < 0.80 && vehicleScore < REQUIRE_VEHICLE_SCORE) return false;
 
   // ─── Layer 3: CONFIDENCE scales with length ────────────────────────
+  // The length ladder guards truck-plaza grille placards (short, decal-like
+  // reads). Apartment traffic is ordinary rear plates; a 6-character read in
+  // the low 80s is a plate, not a decal, and the 0.85 rung was dropping them
+  // (Mayfield, 2026-11-11). Apartments use the flat PR_MIN_SCORE floor.
+  if (propertyType === "apartment") return r.score >= PR_MIN_SCORE;
   const minConf = normalized.length === 5 ? 0.95
                 : normalized.length === 6 ? 0.85
                 : 0.80;
