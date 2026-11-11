@@ -417,12 +417,16 @@ export function ALPRPropertyDetailPage({
     if (!sectionFilter || !property) return;
     try { localStorage.setItem(sectionStorageKey(property.property_type), sectionFilter); } catch { /* blocked storage */ }
   }, [sectionFilter, property]);
-  const showSection = (key) => sectionFilter === 'all' || sectionFilter === key;
+  // Settings takes the page over while it is open (audit 2026-11-11: it used
+  // to render below the whole section, off-screen on a phone). It holds the
+  // registration QR codes, the cameras and the rules.
+  const view = showSettings ? 'settings' : sectionFilter;
+  const showSection = (key) => view === 'all' || view === key;
   // When Requests is the chosen chip, nothing else renders. Spec §5: "No dead
   // controls … the layout ships without the control, not with a disabled one."
   // The three owner surfaces below (the QR tiles, the add-plate form and the
   // plate list) are not behind a showSection of their own, so they need this.
-  const requestsOnly = SOLO_SECTION_IDS.includes(sectionFilter);
+  const requestsOnly = SOLO_SECTION_IDS.includes(view);
   // "Request tow" only where the composer it opens will render: the office
   // (admin / manager) places requests; a viewer or the tow company gets no
   // such button. Same role rule RequestsSection applies to its composer.
@@ -877,7 +881,7 @@ export function ALPRPropertyDetailPage({
           entry photo, the pass's time left or the countdown to register, and
           red when the office should act. The registration queue opens from
           its footer. Apartments only. */}
-      {sectionFilter === 'passes' && !isTruckPlaza && (
+      {view === 'passes' && !isTruckPlaza && (
         <ErrorBoundary label="passes">
           <React.Suspense fallback={<SkeletonCards />}>
             <PassesTab
@@ -893,7 +897,7 @@ export function ALPRPropertyDetailPage({
 
       {/* Lot status (task F7): the state of the lot for the driver at the curb
           and the office at the desk. Apartments only; never under All. */}
-      {sectionFilter === 'lotstatus' && !isTruckPlaza && (
+      {view === 'lotstatus' && !isTruckPlaza && (
         <ErrorBoundary label="lot status">
           <LotStatusTab propertyId={propertyId} propertyName={property?.name || ''} onOpenRow={openLotRow} />
         </ErrorBoundary>
@@ -903,7 +907,7 @@ export function ALPRPropertyDetailPage({
           when people come. Apartments only; never under All; a partner
           session gets Live (no name/unit in its payload). "Request tow"
           hands the page the plate exactly as a pass does. */}
-      {sectionFilter === 'live' && !isTruckPlaza && (
+      {view === 'live' && !isTruckPlaza && (
         <ErrorBoundary label="live view">
           <React.Suspense fallback={<SkeletonCards />}>
             <LiveTab
@@ -915,7 +919,7 @@ export function ALPRPropertyDetailPage({
           </React.Suspense>
         </ErrorBoundary>
       )}
-      {sectionFilter === 'traffic' && !isTruckPlaza && (
+      {view === 'traffic' && !isTruckPlaza && (
         <ErrorBoundary label="traffic">
           <React.Suspense fallback={<SkeletonCards />}>
             <TrafficTab propertyId={propertyId} propertyName={property?.name || ''} />
@@ -1179,7 +1183,7 @@ export function ALPRPropertyDetailPage({
       {showSection('cameras') && features?.cameras === false && (
         <UpsellPanel feature="cameras" propertyName={property.name} propertyId={propertyId} />
       )}
-      {showSection('cameras') && isOwner && features?.cameras !== false && (
+      {(showSettings || showSection('cameras')) && isOwner && features?.cameras !== false && (
         <>
           <div className="pd-section-head">
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>
@@ -1407,7 +1411,7 @@ export function ALPRPropertyDetailPage({
           retries (status='dispatch_failed'). Nobody was paged and nothing
           retries, so this is the only place they surface. Owner-only; read-only
           escalation queue. */}
-      {isOwner && !requestsOnly && stuckDispatch.length > 0 && (
+      {isOwner && !requestsOnly && !showSettings && stuckDispatch.length > 0 && (
         <>
           <div className="pd-section-head">
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>
@@ -1443,7 +1447,7 @@ export function ALPRPropertyDetailPage({
 
       {/* Needs Review — match_status held for human decision before enforcement.
           Owner-only: partners don't approve flagged plate events. */}
-      {isOwner && !requestsOnly && (() => {
+      {isOwner && !requestsOnly && !showSettings && (() => {
         const reviewable = events.filter(e => ['low_confidence','review_needed','camera_suspended','overstay'].includes(e.match_status));
         if (reviewable.length === 0) return null;
         const statusLabel = {
