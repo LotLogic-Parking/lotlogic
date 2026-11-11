@@ -1054,11 +1054,19 @@ Deno.serve(async (req: Request) => {
       const cameraExitOrder  = (camera as { exit_order?:  number | null }).exit_order  ?? null;
       if (cameraEntryOrder != null || cameraExitOrder != null) {
         const cutoff = new Date(now.getTime() - DIRECTION_WINDOW_SECONDS * 1000).toISOString();
+        // Only real reads pair. A diagnostic row for a frame Plate Recognizer
+        // rejected (match_status sidecar_rejected, empty plate) is not the
+        // other camera "firing first": at Mayfield the exit camera sees the
+        // front of every entering car, logs a no-plate frame, and that used to
+        // turn the entry camera's real read into a "second-of-pair" that
+        // opened nothing (2026-11-11 15:12 ET, six reads at 84-100%, no visit).
         let priorQ = db
           .from("plate_events")
           .select("camera_id, alpr_cameras!inner(gate_id, entry_order, exit_order)")
           .eq("property_id", camera.property_id)
           .neq("camera_id", camera.id)
+          .neq("match_status", "sidecar_rejected")
+          .neq("plate_text", "")
           .gt("created_at", cutoff)
           .order("created_at", { ascending: false })
           .limit(1);
