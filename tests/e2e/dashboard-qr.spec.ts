@@ -18,7 +18,7 @@
  *   - the tile's canvas is NON-EMPTY once it has drawn, i.e. it has dark
  *     pixels, not a blank box — that only happens if the bundled `qrcode`
  *     module actually ran, so a missing/broken module fails this test too.
- *   - an apartment opens on its Requests section, where the QR tiles are not on
+ *   - an apartment opens on its Passes section, where the QR tiles are not on
  *     screen at all. Moving to another section MOUNTS fresh, blank canvases, and
  *     they have to be drawn then too — they used to stay white boxes.
  *   - each tile fits its column on a phone and on a tablet, with the QR square
@@ -156,13 +156,16 @@ async function mountPropertyDetail(
         }),
       ),
     );
-    render({ _role: 'owner', id: 'u1' });
+    // The owner "All" chip is a platform-admin surface since 2026-11-11 (a
+    // manager reaches the tiles under Settings, covered below); a test that
+    // opens on `all` mounts as an admin so the chip resolves.
+    render({ _role: 'owner', id: 'u1', _platformAdmin: section === 'all' });
     (window as unknown as Record<string, unknown>).__qrHarness = {
       hold() { gate = new Promise<void>((resolve) => { release = resolve; }); },
       release() { release(); },
       // Same property, same role, another account: the page reloads its data
       // (loadAll depends on user.id) and nothing the tiles depend on changes.
-      signInAs(id: string) { render({ _role: 'owner', id }); },
+      signInAs(id: string) { render({ _role: 'owner', id, _platformAdmin: section === 'all' }); },
     };
   }, { propertyId: PROPERTY_ID, qrCodeId, type: propertyType, section: initialSection ?? null });
 
@@ -266,11 +269,12 @@ test.describe('property QR codes @desktop-only', () => {
     await expect(page.locator('#qr-harness [data-testid="qr-unavailable"]')).toHaveCount(0);
   });
 
-  test('an apartment draws both codes after leaving Requests, where its tiles are not mounted', async ({ page }) => {
+  test('an apartment draws both codes once Settings opens, where a manager finds its tiles', async ({ page }) => {
     const detail = await mountPropertyDetail(page, { propertyType: 'apartment' });
-    // Requests is the apartment default and nothing else renders there.
+    // Passes is the apartment default (2026-11-11) and nothing else renders
+    // there; a manager has no "All" chip, the tiles live under Settings.
     await expect(detail.locator('.pd-qr-tile')).toHaveCount(0);
-    await detail.getByRole('button', { name: 'All', exact: true }).click();
+    await detail.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(detail.locator('.pd-qr-tile')).toHaveCount(2);
     await expect.poll(() => canvasHasInk(page, TILE_CANVAS(1)), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => canvasHasInk(page, TILE_CANVAS(2)), { timeout: 15_000 }).toBe(true);
