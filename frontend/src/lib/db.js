@@ -1176,6 +1176,12 @@ export const db = {
         // embed is ambiguous → 300. Pin the FK we mean (plate_events.session_id).
         .select('id, plate_text, normalized_plate, confidence, image_url, event_type, camera_id, created_at, visitor_pass_id, resident_plate_id, match_status, match_reason, matched_at, session_id, plate_sessions!plate_events_session_id_fkey(state)')
         .eq('property_id', propertyId)
+        // Only frames that read a plate. The pipeline also logs frames Plate
+        // Recognizer rejected (match_status sidecar_rejected, empty plate_text,
+        // 0%) for diagnostics; they are not detections and the office never
+        // wants them in this list (Gabe, 2026-11-11: "no more of these").
+        .neq('match_status', 'sidecar_rejected')
+        .neq('plate_text', '')
         .order('created_at', { ascending: false })
         .limit(limit);
       if (!error && data) return data;

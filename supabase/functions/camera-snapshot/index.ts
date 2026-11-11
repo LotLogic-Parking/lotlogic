@@ -6,7 +6,12 @@ import { extractFromRequest } from "./extract.ts";
 import { parsePath } from "./path.ts";
 import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit } from "./sessions.ts";
 import { handleTruckPlazaExit } from "./truck_plaza_exit.ts";
+import {
+  BURST_PR_CAP_DEFAULT, BURST_WINDOW_SECONDS_DEFAULT, countBurstProbes, findRecentlyClosedSession,
+  readMatchesSession, repointIfBetter, resultScore, withinBurstWindow, type ClosedSessionRow,
+} from "./best_frame.ts";
 import { isPlateHeld } from "./holds.ts";
+import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
 import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
@@ -158,6 +163,21 @@ const CAMERA_COOLDOWN_SECONDS = Number(Deno.env.get("CAMERA_COOLDOWN_SECONDS") ?
 // new frame) — guarantees a fresh re-confirmation every PR_LOCK_SECONDS
 // while a vehicle remains in front of the camera.
 const PR_LOCK_SECONDS = Number(Deno.env.get("PR_LOCK_SECONDS") ?? "180");
+
+// Best frame per session side (apartments; see best_frame.ts). For
+// BEST_FRAME_WINDOW_SECONDS after a session opens, up to BEST_FRAME_PR_CAP
+// more frames from the entry camera pay for a PR read and keep their photo
+// instead of inheriting blind; the sharpest one becomes the entry photo.
+// Frames in that window after a session closes attach to it as the exit
+// burst (instead of opening a phantom session); the sharpest becomes the
+// exit photo. Cap 0 turns the extra entry-side PR calls off; window 0 turns
+// the whole thing off.
+const BEST_FRAME_WINDOW_SECONDS = Number(Deno.env.get("BEST_FRAME_WINDOW_SECONDS") ?? String(BURST_WINDOW_SECONDS_DEFAULT));
+const BEST_FRAME_PR_CAP = Number(Deno.env.get("BEST_FRAME_PR_CAP") ?? String(BURST_PR_CAP_DEFAULT));
+// Cameras whose periodic "4GSolarCam/Snapshot" posts are dropped unread
+// (their plate frames arrive through the Plate Recognizer webhook instead;
+// see pr_webhook.ts). Comma-separated api_keys (MACs).
+const SKIP_SNAPSHOT_TOPIC_MACS = snapshotTopicSkipList(Deno.env.get("SKIP_SNAPSHOT_TOPIC_MACS"));
 // Pre-PR delay. Always wait this many ms before calling PR so any in-flight
 // PR call from a previous frame (parallel arrival from another camera, or
 // the previous frame from THIS camera that's still mid-PR) has a chance to
@@ -223,6 +243,14 @@ Deno.serve(async (req: Request) => {
 
     // Identify the camera. Path segment wins; otherwise fall back to whatever
     // the camera self-identifies as in the payload (Milesight → devMac).
+    // A Plate Recognizer webhook echoing one of this function's own PR calls
+    // (camera_id tagged :lotlogic, or our fixed filename): drop it here or
+    // every read would call PR again, forever.
+    const prHook = (extracted.rawMeta as { _pr_webhook?: PrWebhook } | null)?._pr_webhook;
+    if (prHook && isOwnCall(prHook)) {
+      return json(200, { ok: true, skipped: "own_pr_call", camera_id: prHook.cameraId });
+    }
+
     const cameraApiKey = pathApiKey ?? extracted.cameraHint;
     if (!cameraApiKey) {
       console.warn(`camera-snapshot reject reason=no_camera_identity source=${extracted.source} bytes=${extracted.bytes.byteLength}`);
@@ -269,6 +297,13 @@ Deno.serve(async (req: Request) => {
     // property", cameras only detect EXITS of registered vehicles. The
     // legacy session state machine below handles all other property
     // types (currently apartments only).
+    // Periodic Snapshot frames from a camera that feeds us through the PR
+    // webhook: pavement, no PR call, no ParkPow call. last_seen_at was just
+    // bumped above, so the camera still reads as alive.
+    if (SKIP_SNAPSHOT_TOPIC_MACS.has(String(camera.api_key).toLowerCase()) && isSnapshotTopicPost(extracted.rawMeta)) {
+      return json(200, { ok: true, skipped: "snapshot_topic", camera: camera.api_key });
+    }
+
     const propQ = await db
       .from("properties")
       .select("property_type")
@@ -707,7 +742,17 @@ Deno.serve(async (req: Request) => {
     // AND whose last_detected_at is within the cooldown window.
     if (CAMERA_COOLDOWN_SECONDS > 0) {
       const cameraSession = await findRecentSessionByCamera(db, camera.id, CAMERA_COOLDOWN_SECONDS);
-      if (cameraSession) {
+      // Entry burst: inside the best-frame window, and under the cap, this
+      // frame pays for its own PR read so it can compete for the entry
+      // photo (best_frame.ts). Past either, it inherits as before.
+      const burstProbe = cameraSession !== null
+        && BEST_FRAME_PR_CAP > 0
+        && withinBurstWindow(cameraSession.entered_at, new Date(), BEST_FRAME_WINDOW_SECONDS)
+        && (await countBurstProbes(db, cameraSession.id, "entry")) < BEST_FRAME_PR_CAP;
+      if (cameraSession && burstProbe) {
+        console.log(`best-frame probe: session=${cameraSession.id} camera=${camera.id} — calling PR for a competing entry frame`);
+      }
+      if (cameraSession && !burstProbe) {
         const nowDate = new Date();
         const ev = await db.from("plate_events").insert({
           camera_id: camera.id,
@@ -825,7 +870,8 @@ Deno.serve(async (req: Request) => {
       propertyType === "truck_plaza"
     );
 
-    const prResp = await callPlateRecognizer(bytesForRecognizers, cameraApiKey, wantMmc, PR_MMC_BACKOFF_MINUTES);
+    // camera_id tagged so the PR webhook can tell our call from the camera's own upload.
+    const prResp = await callPlateRecognizer(bytesForRecognizers, tagOwnCall(cameraApiKey), wantMmc, PR_MMC_BACKOFF_MINUTES);
     if (!prResp.ok) {
       console.warn("camera-snapshot PR call failed:", prResp.status, prResp.bodyText.slice(0, 200));
       return json(200, { ok: false, reason: "pr_call_failed", status: prResp.status });
@@ -1105,6 +1151,45 @@ Deno.serve(async (req: Request) => {
         session_id: sessionId,
       });
 
+      // Best frame (best_frame.ts): a burst frame whose read is the session's
+      // plate is stored WITH its photo under the session's plate text — its
+      // own read goes in raw_data._burst_read — and then competes for the
+      // side's photo pointer. Never rewrites the session plate, never opens
+      // or closes anything, never dispatches tow-confirm.
+      const burstRow = (sessionId: string, side: "entry" | "exit", plateText: string, normalizedSessionPlate: string, reason: string) => {
+        const base = baseEventRow(sessionId, "dedup_suppressed");
+        return {
+          ...base,
+          event_type: side,
+          plate_text: plateText,
+          normalized_plate: normalizedSessionPlate,
+          match_reason: reason,
+          matched_at: now.toISOString(),
+          raw_data: {
+            ...(base.raw_data as Record<string, unknown>),
+            _burst: true,
+            _burst_read: { plate: plateUpper, normalized, score: result.score },
+          },
+        };
+      };
+      const attachBurstFrame = async (
+        sessionId: string, side: "entry" | "exit", plateText: string, normalizedSessionPlate: string, reason: string,
+      ) => {
+        const ev = await db.from("plate_events")
+          .insert(burstRow(sessionId, side, plateText, normalizedSessionPlate, reason))
+          .select("id").single();
+        if (ev.error) throw ev.error;
+        const outcome = await repointIfBetter(db, sessionId, side, { id: ev.data.id, score: resultScore(result) }, now);
+        console.log(`best-frame ${side}: session=${sessionId} event=${ev.data.id} score=${resultScore(result).toFixed(2)} ${outcome}`);
+        return ev.data.id as string;
+      };
+      // The session this camera closed moments ago that this read belongs to,
+      // or null. Only inside the best-frame window.
+      const recentlyClosed = async (): Promise<ClosedSessionRow | null> =>
+        BEST_FRAME_WINDOW_SECONDS > 0
+          ? await findRecentlyClosedSession(db, camera.property_id, camera.id, normalized, now, BEST_FRAME_WINDOW_SECONDS)
+          : null;
+
       // Paired-read second-of-pair: log the event tied to the existing open
       // session if any, but skip session state mutation. The first-of-pair
       // already opened or closed the session. Without this guard, each
@@ -1143,6 +1228,13 @@ Deno.serve(async (req: Request) => {
           db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
         );
         if (!peekSession) {
+          const closed = await recentlyClosed();
+          if (closed) {
+            await attachBurstFrame(closed.id, "exit", closed.plate_text, closed.normalized_plate,
+              `exit burst: read "${plateUpper}" after session closed at ${closed.exited_at}`);
+            eventCount++;
+            continue;
+          }
           const ev = await db.from("plate_events")
             .insert(baseEventRow(null, "unmatched"))
             .select("id").single();
@@ -1203,9 +1295,18 @@ Deno.serve(async (req: Request) => {
           }
 
           // DEDUP — still within window. Continued presence.
-          const ev = await db.from("plate_events")
-            .insert(baseEventRow(openSession.id, "unmatched"))
-            .select().single();
+          // Inside the best-frame window a frame that read the session's
+          // plate is a competing entry photo (best_frame.ts); any other
+          // dedup read is logged as before.
+          const burstEntry = BEST_FRAME_WINDOW_SECONDS > 0
+            && withinBurstWindow(openSession.entered_at, now, BEST_FRAME_WINDOW_SECONDS)
+            && readMatchesSession(normalized, openSession.normalized_plate);
+          const ev = burstEntry
+            ? { error: null, data: { id: await attachBurstFrame(openSession.id, "entry", openSession.plate_text, openSession.normalized_plate,
+                `entry burst: read "${plateUpper}" ${Math.round((now.getTime() - new Date(openSession.entered_at).getTime()) / 1000)}s after entry`) } }
+            : await db.from("plate_events")
+                .insert(baseEventRow(openSession.id, "unmatched"))
+                .select().single();
           if (ev.error) throw ev.error;
           // Direction inference MUST run before the last_detected_at bump so
           // the silence-gap branch inside inferDirection sees the prior
@@ -1217,6 +1318,18 @@ Deno.serve(async (req: Request) => {
             .eq("id", openSession.id);
           dedupCount++;
           continue;
+        }
+
+        // Re-pass exit burst: the frame before this one closed the session
+        // on this camera; this one belongs to that exit, not to a new entry.
+        {
+          const closed = await recentlyClosed();
+          if (closed) {
+            await attachBurstFrame(closed.id, "exit", closed.plate_text, closed.normalized_plate,
+              `exit burst: read "${plateUpper}" after session closed at ${closed.exited_at}`);
+            eventCount++;
+            continue;
+          }
         }
 
         // Asymmetric session-opening guard. Single OCR'd reads with no

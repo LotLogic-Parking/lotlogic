@@ -146,7 +146,6 @@ export function counters(metrics) {
   const out = [];
   if (traffic) {
     out.push({ key: 'entries', label: 'Cars seen entering', value: String(n(traffic.entries_total)) });
-    out.push({ key: 'unique', label: 'Different plates', value: String(n(traffic.unique_plates)) });
   }
   out.push({ key: 'registrations', label: 'Passes filed', value: String(n(reg.total)) });
   out.push({ key: 'kinds', label: 'Short-term / long-term', value: `${n(reg.short_term)} / ${n(reg.long_term)}` });
