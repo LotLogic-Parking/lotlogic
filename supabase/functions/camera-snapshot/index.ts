@@ -18,6 +18,10 @@ import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
 import { extractMmc, mmcColumns, isMmcBlocked, handleMmcFailureStatus, type PrMmcData } from "./mmc.ts";
 
 const URL_SECRET = Deno.env.get("CAMERA_SNAPSHOT_URL_SECRET") ?? Deno.env.get("PR_INGEST_URL_SECRET") ?? "";
+// A second accepted secret for third-party callers (the Plate Recognizer
+// cloud webhook), so they never need the cameras' secret and can be cut
+// off on their own. Empty = not accepted.
+const URL_SECRET_2 = Deno.env.get("CAMERA_SNAPSHOT_URL_SECRET_2") ?? "";
 const PR_TOKEN = Deno.env.get("PLATE_RECOGNIZER_TOKEN") ?? "";
 // Self-hosted Plate Recognizer Snapshot SDK toggle. When this env is set
 // (e.g. https://parkpow-sdk.railway.app/v1/plate-reader/), camera-snapshot
@@ -234,7 +238,8 @@ Deno.serve(async (req: Request) => {
   if (SYSTEM_PAUSED) return json(200, { ok: true, paused: true });
 
   const { apiKey: pathApiKey, secret } = parsePath(new URL(req.url));
-  if (!URL_SECRET || secret !== URL_SECRET) return json(401, { ok: false, error: "unauthorized" });
+  const secretOk = !!secret && ((!!URL_SECRET && secret === URL_SECRET) || (!!URL_SECRET_2 && secret === URL_SECRET_2));
+  if (!secretOk) return json(401, { ok: false, error: "unauthorized" });
 
   try {
     const ctHdr = (req.headers.get("content-type") ?? "?").slice(0, 80);
