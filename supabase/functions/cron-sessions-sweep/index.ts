@@ -22,6 +22,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "@supabase/supabase-js";
 import { findStaleGroups, flushGroup } from "../camera-snapshot/weak_plate_reads.ts";
 import { handleSystemPaused, heartbeat, redactError } from "./heartbeat.ts";
+import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -36,6 +37,20 @@ const COOLDOWN_HOURS = Number(Deno.env.get("COOLDOWN_HOURS") ?? "24");
 // means we never fire violations on unregistered plates — they're noise
 // we discard.
 const GRACE_EXPIRY_MINUTES = Number(Deno.env.get("GRACE_EXPIRY_MINUTES") ?? "15");
+// Boot dispatch to LotLogic drivers at apartments (boot_dispatch.ts). Off
+// until BOOT_DRIVER_PHONES names at least one number.
+const BOOT_DRIVER_PHONES = parsePhoneList(Deno.env.get("BOOT_DRIVER_PHONES"));
+const GRACE_DISPATCH_MINUTES = Number(Deno.env.get("GRACE_DISPATCH_MINUTES") ?? String(GRACE_DISPATCH_MINUTES_DEFAULT));
+const BOOT_STALE_HOURS = Number(Deno.env.get("BOOT_STALE_HOURS") ?? String(BOOT_STALE_HOURS_DEFAULT));
+const bootDeps = (): BootDeps => {
+  const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
+  const authToken = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
+  const from = Deno.env.get("TWILIO_FROM_NUMBER") ?? "";
+  return {
+    db, phones: BOOT_DRIVER_PHONES, dispatchMinutes: GRACE_DISPATCH_MINUTES, staleHours: BOOT_STALE_HOURS,
+    twilio: accountSid && authToken && from ? { accountSid, authToken, from } : null,
+  };
+};
 
 // PRESENCE_EVIDENCE_MINUTES + MIN_DWELL_SECONDS removed 2026-04-29 in
 // PR #161 — gate-only properties (Charlotte) can never satisfy the
@@ -60,6 +75,8 @@ Deno.serve(async (_req: Request) => {
   if (SYSTEM_PAUSED) return await handleSystemPaused(db);
   try {
     const promoted = await registrationTransition();
+    const bootRegistered = await bootRegistrations(bootDeps());
+    const boot = await bootDispatch(bootDeps());
     const grace = await graceExpiry();
     const overstayExpired = await overstayExpiry();
     const passOverstay = await sweepUnexitedPassesForOverstay();
@@ -69,6 +86,7 @@ Deno.serve(async (_req: Request) => {
     const fanoutBudget = { remaining: DISPATCH_FANOUT_MAX_PER_TICK };
     const dispatch = await dispatchPendingViolations(fanoutBudget);
     const standDowns = await sweepPendingStandDowns(fanoutBudget);
+    const bootStandDown = await bootStandDowns(bootDeps());
     const closedRegistered = await closeRegistered();
     const closedResident = await closeResident();
     const closedExpired = await closeExpired();
@@ -77,6 +95,12 @@ Deno.serve(async (_req: Request) => {
     return json(200, {
       ok: true,
       promoted,
+      boot_dispatched: boot.dispatched,
+      boot_dispatch_failed: boot.failed,
+      boot_skipped_no_exit_camera: boot.skipped_no_exit_camera,
+      boot_registered: bootRegistered,
+      boot_stood_down: bootStandDown.stood_down,
+      boot_stale: bootStandDown.stale,
       grace_thrown_away: grace.thrown_away,
       overstay_expired: overstayExpired,
       pass_overstay_fired: passOverstay,
@@ -322,10 +346,14 @@ async function closeExpired(): Promise<number> {
   let closed = 0;
   for (const s of sessions) {
     let towConfirmed = false;
+    // A boot dispatch that ended (booted, stood down, or stale) gets no 24 h
+    // hold: a visitor who left before the driver arrived must be able to
+    // register that evening (review 2026-11-11).
+    let bootDispatched = false;
     if (s.violation_id) {
       const { data: v, error: vErr } = await db
         .from("alpr_violations")
-        .select("status, tow_confirmed_at")
+        .select("status, tow_confirmed_at, action_channel")
         .eq("id", s.violation_id)
         .maybeSingle();
       // maybeSingle (not single): a deleted violation returns null, not a throw,
@@ -341,6 +369,7 @@ async function closeExpired(): Promise<number> {
           (v.status && ["resolved", "dismissed", "no_tow"].includes(v.status));
         if (!resolved) continue;
         towConfirmed = v.tow_confirmed_at !== null;
+        bootDispatched = v.action_channel === BOOT_CHANNEL;
       }
     }
     // If we get here the session is either:
@@ -366,6 +395,7 @@ async function closeExpired(): Promise<number> {
       .eq("state", "expired");
     if (sUpd.error) throw sUpd.error;
 
+    if (bootDispatched) { closed++; continue; }
     const holdUntil = new Date(new Date(exitedAt).getTime() + COOLDOWN_HOURS * 60 * 60 * 1000);
     const hIns = await db.from("plate_holds").insert({
       property_id: s.property_id,
@@ -764,6 +794,10 @@ async function sweepPendingStandDowns(budget: { remaining: number }): Promise<{ 
     .not("dispatched_at", "is", null)
     .not("left_before_tow_at", "is", null)
     .is("left_before_tow_email_sent_at", null)
+    // A boot dispatch went to LotLogic's drivers, not the tow partner; its
+    // stand-down is bootStandDowns' (boot_dispatch.ts). NULL action_channel
+    // rows must stay in, hence the OR rather than a bare neq.
+    .or(`action_channel.is.null,action_channel.neq.${BOOT_CHANNEL}`)
     .limit(50);
   if (error) {
     console.warn(`sweepPendingStandDowns select failed: ${error.message}`);
