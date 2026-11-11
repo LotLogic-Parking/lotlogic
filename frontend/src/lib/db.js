@@ -1188,6 +1188,24 @@ export const db = {
     }
     return [];
   },
+  /**
+   * One row per car per pass for the Traffic tab's Visits list: the sessions
+   * that began in the last `days`, newest first, each with the entry photo and
+   * the exit photo the pipeline chose for it (plate_sessions.entry/exit_plate_event_id).
+   */
+  async getVisits(propertyId, days = 30, limit = 200) {
+    if (!supabase || !propertyId) return [];
+    const since = new Date(Date.now() - Math.max(1, Number(days) || 30) * 86400000).toISOString();
+    const { data, error } = await supabase
+      .from('plate_sessions')
+      .select('id, plate_text, normalized_plate, entered_at, exited_at, state, entry_camera_id, exit_camera_id, visitor_pass_id, resident_plate_id, entry:plate_events!plate_sessions_entry_plate_event_id_fkey(image_url, confidence, created_at), exit:plate_events!plate_sessions_exit_plate_event_id_fkey(image_url, confidence, created_at)')
+      .eq('property_id', propertyId)
+      .gte('entered_at', since)
+      .order('entered_at', { ascending: false })
+      .limit(limit);
+    if (error || !data) return [];
+    return data;
+  },
   async getOpenSessions(propertyId) {
     if (supabase) {
       const { data, error } = await supabase
