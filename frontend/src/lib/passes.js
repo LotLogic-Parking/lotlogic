@@ -39,12 +39,14 @@ export function splitPresence(onProperty) {
   return { residents, visitors };
 }
 
-/** A LotLogic driver has been dispatched to this car and it is still here. */
+/**
+ * A LotLogic driver has been dispatched to this car and nothing has cancelled
+ * it yet. The backend says so (`dispatched`, an open boot dispatch on the
+ * session's violation). `state === 'expired'` alone is not it: cooldown and
+ * overstay violations go to the tow partner and look the same on the session.
+ */
 export function isDispatched(row) {
-  if (!row || typeof row !== 'object') return false;
-  if (row.dispatched === true) return true;
-  if (row.violation_id) return true;
-  return row.state === 'expired';
+  return !!row && typeof row === 'object' && row.dispatched === true;
 }
 
 /** Minutes the car still has to register, 0 when the window has passed. */

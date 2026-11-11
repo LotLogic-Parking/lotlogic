@@ -42,18 +42,18 @@ test('visitorStatus: a short-term pass shows time left, red inside the last hour
   assert.deepEqual(visitorStatus(visitorPass({ pass: { kind: 'short_term', status: 'active' } })), { tone: 'green', text: 'Short-term', flag: false });
 });
 
-test('Dispatched wins over everything, on either side', () => {
-  assert.equal(isDispatched(unknown({ state: 'expired' })), true);
-  assert.equal(isDispatched(unknown({ violation_id: 'v1' })), true);
+test('Dispatched wins over everything, on either side, and only on the backend flag', () => {
   assert.equal(isDispatched(unknown({ dispatched: true })), true);
+  assert.equal(isDispatched(unknown({ state: 'expired' })), false);   // a partner tow looks like this too
+  assert.equal(isDispatched(unknown({ violation_id: 'v1' })), false);
   assert.equal(isDispatched(unknown()), false);
-  assert.deepEqual(visitorStatus(unknown({ state: 'expired' })), { tone: 'red', text: 'Dispatched', flag: true });
-  assert.deepEqual(residentStatus(resident({ violation_id: 'v2' })), { tone: 'red', text: 'Dispatched', flag: true });
+  assert.deepEqual(visitorStatus(unknown({ dispatched: true })), { tone: 'red', text: 'Dispatched', flag: true });
+  assert.deepEqual(residentStatus(resident({ dispatched: true })), { tone: 'red', text: 'Dispatched', flag: true });
   assert.deepEqual(residentStatus(resident()), { tone: 'info', text: 'Resident', flag: false });
 });
 
 test('passesSummary counts residents, visitors, flagged and registering', () => {
-  const split = splitPresence([resident(), visitorPass(), unknown({ minutes_here: 3 }), unknown({ minutes_here: 20 }), unknown({ state: 'expired', minutes_here: 2 })]);
+  const split = splitPresence([resident(), visitorPass(), unknown({ minutes_here: 3 }), unknown({ minutes_here: 20 }), unknown({ dispatched: true, minutes_here: 2 })]);
   assert.deepEqual(passesSummary(split), { residents: 1, visitors: 4, flagged: 2, registering: 1 });
   assert.deepEqual(passesSummary(null), { residents: 0, visitors: 0, flagged: 0, registering: 0 });
 });
