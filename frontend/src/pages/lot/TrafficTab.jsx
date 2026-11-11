@@ -4,7 +4,7 @@ import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { asOfLine } from '../../lib/lotStatus.js';
 import { db } from '../../lib/db.js';
 import { PhotoFrame } from './Photo.jsx';
-import { VISITS_EMPTY, visitRows, visitsSummary } from '../../lib/visits.js';
+import { VISITS_EMPTY, visitMetrics, visitRows, visitsSummary } from '../../lib/visits.js';
 import {
   DAY_OPTIONS,
   DEFAULT_DAYS,
@@ -70,8 +70,9 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
   const series = useMemo(() => pickSeries(data), [data]);
   const bars = useMemo(() => hourBars(series.by_hour), [series]);
   const grid = useMemo(() => heatGrid(series), [series]);
-  const tiles = useMemo(() => counters(data), [data]);
   const rows = useMemo(() => visitRows(visits), [visits]);
+  const stats = useMemo(() => visitMetrics(visits), [visits]);
+  const tiles = useMemo(() => counters(data, stats), [data, stats]);
   const total = series.by_hour.reduce((a, b) => a + b, 0);
   const asOf = data?.as_of;
 

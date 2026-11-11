@@ -137,22 +137,25 @@ export function fmtMinutes(minutes) {
 const n = (v) => (Number.isFinite(v) ? v : 0);
 
 /**
- * The counters above the charts, each a labelled number. Camera counters
- * only when the camera answered; registration counters always.
+ * The counters above the charts (Gabe, 2026-11-11: visits per day, busiest
+ * hours, average dwell — not the registration counters). From the visits
+ * themselves (`visitMetrics`), with the camera's hourly series for the
+ * busiest-hour note. Without a camera the registrations series is charted
+ * and the one counter is passes filed.
  */
-export function counters(metrics) {
+export function counters(metrics, visitStats = null) {
   const reg = metrics?.registrations && typeof metrics.registrations === 'object' ? metrics.registrations : {};
-  const traffic = metrics?.traffic && typeof metrics.traffic === 'object' ? metrics.traffic : null;
-  const out = [];
-  if (traffic) {
-    out.push({ key: 'entries', label: 'Cars seen entering', value: String(n(traffic.entries_total)) });
+  const source = pickSeries(metrics).source;
+  if (source !== 'camera') {
+    return [{ key: 'registrations', label: 'Passes filed', value: String(n(reg.total)) }];
   }
-  out.push({ key: 'registrations', label: 'Passes filed', value: String(n(reg.total)) });
-  out.push({ key: 'kinds', label: 'Short-term / long-term', value: `${n(reg.short_term)} / ${n(reg.long_term)}` });
-  out.push({ key: 'decisions', label: 'Approved / denied', value: `${n(reg.approved)} / ${n(reg.rejected)}` });
-  const median = fmtMinutes(reg.median_minutes_to_decision);
-  out.push({ key: 'median', label: 'Typical time to a decision', value: median || '—' });
-  return out;
+  const v = visitStats && typeof visitStats === 'object' ? visitStats : {};
+  const avg = fmtMinutes(v.avgStayMinutes);
+  return [
+    { key: 'visits', label: 'Visits', value: String(n(v.total)) },
+    { key: 'today', label: 'Today', value: String(n(v.today)) },
+    { key: 'stay', label: 'Average stay', value: avg || '—' },
+  ];
 }
 
 /** "Busiest: Fri, 5 PM" from a series; "" when nothing was counted. */

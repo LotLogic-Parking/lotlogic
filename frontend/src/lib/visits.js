@@ -66,6 +66,46 @@ export function visitRows(sessions, now = Date.now()) {
     .sort((a, b) => (ms(b.in.at) ?? 0) - (ms(a.in.at) ?? 0));
 }
 
+/** Local calendar day (ET is what the office thinks in; the server's day buckets agree). */
+function dayKey(iso) {
+  const d = iso ? new Date(iso) : null;
+  if (!d || !Number.isFinite(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+/**
+ * The Traffic tab's numbers, from the visits themselves (Gabe, 2026-11-11:
+ * visits per day, busiest hours, average dwell; not the registration
+ * counters). `avgStayMinutes` and `medianStayMinutes` count closed visits
+ * only; a car still here has no stay yet. Null when there is nothing to
+ * average.
+ */
+export function visitMetrics(sessions, now = Date.now()) {
+  const list = Array.isArray(sessions) ? sessions.filter(s => s && s.entered_at) : [];
+  const stays = list
+    .filter(s => s.exited_at)
+    .map(s => (ms(s.exited_at) - ms(s.entered_at)) / 60000)
+    .filter(m => Number.isFinite(m) && m >= 0)
+    .sort((a, b) => a - b);
+  const perDayMap = new Map();
+  for (const s of list) {
+    const k = dayKey(s.entered_at);
+    if (k) perDayMap.set(k, (perDayMap.get(k) || 0) + 1);
+  }
+  const perDay = [...perDayMap.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, count]) => ({ day, count }));
+  const todayKey = dayKey(new Date(now).toISOString());
+  const mid = stays.length ? (stays.length % 2 ? stays[(stays.length - 1) / 2] : (stays[stays.length / 2 - 1] + stays[stays.length / 2]) / 2) : null;
+  return {
+    total: list.length,
+    today: perDayMap.get(todayKey) || 0,
+    stillHere: list.filter(s => !s.exited_at).length,
+    closed: stays.length,
+    avgStayMinutes: stays.length ? stays.reduce((a, b) => a + b, 0) / stays.length : null,
+    medianStayMinutes: mid,
+    perDay,
+  };
+}
+
 /** "12 visits · 3 still here" for the card head. */
 export function visitsSummary(rows) {
   const n = rows.length;

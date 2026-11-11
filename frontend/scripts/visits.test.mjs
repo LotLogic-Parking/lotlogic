@@ -1,7 +1,7 @@
 // Tests for frontend/src/lib/visits.js - one row per car per pass.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VISITS_EMPTY, visitRow, visitRows, visitsSummary } from '../src/lib/visits.js';
+import { VISITS_EMPTY, visitMetrics, visitRow, visitRows, visitsSummary } from '../src/lib/visits.js';
 
 const NOW = new Date('2026-11-11T20:30:00Z').getTime(); // 3:30 PM ET
 
@@ -54,4 +54,21 @@ test('visitsSummary counts visits and the ones still here', () => {
   assert.equal(visitsSummary(visitRows([LEFT], NOW)), '1 visit');
   assert.equal(visitsSummary([]), '');
   assert.ok(VISITS_EMPTY.length > 0);
+});
+
+test('visitMetrics: visits per day in ET, today, average and median stay over closed visits only', () => {
+  const m = visitMetrics([
+    HERE,
+    LEFT,
+    { ...LEFT, id: 's3', entered_at: '2026-11-10T22:00:00Z', exited_at: '2026-11-10T22:30:00Z' }, // Nov 10 5 PM ET, 30 m
+    { ...LEFT, id: 's4', entered_at: '2026-11-11T03:00:00Z', exited_at: '2026-11-11T05:00:00Z' }, // Nov 10 10 PM ET, 120 m
+  ], NOW);
+  assert.equal(m.total, 4);
+  assert.equal(m.today, 2);
+  assert.equal(m.stillHere, 1);
+  assert.equal(m.closed, 3);
+  assert.equal(Math.round(m.avgStayMinutes), Math.round((83 + 30 + 120) / 3));
+  assert.equal(m.medianStayMinutes, 83);
+  assert.deepEqual(m.perDay, [{ day: '2026-11-10', count: 2 }, { day: '2026-11-11', count: 2 }]);
+  assert.deepEqual(visitMetrics(null, NOW), { total: 0, today: 0, stillHere: 0, closed: 0, avgStayMinutes: null, medianStayMinutes: null, perDay: [] });
 });
