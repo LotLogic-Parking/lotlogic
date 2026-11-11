@@ -36,6 +36,8 @@ export type Extracted = {
   };
 };
 
+import { parsePrWebhookJson } from "./pr_webhook.ts";
+
 const COMMON_IMAGE_FIELDS = ["upload", "image", "file", "snapshot", "picture", "photo"];
 
 export async function extractFromRequest(req: Request): Promise<Extracted | null> {
@@ -72,11 +74,17 @@ export async function extractFromRequest(req: Request): Promise<Extracted | null
     } catch {
       return null;
     }
+    // Plate Recognizer cloud webhook "with image": a `json` field carrying
+    // PR's result (data.camera_id = what the camera sent = our api_key) next
+    // to the `upload` JPEG. The identity comes from that json; the image goes
+    // through the pipeline like any camera frame. See pr_webhook.ts.
+    const hook = parsePrWebhookJson(form.get("json"));
+    const rawMeta = hook ? { _pr_webhook: hook } : null;
     for (const name of COMMON_IMAGE_FIELDS) {
       const v = form.get(name);
       if (v instanceof Blob && v.size > 0) {
         const bytes = new Uint8Array(await v.arrayBuffer());
-        return { bytes, cameraHint: null, source: "multipart", rawMeta: null };
+        return { bytes, cameraHint: hook?.cameraId ?? null, source: "multipart", rawMeta };
       }
     }
     // fallback: first blob

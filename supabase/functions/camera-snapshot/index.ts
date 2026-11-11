@@ -11,6 +11,7 @@ import {
   readMatchesSession, repointIfBetter, resultScore, withinBurstWindow, type ClosedSessionRow,
 } from "./best_frame.ts";
 import { isPlateHeld } from "./holds.ts";
+import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
 import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
@@ -173,6 +174,10 @@ const PR_LOCK_SECONDS = Number(Deno.env.get("PR_LOCK_SECONDS") ?? "180");
 // the whole thing off.
 const BEST_FRAME_WINDOW_SECONDS = Number(Deno.env.get("BEST_FRAME_WINDOW_SECONDS") ?? String(BURST_WINDOW_SECONDS_DEFAULT));
 const BEST_FRAME_PR_CAP = Number(Deno.env.get("BEST_FRAME_PR_CAP") ?? String(BURST_PR_CAP_DEFAULT));
+// Cameras whose periodic "4GSolarCam/Snapshot" posts are dropped unread
+// (their plate frames arrive through the Plate Recognizer webhook instead;
+// see pr_webhook.ts). Comma-separated api_keys (MACs).
+const SKIP_SNAPSHOT_TOPIC_MACS = snapshotTopicSkipList(Deno.env.get("SKIP_SNAPSHOT_TOPIC_MACS"));
 // Pre-PR delay. Always wait this many ms before calling PR so any in-flight
 // PR call from a previous frame (parallel arrival from another camera, or
 // the previous frame from THIS camera that's still mid-PR) has a chance to
@@ -238,6 +243,14 @@ Deno.serve(async (req: Request) => {
 
     // Identify the camera. Path segment wins; otherwise fall back to whatever
     // the camera self-identifies as in the payload (Milesight → devMac).
+    // A Plate Recognizer webhook echoing one of this function's own PR calls
+    // (camera_id tagged :lotlogic, or our fixed filename): drop it here or
+    // every read would call PR again, forever.
+    const prHook = (extracted.rawMeta as { _pr_webhook?: PrWebhook } | null)?._pr_webhook;
+    if (prHook && isOwnCall(prHook)) {
+      return json(200, { ok: true, skipped: "own_pr_call", camera_id: prHook.cameraId });
+    }
+
     const cameraApiKey = pathApiKey ?? extracted.cameraHint;
     if (!cameraApiKey) {
       console.warn(`camera-snapshot reject reason=no_camera_identity source=${extracted.source} bytes=${extracted.bytes.byteLength}`);
@@ -284,6 +297,13 @@ Deno.serve(async (req: Request) => {
     // property", cameras only detect EXITS of registered vehicles. The
     // legacy session state machine below handles all other property
     // types (currently apartments only).
+    // Periodic Snapshot frames from a camera that feeds us through the PR
+    // webhook: pavement, no PR call, no ParkPow call. last_seen_at was just
+    // bumped above, so the camera still reads as alive.
+    if (SKIP_SNAPSHOT_TOPIC_MACS.has(String(camera.api_key).toLowerCase()) && isSnapshotTopicPost(extracted.rawMeta)) {
+      return json(200, { ok: true, skipped: "snapshot_topic", camera: camera.api_key });
+    }
+
     const propQ = await db
       .from("properties")
       .select("property_type")
@@ -850,7 +870,8 @@ Deno.serve(async (req: Request) => {
       propertyType === "truck_plaza"
     );
 
-    const prResp = await callPlateRecognizer(bytesForRecognizers, cameraApiKey, wantMmc, PR_MMC_BACKOFF_MINUTES);
+    // camera_id tagged so the PR webhook can tell our call from the camera's own upload.
+    const prResp = await callPlateRecognizer(bytesForRecognizers, tagOwnCall(cameraApiKey), wantMmc, PR_MMC_BACKOFF_MINUTES);
     if (!prResp.ok) {
       console.warn("camera-snapshot PR call failed:", prResp.status, prResp.bodyText.slice(0, 200));
       return json(200, { ok: false, reason: "pr_call_failed", status: prResp.status });
