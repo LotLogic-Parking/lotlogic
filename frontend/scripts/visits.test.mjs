@@ -1,7 +1,7 @@
 // Tests for frontend/src/lib/visits.js - one row per car per pass.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VISITS_EMPTY, visitMetrics, visitRow, visitRows, visitsSummary } from '../src/lib/visits.js';
+import { VISITS_EMPTY, busiestHour, passesMetrics, visitMetrics, visitRow, visitRows, visitsSummary } from '../src/lib/visits.js';
 
 const NOW = new Date('2026-11-11T20:30:00Z').getTime(); // 3:30 PM ET
 
@@ -71,4 +71,24 @@ test('visitMetrics: visits per day in ET, today, average and median stay over cl
   assert.equal(m.medianStayMinutes, 83);
   assert.deepEqual(m.perDay, [{ day: '2026-11-10', count: 2 }, { day: '2026-11-11', count: 2 }]);
   assert.deepEqual(visitMetrics(null, NOW), { total: 0, today: 0, stillHere: 0, closed: 0, avgStayMinutes: null, medianStayMinutes: null, perDay: [] });
+});
+
+test('busiestHour: the ET hour most visits began in; the earlier hour on a tie; null with none', () => {
+  const at = (iso) => ({ id: iso, entered_at: iso });
+  // 20:12Z and 20:40Z are 3 PM ET; 13:05Z is 8 AM ET.
+  assert.equal(busiestHour([at('2026-11-11T20:12:00Z'), at('2026-11-11T20:40:00Z'), at('2026-11-11T13:05:00Z')]), 15);
+  assert.equal(busiestHour([at('2026-11-11T20:12:00Z'), at('2026-11-11T13:05:00Z')]), 8);
+  assert.equal(busiestHour([]), null);
+  assert.equal(busiestHour(null), null);
+  assert.equal(busiestHour([{ entered_at: 'junk' }]), null);
+});
+
+test('passesMetrics: visits today, busiest hour, average stay; dashes before any visit', () => {
+  const left = { id: 'l', entered_at: '2026-11-10T20:00:00Z', exited_at: '2026-11-10T21:00:00Z' };
+  assert.deepEqual(passesMetrics([HERE, left], NOW), [
+    { key: 'today', label: 'Visits today', value: '1' },
+    { key: 'busiest', label: 'Busiest hour', value: '3 PM' },
+    { key: 'stay', label: 'Average stay', value: '1 h 00 m' },
+  ]);
+  assert.deepEqual(passesMetrics([], NOW).map(t => t.value), ['0', '—', '—']);
 });

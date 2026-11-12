@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getPermits, getPresence } from '../../lib/requestsApi.js';
+import { db } from '../../lib/db.js';
+import { passesMetrics } from '../../lib/visits.js';
 import { useNowTick } from '../../hooks.js';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { asOfLine } from '../../lib/lotStatus.js';
@@ -22,13 +24,17 @@ import { PersonRow } from './LiveTab.jsx';
 // LotLogic driver has been dispatched. Each row opens, one at a time, into
 // the same panel Live uses: the entry photo wide (tap it again to expand),
 // contact, vehicle, pass, history, visits, documents, and the actions.
-// Polls every 30 s while the page is visible. No camera: says so.
+// Under the columns, one line of numbers from the last week of visits:
+// visits today, busiest hour, average stay (Gabe, 2026-11-11: the office
+// gets no Traffic page). Polls every 30 s while the page is visible. No
+// camera: says so.
 //
 // Gabe, 2026-11-11: "passes is good, we need residents on site now, and
 // active visitors on the right hand side with their information and a clean
 // photo that can be expanded of when they entered."
 
 const REFRESH_MS = 30000;
+const METRIC_DAYS = 7;
 
 function Column({ id, title, count, empty, rows, rowProps, status }) {
   return (
@@ -51,6 +57,7 @@ function Column({ id, title, count, empty, rows, rowProps, status }) {
 export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenPass, onOpenRegistrations, needsReview = 0 }) {
   const [data, setData] = useState(null);
   const [permits, setPermits] = useState(null);
+  const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState(null);
   const [openKey, setOpenKey] = useState(null);
@@ -68,9 +75,13 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
     const mine = ++token.current;
     setLoading(true);
     try {
-      const res = await getPresence(propertyId);
+      const [res, vis] = await Promise.all([
+        getPresence(propertyId),
+        db.getVisits(propertyId, METRIC_DAYS).catch(() => []),
+      ]);
       if (mine !== token.current) return;
       setData(res);
+      setVisits(vis);
       setLoadErr(null);
       lastLoad.current = Date.now();
     } catch (e) {
@@ -110,6 +121,7 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
   const hasCameras = data?.has_cameras !== false;
   const split = useMemo(() => splitPresence(data?.on_property), [data]);
   const summary = useMemo(() => passesSummary(split), [split]);
+  const tiles = useMemo(() => passesMetrics(visits, now), [visits, now]);
 
   const toggle = useCallback((key) => setOpenKey(current => (current === key ? null : key)), []);
   const closeDocView = useCallback(() => setDocView(null), []);
@@ -133,6 +145,7 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
   };
 
   let body;
+  let metrics = null;
   if (!data && loadErr) {
     body = (
       <div className="pq-empty pq-empty--error">
@@ -152,6 +165,16 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
         <Column id="visitors" title={PASSES_COPY.visitors} count={summary.visitors} empty={PASSES_COPY.no_visitors}
           rows={split.visitors} rowProps={rowProps} status={visitorStatus} />
       </div>
+    );
+    metrics = (
+      <dl className="ls-tiles ls-tiles--wrap" aria-label="This week" data-testid="passes-metrics" style={{ marginTop: 14 }}>
+        {tiles.map(t => (
+          <div key={t.key} className="ls-tile" data-testid={`passes-tile-${t.key}`}>
+            <dt className="ls-tile-l">{t.label}</dt>
+            <dd className="ls-tile-n">{t.value}</dd>
+          </div>
+        ))}
+      </dl>
     );
   }
 
@@ -175,6 +198,7 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
         )}
 
         {body}
+        {metrics}
 
         {onOpenRegistrations && (
           <div className="ls-foot">

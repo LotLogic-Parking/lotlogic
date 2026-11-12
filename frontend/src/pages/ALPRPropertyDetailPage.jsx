@@ -263,14 +263,25 @@ export function sectionChipsFor(propertyType, features, { isPartner = false, isA
       lockedById.get('log') || { id: 'log', label: 'Parking passes' },
     ], { isPartner }), { isPartner });
   }
-  // The office (Gabe, 2026-11-11: "get to the essentials"): Passes is the
-  // home screen, Traffic the visit log, Requests a side feature. The
-  // registration queue (approve / deny / history) opens from the Passes
-  // screen and never shows as a chip. A platform admin keeps "All" for the
-  // owner surfaces (QR tiles, cameras, review queues).
+  // The office (Gabe, 2026-11-11: "reduce and simplify"): the page is the
+  // Passes screen and nothing else. Requests, the registration queue and any
+  // locked chip sit behind one "More" button in the header (`more: true`),
+  // next to Settings (QR codes, cameras, rules), which is page state rather
+  // than a section. No Traffic chip: its numbers are one line under the
+  // Passes columns.
+  if (!isAdmin) {
+    return [
+      { id: 'passes', label: 'Passes' },
+      { id: 'requests', label: 'Requests', more: true },
+      { ...(lockedById.get('log') || { id: 'log', label: 'Registrations' }), more: true },
+      ...locked.filter(c => c.id !== 'log').map(c => ({ ...c, more: true })),
+    ];
+  }
+  // A platform admin keeps "All" for the owner surfaces (QR tiles, cameras,
+  // review queues) and Traffic, the full visit log.
   return withActivityChips(withLotStatusChip([
     { id: 'passes', label: 'Passes' },
-    ...(isAdmin ? [{ id: 'all', label: 'All' }] : []),
+    { id: 'all', label: 'All' },
     { ...(lockedById.get('log') || { id: 'log', label: 'Parking passes' }), hidden: true },
     ...locked.filter(c => c.id !== 'log'),
     { id: 'requests', label: 'Requests' },
@@ -340,6 +351,8 @@ export function ALPRPropertyDetailPage({
   // QR codes + camera registration are owner-only surfaces. Partners see
   // the property + plates + parking log but not the operational chrome.
   const isOwner = user?._role === 'owner';
+  // A manager's session (the office): one screen, the rest behind "More".
+  const managerOnly = isOwner && !user?._platformAdmin;
   const { addToast } = useToast();
   const [property, setProperty] = useState(null);
   const [plates, setPlates] = useState([]);
@@ -353,6 +366,10 @@ export function ALPRPropertyDetailPage({
   const [newApiKey, setNewApiKey] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // The office's "More" menu (Gabe, 2026-11-11): the chip row shows only
+  // while it is open. Opens on its own when the page lands on a section
+  // other than Passes (a deep link, or "Request tow" from a row).
+  const [moreOpen, setMoreOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState(null);
   // What the Requests composer opens pre-filled with (`{kind, plate, nonce}`),
   // set by "Request tow" on a parking pass. The nonce makes the same plate
@@ -404,15 +421,17 @@ export function ALPRPropertyDetailPage({
     sectionResolvedRef.current = true;
     let stored = null;
     try { stored = localStorage.getItem(sectionStorageKey(property.property_type)); } catch { /* blocked storage */ }
-    setSectionFilter(resolveSectionFilter({
+    const next = resolveSectionFilter({
       propertyType: property.property_type,
       features,
       initialSection,
       stored,
       isPartner: user?._role === 'partner',
       isAdmin: !!user?._platformAdmin,
-    }));
-  }, [property, features, initialSection, user?._role, user?._platformAdmin]);
+    });
+    setSectionFilter(next);
+    if (managerOnly && next !== 'passes') setMoreOpen(true);
+  }, [property, features, initialSection, user?._role, user?._platformAdmin, managerOnly]);
   useEffect(() => {
     if (!sectionFilter || !property) return;
     try { localStorage.setItem(sectionStorageKey(property.property_type), sectionFilter); } catch { /* blocked storage */ }
@@ -432,6 +451,15 @@ export function ALPRPropertyDetailPage({
   // such button. Same role rule RequestsSection applies to its composer.
   const canRequestTow = ['admin', 'manager'].includes(property?.role);
 
+  // Every move between sections goes through here: Settings closes, and for
+  // the office anything but Passes opens the More menu so the chips are there
+  // to come back with.
+  const goSection = useCallback((id) => {
+    setShowSettings(false);
+    setSectionFilter(id);
+    if (managerOnly && id !== 'passes') setMoreOpen(true);
+  }, [managerOnly]);
+
   // A Lot status row tap: a hold goes to Requests; a pass goes to the Parking
   // Passes queue, searched for the plate (it reads `?status=&q=` as it mounts).
   const openTarget = useCallback((target) => {
@@ -441,9 +469,9 @@ export function ALPRPropertyDetailPage({
         window.history.replaceState(window.history.state, '', `${pathname}${writeQueueQuery(search, target)}${hash}`);
       } catch { /* history blocked: the section still opens, unsearched */ }
     }
-    setSectionFilter(target.section);
+    goSection(target.section);
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
-  }, []);
+  }, [goSection]);
   const openLotRow = useCallback((row, list) => openTarget(rowTarget(row, list)), [openTarget]);
   // "Open pass" on a Live row: the Visitor passes queue, Approved, searched
   // for the plate (the queue selects the first match as it mounts).
@@ -456,9 +484,9 @@ export function ALPRPropertyDetailPage({
   // the composer stays the attestation — nothing is posted from here.
   const requestTow = useCallback((row) => {
     setRequestPrefill({ kind: 'tow', plate: plateText(row), nonce: Date.now() });
-    setSectionFilter('requests');
+    goSection('requests');
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
-  }, []);
+  }, [goSection]);
 
   const loadAll = useCallback(async () => {
     if (!propertyId) return;
@@ -806,18 +834,31 @@ export function ALPRPropertyDetailPage({
             <div style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>{property.address || 'No address'}</div>
             <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',padding:'2px 7px',borderRadius:20,background:isTruckPlaza?'rgba(251,146,60,.12)':'rgba(96,165,250,.12)',color:isTruckPlaza?'#fb923c':'var(--info-ink)',border:isTruckPlaza?'1px solid rgba(251,146,60,.3)':'1px solid rgba(96,165,250,.3)',display:'inline-block',marginTop:6}}>{isTruckPlaza ? 'Truck Plaza' : 'Apartment'}</div>
           </div>
-          <button
-            onClick={() => {
-              setSettingsDraft(settingsBaseline(property));
-              setShowSettings(!showSettings);
-            }}
-            className="pd-share-btn"
-          >{showSettings ? 'Close' : 'Settings'}</button>
+          {managerOnly ? (
+            <button
+              onClick={() => {
+                if (moreOpen) { setMoreOpen(false); setShowSettings(false); setSectionFilter('passes'); }
+                else setMoreOpen(true);
+              }}
+              className="pd-share-btn"
+              aria-expanded={moreOpen}
+            >{moreOpen ? 'Close' : 'More'}</button>
+          ) : (
+            <button
+              onClick={() => {
+                setSettingsDraft(settingsBaseline(property));
+                setShowSettings(!showSettings);
+              }}
+              className="pd-share-btn"
+            >{showSettings ? 'Close' : 'Settings'}</button>
+          )}
         </div>
       </div>
 
       {/* Top section filter — pick what's visible below. Sticks to the top of
-          the property page; default "All" shows everything. */}
+          the property page. The office sees it only while "More" is open;
+          Passes is its page. */}
+      {(!managerOnly || moreOpen) && (
       <div data-testid="pd-section-chips" style={{
         position: 'sticky', top: 'calc(58px + env(safe-area-inset-top))', zIndex: 30,
         display: 'flex', gap: 6, flexWrap: 'wrap',
@@ -827,13 +868,18 @@ export function ALPRPropertyDetailPage({
         borderBottom: '1px solid var(--border-subtle, transparent)',
       }}>
         {(() => {
-          const chips = sectionChipsFor(property?.property_type, features, { isPartner: user?._role === 'partner', isAdmin: !!user?._platformAdmin });
-          return chips.filter(c => !c.hidden).map(c => {
-            const active = sectionFilter === c.id;
+          const chips = sectionChipsFor(property?.property_type, features, { isPartner: user?._role === 'partner', isAdmin: !!user?._platformAdmin })
+            .filter(c => !c.hidden);
+          if (managerOnly) chips.push({ id: 'settings', label: 'Settings' });
+          return chips.map(c => {
+            const active = view === c.id;
             const locked = c.locked === true;
             return (
               <button key={c.id}
-                onClick={() => setSectionFilter(c.id)}
+                onClick={() => {
+                  if (c.id === 'settings') { setSettingsDraft(settingsBaseline(property)); setShowSettings(true); return; }
+                  goSection(c.id);
+                }}
                 aria-describedby={locked ? lockedChipDescId : undefined}
                 style={{
                   fontSize: 12, fontWeight: 800,
@@ -860,6 +906,7 @@ export function ALPRPropertyDetailPage({
             points at (spec §5.6). One node, not one per chip. */}
         <span id={lockedChipDescId} style={{position:'absolute',width:1,height:1,padding:0,margin:-1,overflow:'hidden',clip:'rect(0,0,0,0)',whiteSpace:'nowrap'}}>Not included yet</span>
       </div>
+      )}
 
       {/* The You're-in card (spec §3.4 step 5) — the signup landing only
           (`/app?property=…&section=requests&firstrun=1`), above the Requests
@@ -889,7 +936,7 @@ export function ALPRPropertyDetailPage({
               propertyName={property?.name || ''}
               onOpenPass={openPass}
               onRequestTow={canRequestTow ? requestTow : undefined}
-              onOpenRegistrations={() => setSectionFilter('log')}
+              onOpenRegistrations={() => goSection('log')}
             />
           </React.Suspense>
         </ErrorBoundary>
