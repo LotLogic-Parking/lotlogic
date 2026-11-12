@@ -767,9 +767,13 @@ export async function insertSession(
     vehicle_type: input.vehicleType,
     vehicle_make:             input.vehicleMake            ?? null,
     vehicle_model:            input.vehicleModel           ?? null,
-    vehicle_make_confidence:  input.vehicleMakeConfidence  ?? null,
     vehicle_color:            input.vehicleColor           ?? null,
-    vehicle_color_confidence: input.vehicleColorConfidence ?? null,
+    // vehicle_make_confidence / vehicle_color_confidence are NOT columns in
+    // production (migration 027_vehicle_mmc_columns sits in _archive and was
+    // never applied). Writing them made every insert 400 since 2026-06-04:
+    // no visit opened anywhere after 2026-05-12, and the caller's rollback
+    // deleted the entry read, so a 100% plate read left no trace (Mayfield,
+    // 2026-11-12 10:52 ET). Confidences stay on the event's raw_data.
     entry_camera_id: input.entryCameraId,
     entry_plate_event_id: input.entryPlateEventId,
     entered_at: input.enteredAt.toISOString(),
