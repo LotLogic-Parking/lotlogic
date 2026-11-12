@@ -100,11 +100,9 @@ function PersonPanel({ row, list, propertyId, permitsRow, now, onZoom, onOpenPas
   );
 }
 
-// `chipOverride` ({tone, text}) lets the Passes screen put its own tag on the
-// row (the 15-minute countdown, Dispatched) in place of the pass chip.
-export function PersonRow({ row, list, open, onToggle, panelId, now, chipOverride = null, ...panel }) {
-  const chip = chipOverride || passChip(row.pass);
-  const ticking = chipOverride ? '' : timeLeftText(row.pass, now);
+function PersonRow({ row, list, open, onToggle, panelId, now, ...panel }) {
+  const chip = passChip(row.pass);
+  const ticking = timeLeftText(row.pass, now);
   const chipText = ticking && chip.tone !== 'info' && row.pass?.kind !== 'long_term' ? `Short-term · ${ticking}` : chip.text;
   const ref = useRef(null);
   useEffect(() => {

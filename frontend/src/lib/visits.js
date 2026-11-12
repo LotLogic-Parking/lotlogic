@@ -11,7 +11,6 @@
 
 import { fmtETStamp } from './holdTime.js';
 import { spanPhrase } from './presence.js';
-import { fmtMinutes, hourLabel } from './traffic.js';
 
 export const VISITS_EMPTY = 'No visits yet. The next car the camera sees entering appears here with its photo, and again when it leaves.';
 
@@ -114,39 +113,4 @@ export function visitsSummary(rows) {
   if (n === 0) return '';
   const visits = `${n} visit${n === 1 ? '' : 's'}`;
   return here ? `${visits} · ${here} still here` : visits;
-}
-
-/** Hour of day in ET (0-23) a visit began, or null. */
-function hourET(iso) {
-  const d = iso ? new Date(iso) : null;
-  if (!d || !Number.isFinite(d.getTime())) return null;
-  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(d));
-  return Number.isInteger(h) && h >= 0 && h <= 23 ? h : null;
-}
-
-/** The ET hour most visits began in, or null when there were none; the earlier hour on a tie. */
-export function busiestHour(sessions) {
-  const counts = new Array(24).fill(0);
-  for (const s of Array.isArray(sessions) ? sessions : []) {
-    const h = hourET(s?.entered_at);
-    if (h !== null) counts[h] += 1;
-  }
-  const max = Math.max(0, ...counts);
-  return max === 0 ? null : counts.indexOf(max);
-}
-
-/**
- * The one line of numbers under the Passes columns (Gabe, 2026-11-11: the
- * office gets "visits today, busiest hour, average stay" and no Traffic
- * page). From the last week of visits; "—" where there is nothing yet.
- */
-export function passesMetrics(sessions, now = Date.now()) {
-  const m = visitMetrics(sessions, now);
-  const hour = busiestHour(sessions);
-  const avg = fmtMinutes(m.avgStayMinutes);
-  return [
-    { key: 'today', label: 'Visits today', value: String(m.today) },
-    { key: 'busiest', label: 'Busiest hour', value: hour === null ? '—' : hourLabel(hour) },
-    { key: 'stay', label: 'Average stay', value: avg || '—' },
-  ];
 }

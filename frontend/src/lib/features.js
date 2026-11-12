@@ -98,11 +98,6 @@ export function navTabsFor(role, properties, opts = {}) {
       { id: 'account', label: 'Account' },
     ];
   }
-  // A property manager (an owner who is not a platform admin) sees their
-  // property and their account, nothing else: no Analytics, no Tow truck
-  // (Gabe, 2026-11-11: "Managers see only their property"). Money surfaces
-  // are App.jsx's extras and still follow showMoney.
-  if (opts.managerOnly) return OWNER_PORTAL_ONLY_TABS.map(t => ({ ...t }));
   const list = Array.isArray(properties) ? properties : [];
   const portalOnly = list.length > 0 && list.every(isPortalOnly);
   return (portalOnly ? OWNER_PORTAL_ONLY_TABS : OWNER_TABS).map(t => ({ ...t }));

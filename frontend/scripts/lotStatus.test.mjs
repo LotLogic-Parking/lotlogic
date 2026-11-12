@@ -130,18 +130,17 @@ import { LOT_STATUS_CHIP, passTarget, rowTarget, withLotStatusChip } from '../sr
 
 const APARTMENT_CHIPS = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }, { id: 'log', label: 'Visitor passes' }, { id: 'qr', label: 'QR codes', locked: true }];
 
-test('withLotStatusChip: first for a partner; the office never gets it (Gabe, 2026-11-11)', () => {
+test('withLotStatusChip: first for a partner, right after Visitor passes for an owner', () => {
   assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS, { isPartner: true }).map(c => c.id), ['lotstatus', 'requests', 'all', 'log', 'qr']);
-  assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS).map(c => c.id), ['requests', 'all', 'log', 'qr']);
+  assert.deepEqual(withLotStatusChip(APARTMENT_CHIPS).map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'qr']);
   assert.equal(LOT_STATUS_CHIP.label, 'Lot status');
 });
 
-test('withLotStatusChip: never twice for a partner, and strips a stray one for the office', () => {
-  const once = withLotStatusChip(APARTMENT_CHIPS, { isPartner: true });
-  assert.equal(withLotStatusChip(once, { isPartner: true }).filter(c => c.id === 'lotstatus').length, 1);
-  assert.deepEqual(withLotStatusChip([{ id: 'all', label: 'All' }, LOT_STATUS_CHIP]).map(c => c.id), ['all']);
-  assert.deepEqual(withLotStatusChip(null, { isPartner: true }).map(c => c.id), ['lotstatus']);
-  assert.deepEqual(withLotStatusChip(null).map(c => c.id), []);
+test('withLotStatusChip: never twice, and lands last when Visitor passes is absent', () => {
+  const once = withLotStatusChip(APARTMENT_CHIPS);
+  assert.equal(withLotStatusChip(once).filter(c => c.id === 'lotstatus').length, 1);
+  assert.deepEqual(withLotStatusChip([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'lotstatus']);
+  assert.deepEqual(withLotStatusChip(null).map(c => c.id), ['lotstatus']);
 });
 
 test('rowTarget: holds open Requests, passes open the queue searched by plate', () => {
@@ -155,9 +154,9 @@ test('rowTarget: holds open Requests, passes open the queue searched by plate', 
 // ── The manager's activity chips (build plan F1) ─────────────
 import { ACTIVITY_CHIPS, SOLO_SECTION_IDS, withActivityChips } from '../src/lib/lotStatus.js';
 
-test('withActivityChips: the office gets Traffic only (Passes is its who-is-here); no Violations tab', () => {
+test('withActivityChips: Live and Traffic right after Lot status for the office; no Violations tab', () => {
   const office = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
-  assert.deepEqual(office.map(c => c.id), ['requests', 'all', 'log', 'qr', 'traffic']);
+  assert.deepEqual(office.map(c => c.id), ['requests', 'all', 'log', 'lotstatus', 'live', 'traffic', 'qr']);
   assert.deepEqual(ACTIVITY_CHIPS.map(c => c.label), ['Live', 'Traffic']);
   assert.ok(!office.some(c => /violation|enforcement/i.test(c.label)), 'enforcement is the tow company\'s job, not a tab');
 });
@@ -169,14 +168,13 @@ test('withActivityChips: a partner gets Live, not Traffic', () => {
 
 test('withActivityChips: never twice, and lands last when Lot status is absent', () => {
   const once = withActivityChips(withLotStatusChip(APARTMENT_CHIPS));
-  assert.equal(withActivityChips(once).filter(c => c.id === 'traffic').length, 1);
-  assert.deepEqual(withActivityChips([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'traffic']);
-  assert.deepEqual(withActivityChips(null).map(c => c.id), ['traffic']);
-  assert.deepEqual(withActivityChips(null, { isPartner: true }).map(c => c.id), ['live']);
+  assert.equal(withActivityChips(once).filter(c => c.id === 'live').length, 1);
+  assert.deepEqual(withActivityChips([{ id: 'all', label: 'All' }]).map(c => c.id), ['all', 'live', 'traffic']);
+  assert.deepEqual(withActivityChips(null).map(c => c.id), ['live', 'traffic']);
 });
 
 test('the activity sections stand alone, like Requests and Lot status (never under All)', () => {
-  assert.deepEqual([...SOLO_SECTION_IDS], ['passes', 'requests', 'lotstatus', 'live', 'traffic']);
+  assert.deepEqual([...SOLO_SECTION_IDS], ['requests', 'lotstatus', 'live', 'traffic']);
 });
 
 test('timeline: camera sessions read "Seen entering" / "Seen leaving" (build plan B5)', () => {
