@@ -222,12 +222,12 @@ export const LOT_STATUS_CHIP = Object.freeze({ id: 'lotstatus', label: 'Lot stat
  * chip for an owner or office session. Apartments only; the caller passes the
  * apartment chip list.
  */
+// Lot status is the tow partner's surface (Gabe, 2026-11-11: "tow partner
+// only"); the office never gets the chip.
 export function withLotStatusChip(chips, { isPartner = false } = {}) {
   const list = (Array.isArray(chips) ? chips : []).filter(c => c.id !== LOT_STATUS_CHIP.id);
   if (isPartner) return [LOT_STATUS_CHIP, ...list];
-  const at = list.findIndex(c => c.id === 'log');
-  if (at < 0) return [...list, LOT_STATUS_CHIP];
-  return [...list.slice(0, at + 1), LOT_STATUS_CHIP, ...list.slice(at + 1)];
+  return list;
 }
 
 /**
@@ -242,10 +242,13 @@ export const ACTIVITY_CHIPS = Object.freeze([
   Object.freeze({ id: 'traffic', label: 'Traffic' }),
 ]);
 
-export function withActivityChips(chips, { isPartner = false } = {}) {
+// The office's "who is here" is the Passes home screen, so it gets Traffic
+// only; a partner keeps Live (Gabe, 2026-11-11).
+// A classic office page (features.js isClassicOffice) keeps both, as before.
+export function withActivityChips(chips, { isPartner = false, classic = false } = {}) {
   const ids = new Set(ACTIVITY_CHIPS.map(c => c.id));
   const list = (Array.isArray(chips) ? chips : []).filter(c => !ids.has(c.id));
-  const add = ACTIVITY_CHIPS.filter(c => !isPartner || c.id !== 'traffic');
+  const add = ACTIVITY_CHIPS.filter(c => (isPartner ? c.id !== 'traffic' : classic ? true : c.id !== 'live'));
   const at = list.findIndex(c => c.id === LOT_STATUS_CHIP.id);
   if (at < 0) return [...list, ...add];
   return [...list.slice(0, at + 1), ...add, ...list.slice(at + 1)];
@@ -255,7 +258,7 @@ export function withActivityChips(chips, { isPartner = false } = {}) {
  * Sections that stand alone on the page: when one of these is the chip, no
  * other surface renders beside it (and none of them sits under "All").
  */
-export const SOLO_SECTION_IDS = Object.freeze(['requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
+export const SOLO_SECTION_IDS = Object.freeze(['passes', 'requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
 
 /**
  * What a row tap opens. A hold goes to the Requests section (the request

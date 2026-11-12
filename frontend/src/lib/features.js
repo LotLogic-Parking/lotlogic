@@ -48,6 +48,20 @@ const OWNER_TABS = [
   { id: 'account', label: 'Account' },
 ];
 
+// Properties that keep the classic office page (Gabe, 2026-11-11: "CHANGE
+// STEVENSONS BACK TO HOW IT WAS THIS WAS FOR MEMORIAL AND FUTURE
+// PROPERTIES"). Everything else — Mayfield Memorial and every property added
+// after it — gets the Passes screen, the More menu and the trimmed nav.
+export const CLASSIC_OFFICE_PROPERTY_IDS = new Set([
+  'af974dbe-5836-4a10-9dc8-d5f12e5cb9cc', // Stevensons Apartments
+]);
+
+/** True for a property (row or id) that keeps the page as it was before 2026-11-11. */
+export function isClassicOffice(property) {
+  const id = typeof property === 'string' ? property : property?.id;
+  return !!id && CLASSIC_OFFICE_PROPERTY_IDS.has(String(id).toLowerCase());
+}
+
 const OWNER_PORTAL_ONLY_TABS = [
   { id: 'lots', label: 'Properties' },
   { id: 'account', label: 'Account' },
@@ -98,6 +112,11 @@ export function navTabsFor(role, properties, opts = {}) {
       { id: 'account', label: 'Account' },
     ];
   }
+  // A property manager (an owner who is not a platform admin) sees their
+  // property and their account, nothing else: no Analytics, no Tow truck
+  // (Gabe, 2026-11-11: "Managers see only their property"). Money surfaces
+  // are App.jsx's extras and still follow showMoney.
+  if (opts.managerOnly) return OWNER_PORTAL_ONLY_TABS.map(t => ({ ...t }));
   const list = Array.isArray(properties) ? properties : [];
   const portalOnly = list.length > 0 && list.every(isPortalOnly);
   return (portalOnly ? OWNER_PORTAL_ONLY_TABS : OWNER_TABS).map(t => ({ ...t }));

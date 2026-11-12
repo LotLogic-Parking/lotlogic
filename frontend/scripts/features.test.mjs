@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { navTabsFor, isPortalOnly, partnerRequestsReady, KNOWN_TAB_IDS, isKnownTab, homeTabFor } from '../src/lib/features.js';
+import { navTabsFor, isPortalOnly, partnerRequestsReady, KNOWN_TAB_IDS, isKnownTab, homeTabFor, isClassicOffice, CLASSIC_OFFICE_PROPERTY_IDS } from '../src/lib/features.js';
 
 const ids = tabs => tabs.map(t => t.id);
 const labelOf = (tabs, id) => tabs.find(t => t.id === id)?.label;
@@ -159,4 +159,14 @@ test('an owner nav ignores a member role', () => {
 test('homeTabFor: a Truck lands on Requests, everyone else on Lots', () => {
   assert.equal(homeTabFor('driver'), 'requests');
   for (const r of ['admin', 'dispatcher', null, undefined]) assert.equal(homeTabFor(r), 'lots', String(r));
+});
+
+test('isClassicOffice: Stevensons keeps the classic page; everything else gets the office screen (Gabe, 2026-11-11)', () => {
+  const stevensons = 'af974dbe-5836-4a10-9dc8-d5f12e5cb9cc';
+  assert.ok(CLASSIC_OFFICE_PROPERTY_IDS.has(stevensons));
+  assert.equal(isClassicOffice({ id: stevensons, name: 'Stevensons Apartments' }), true);
+  assert.equal(isClassicOffice(stevensons.toUpperCase()), true);
+  assert.equal(isClassicOffice({ id: '09d94552-49d6-49a9-ab54-338975b927af', name: 'Mayfield Memorial Apartments' }), false);
+  assert.equal(isClassicOffice(null), false);
+  assert.equal(isClassicOffice({}), false);
 });
