@@ -4,7 +4,7 @@ import { makeR2Uploader } from "../pr-ingest/r2.ts";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
 import { extractFromRequest } from "./extract.ts";
 import { parsePath } from "./path.ts";
-import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit } from "./sessions.ts";
+import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit, plateSimilar } from "./sessions.ts";
 import { handleTruckPlazaExit } from "./truck_plaza_exit.ts";
 import {
   BURST_PR_CAP_DEFAULT, BURST_WINDOW_SECONDS_DEFAULT, countBurstProbes, findRecentlyClosedSession,
@@ -1083,19 +1083,29 @@ Deno.serve(async (req: Request) => {
         // opened nothing (2026-11-11 15:12 ET, six reads at 84-100%, no visit).
         let priorQ = db
           .from("plate_events")
-          .select("camera_id, alpr_cameras!inner(gate_id, entry_order, exit_order)")
+          .select("camera_id, plate_text, normalized_plate, alpr_cameras!inner(gate_id, entry_order, exit_order)")
           .eq("property_id", camera.property_id)
           .neq("camera_id", camera.id)
           .neq("match_status", "sidecar_rejected")
           .neq("plate_text", "")
           .gt("created_at", cutoff)
           .order("created_at", { ascending: false })
-          .limit(1);
+          .limit(3);
         if (cameraGateId) {
           priorQ = priorQ.eq("alpr_cameras.gate_id", cameraGateId);
         }
         const { data: priorAtGate } = await priorQ;
-        const priorRow = (priorAtGate ?? [])[0];
+        // Only the same car pairs. A busy apartment gate carries both
+        // directions at once: on 2026-11-12 08:16 ET the exit camera read a
+        // van leaving and, a second later, the entry camera read a different
+        // car coming in; paired by time alone, the entry was dropped as "the
+        // other camera already opened this". A read of some other plate is
+        // not this car firing first.
+        const priorRow = (priorAtGate ?? []).find((r) => {
+          const pr = String((r as { normalized_plate?: string | null; plate_text?: string | null }).normalized_plate
+            || (r as { plate_text?: string | null }).plate_text || "").toUpperCase();
+          return pr !== "" && (pr === normalized || plateSimilar(pr, normalized, true));
+        });
         if (priorRow) {
           isPairedRead = true;
           // Direction comes from comparing per-direction firing order. The
@@ -1235,12 +1245,21 @@ Deno.serve(async (req: Request) => {
         const openSession = await findSimilarOpenSession(
           db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
         );
-        const ev = await db.from("plate_events")
-          .insert(baseEventRow(openSession?.id ?? null, "unmatched"))
-          .select("id").single();
-        if (ev.error) throw ev.error;
-        eventCount++;
-        continue;
+        if (openSession) {
+          const ev = await db.from("plate_events")
+            .insert(baseEventRow(openSession.id, "unmatched"))
+            .select("id").single();
+          if (ev.error) throw ev.error;
+          eventCount++;
+          continue;
+        }
+        // No session for this plate: the first-of-pair did not open one (a
+        // car stopped at the gate shows the exit camera its front plate
+        // first, which is filed as a stray exit). Gabe, 2026-11-12: "for
+        // entry, only a plate read should open it" — this read is that
+        // plate read, so it opens the visit as a plain entry below.
+        isPairedRead = false;
+        console.log(`paired entry with no session: opening on this read plate=${normalized} camera=${camera.id}`);
       }
 
       // Exit-pattern fall-through: if we got here with direction="exit" and
