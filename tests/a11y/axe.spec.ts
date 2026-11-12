@@ -225,7 +225,10 @@ test.describe('accessibility @a11y', () => {
     const card = page.locator('[data-testid="property-card"], .lot-card').first();
     if (await card.count()) {
       await card.click();
-      // The chip row resolves once the property row lands.
+      // A manager's chip row sits behind "More" (2026-11-11); an admin's
+      // resolves once the property row lands.
+      const more = page.getByRole('button', { name: 'More', exact: true });
+      if (await more.count()) await more.first().click();
       const chip = page.getByRole('button', { name: 'Requests', exact: true });
       if (await chip.count()) await chip.first().click();
     }
