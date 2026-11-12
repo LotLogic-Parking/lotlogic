@@ -3466,6 +3466,13 @@
     .ls--blue .pq-banner { background: var(--ll-blue-tint); border-color: rgba(37,99,235,.35); color: var(--ll-text); }
     .ls--blue .pq-btn--quiet { color: var(--ll-link); }
 
+    /* Passes: residents on the property (left) and visitors here (right). One
+       column on a phone. */
+    .ls-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 760px) { .ls-cols { grid-template-columns: 1fr; } }
+    .ls-col { background: var(--ll-white, #fff); border: 1px solid var(--ll-line, #E2E8F0); border-radius: 14px; padding: 14px 16px; min-width: 0; }
+    .ls-col .ls-people { margin: 0; padding: 0; }
+    .ls-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
     /* Traffic: the source line, a card per chart, the bar strip, the heat grid. */
     /* Traffic › Visits: one row per car per pass, entry photo then exit photo. */
     .ls-visits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
