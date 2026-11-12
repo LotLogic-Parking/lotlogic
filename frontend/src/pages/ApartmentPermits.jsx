@@ -91,7 +91,7 @@ function replaceQuery(state) {
   } catch { /* history blocked: the view still works, it just will not survive a refresh */ }
 }
 
-export function ApartmentPermits({ property, onRequestTow }) {
+export function ApartmentPermits({ property, onRequestTow, title = 'Visitor passes' }) {
   const propertyId = property?.id;
   const propertyName = property?.name || '';
   const cap = capOf(property);
@@ -504,8 +504,10 @@ export function ApartmentPermits({ property, onRequestTow }) {
         <div className="pq-sr" role="status" aria-live="polite">{announcement}</div>
 
         <div className="pq-head" hidden={phoneDetail}>
-          {/* Mirrors the chip (Gabe, 2026-11-07: "parking passes should be visitor passes"). */}
-          <h2 className="pq-title">Visitor passes</h2>
+          {/* Mirrors the chip (Gabe, 2026-11-07: "parking passes should be visitor passes").
+              The office reaches this from its "Registrations" chip and the queue
+              holds long-term passes too, so it is titled to match that chip. */}
+          <h2 className="pq-title">{title}</h2>
           <div className="pq-controls">
             <div className="pq-segments" role="group" aria-label="Show requests">
               {SEGMENTS.map(s => (
@@ -535,7 +537,7 @@ export function ApartmentPermits({ property, onRequestTow }) {
                   enterKeyHint="search"
                 />
               </label>
-              <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={() => setFeedbackOpen(true)}>Feedback</button>
+              <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={() => setFeedbackOpen(true)}>Report a problem</button>
               <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={refresh}>
                 {loading && loaded ? 'Refreshing…' : 'Refresh'}
               </button>

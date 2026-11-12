@@ -214,8 +214,12 @@ function ChangePasswordSection() {
   );
 }
 
-export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setAutoRefresh, refreshInterval, setRefreshInterval, showFees = true, isPlatformAdmin = false, properties = [], onPropertyAdded }) {
+export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setAutoRefresh, refreshInterval, setRefreshInterval, showFees = true, isPlatformAdmin = false, properties = [], onPropertyAdded, office = false, theme = 'light', onToggleTheme }) {
   const isOwner = user._role === 'owner';
+  // The leasing office (App.jsx officeMode, Victor 2026-11-12) sees its name,
+  // its team, Dark mode, password and sign out. The owner/system rows below
+  // (role, Add a property, refresh timing, violation chime, database/version)
+  // describe things the office cannot do or does not need.
   const [notifyPrefs, setNotifyPrefs] = useState(() => NotifyManager.getPrefs());
   const [notifyPerm, setNotifyPerm] = useState(() => NotifyManager.getPermission());
   const [showAddProperty, setShowAddProperty] = useState(false);
@@ -257,14 +261,16 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
             background: isOwner ? 'rgba(59,130,246,.12)' : 'rgba(139,92,246,.12)',
             color: isOwner ? '#60a5fa' : '#a78bfa',
             border: `1px solid ${isOwner ? 'rgba(59,130,246,.2)' : 'rgba(139,92,246,.2)'}`}}>
-            {isOwner ? 'Lot Owner' : 'Towing Partner'}
+            {office ? 'Leasing office' : isOwner ? 'Lot Owner' : 'Towing Partner'}
           </span>
         </div>
       </div>
 
       {/* Account info */}
+      {(!office || user.business_name || user.phone) && (
       <div className="settings-section">
         <div className="settings-section-title">Account</div>
+        {!office && (
         <div className="settings-row">
           <div className="settings-row-info">
             <div className="settings-row-label">Role</div>
@@ -272,6 +278,7 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
           </div>
           <div className="settings-row-value" style={{color: isOwner ? '#60a5fa' : '#a78bfa'}}>{isOwner ? 'Owner' : 'Towing Partner'}</div>
         </div>
+        )}
         {user.business_name && (
           <div className="settings-row">
             <div className="settings-row-info"><div className="settings-row-label">Organization</div></div>
@@ -285,6 +292,7 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
           </div>
         )}
       </div>
+      )}
 
       {/* Team, per property (spec §5.7) — owners only. A tow company's
           people are the partner Team section further down. */}
@@ -298,7 +306,7 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
           prop — it posts `partner_id: null` (the bare-`/join` "Not listed"
           fallback) rather than a client-supplied partner id; see
           AddPropertyForm.jsx's header comment. */}
-      {isOwner && (
+      {isOwner && !office && (
         <div className="settings-section">
           <button
             onClick={() => setShowAddProperty(true)}
@@ -351,7 +359,28 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
           entirely when the backend hasn't shipped the Slack routes yet. */}
       {!isOwner && <SlackSection user={user} />}
 
+      {office && (
+        <div className="settings-section">
+          <div className="settings-section-title">Display</div>
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="settings-row-label">Dark mode</div>
+              <div className="settings-row-desc">Easier on the eyes at night</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={theme === 'dark'}
+              aria-label="Dark mode"
+              onClick={() => onToggleTheme?.()}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+            ><ToggleSwitch on={theme === 'dark'} onChange={() => {}} /></button>
+          </div>
+        </div>
+      )}
+
       {/* App settings */}
+      {!office && <>
       <div className="settings-section">
         <div className="settings-section-title">App</div>
         <div className="settings-row">
@@ -455,6 +484,7 @@ export function AccountPage({ user, isImpersonating, onLogout, autoRefresh, setA
           <div className="settings-row-value">5.0.0</div>
         </div>
       </div>
+      </>}
 
       {isImpersonating ? (
         <div className="settings-section">

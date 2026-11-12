@@ -35,12 +35,17 @@ export function ALPRPropertiesPage({
   // pending property needs the 6-digit code first. Without it the default
   // no-op leaves the composer's "Confirm your email" line with nothing to open.
   onNeedVerify,
+  // The leasing office (App.jsx `officeMode`): no Archive, no Add a property.
+  // `singleProperty`: the office has one property, so its page has no
+  // "Back to Lots" — there is no list worth going back to.
+  office = false,
+  singleProperty = false,
 }) {
   const { addToast } = useToast();
   // Property deletion cascades to plates, cameras and passes. Partners enforce
   // lots, they don't own them — and an admin impersonating a partner arrives
   // here with _role === 'partner' too, so this single check covers both.
-  const canDelete = user?._role === 'owner';
+  const canDelete = user?._role === 'owner' && !office;
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   // Door (a) — "Add a property" opens AddPropertyForm as a modal, with no
@@ -56,6 +61,12 @@ export function ALPRPropertiesPage({
   // Lots page can explain an empty list instead of showing "No lots yet".
   const [rejectedProperties, setRejectedProperties] = useState([]);
   const [selectedId, setSelectedId] = useState(initialSelectedId);
+  // App.jsx learns the property list from `/auth/me` after this page has
+  // mounted, so a one-property office's `initialSelectedId` can arrive a
+  // moment late. Open it then too, unless something is already open.
+  useEffect(() => {
+    if (initialSelectedId) setSelectedId(prev => prev || initialSelectedId);
+  }, [initialSelectedId]);
   // KPI counts per property_id — { [propId]: { openJobs, noReg, overstays, registered } }
   const [kpiCounts, setKpiCounts] = useState({});
   // Drill-down state: { propId, drill: 'noreg' | 'registered' }
@@ -199,7 +210,7 @@ export function ALPRPropertiesPage({
 
   if (selectedId) return <ErrorBoundary label="this property"><React.Suspense fallback={<SkeletonCards />}><ALPRPropertyDetailPage
     propertyId={selectedId}
-    onBack={() => setSelectedId(null)}
+    onBack={singleProperty ? null : () => setSelectedId(null)}
     user={user}
     // This list's own `/auth/me` row for the open property — the detail
     // page's `db.getProperty` read is a raw table row with no computed
@@ -236,7 +247,7 @@ export function ALPRPropertiesPage({
     <div className="page-enter">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <div style={{fontSize:16,fontWeight:800,color:'var(--text-primary)'}}>Lots</div>
-        {user?._role !== 'partner' && (
+        {user?._role !== 'partner' && !office && (
           <button onClick={() => setShowAddProperty(true)} style={{background:'rgba(74,222,128,.12)',color:'var(--text-primary)',border:'1px solid rgba(74,222,128,.3)',borderRadius:8,padding:'6px 14px',fontSize:12,fontWeight:700,cursor:'pointer'}}>+ Add a property</button>
         )}
       </div>

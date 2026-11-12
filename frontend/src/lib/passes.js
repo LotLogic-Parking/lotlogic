@@ -24,7 +24,8 @@ export const PASSES_COPY = Object.freeze({
   visitors: 'Visitors here',
   no_residents: 'No residents on the property right now.',
   no_visitors: 'No visitors right now. The next car the camera sees appears here within a minute, with its photo.',
-  no_camera: 'Once a camera is registered under Settings, everyone who drives in appears here within a minute.',
+  // The office cannot register cameras (Victor, 2026-11-12): LotLogic installs them.
+  no_camera: 'Once LotLogic installs a camera here, everyone who drives in appears on this screen within a minute.',
 });
 
 const isLongTerm = (row) => row?.pass?.kind === 'long_term' && row?.pass?.status !== 'pending';
