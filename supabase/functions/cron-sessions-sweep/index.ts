@@ -22,6 +22,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "@supabase/supabase-js";
 import { findStaleGroups, flushGroup } from "../camera-snapshot/weak_plate_reads.ts";
 import { handleSystemPaused, heartbeat, redactError } from "./heartbeat.ts";
+import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision } from "./grace_policy.ts";
 import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -37,6 +38,9 @@ const COOLDOWN_HOURS = Number(Deno.env.get("COOLDOWN_HOURS") ?? "24");
 // means we never fire violations on unregistered plates — they're noise
 // we discard.
 const GRACE_EXPIRY_MINUTES = Number(Deno.env.get("GRACE_EXPIRY_MINUTES") ?? "15");
+// Apartments only: an unregistered visit stays on the office's screen until
+// the exit camera reads it leaving; this is the "nobody has seen it" cap.
+const APARTMENT_GRACE_STALE_HOURS = Number(Deno.env.get("APARTMENT_GRACE_STALE_HOURS") ?? String(APARTMENT_GRACE_STALE_HOURS_DEFAULT));
 // Boot dispatch to LotLogic drivers at apartments (boot_dispatch.ts). Off
 // until BOOT_DRIVER_PHONES names at least one number.
 const BOOT_DRIVER_PHONES = parsePhoneList(Deno.env.get("BOOT_DRIVER_PHONES"));
@@ -170,9 +174,12 @@ async function registrationTransition(): Promise<number> {
 // fire a violation in the old apartment-style model; that branch is gone.
 async function graceExpiry(): Promise<{ thrown_away: number }> {
   const cutoff = new Date(Date.now() - GRACE_EXPIRY_MINUTES * 60 * 1000).toISOString();
+  // Plaza visits are thrown away at the expiry minute; an apartment visit
+  // stays open for the office (grace_policy.ts), so the property type rides
+  // along and the decision is per row.
   const { data: sessions, error } = await db
     .from("plate_sessions")
-    .select("id, last_detected_at, entered_at")
+    .select("id, last_detected_at, entered_at, properties(property_type)")
     .eq("state", "grace")
     .is("exited_at", null)
     .lt("entered_at", cutoff);
@@ -180,8 +187,19 @@ async function graceExpiry(): Promise<{ thrown_away: number }> {
   if (!sessions || sessions.length === 0) return { thrown_away: 0 };
 
   let thrownAway = 0;
-  const nowIso = new Date().toISOString();
-  for (const s of sessions) {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  for (const s of sessions as Array<{ id: string; last_detected_at: string | null; entered_at: string; properties?: { property_type?: string | null } | { property_type?: string | null }[] | null }>) {
+    const prop = Array.isArray(s.properties) ? s.properties[0] : s.properties;
+    const decision = graceDecision({
+      propertyType: prop?.property_type ?? null,
+      enteredAt: s.entered_at,
+      lastDetectedAt: s.last_detected_at,
+      now,
+      expiryMinutes: GRACE_EXPIRY_MINUTES,
+      staleHours: APARTMENT_GRACE_STALE_HOURS,
+    });
+    if (decision === "keep") continue;
     // exited_at = last_detected_at when we have one, else entered_at —
     // never `now`, because `now` is when the cron fired, not when the
     // truck was actually here.
