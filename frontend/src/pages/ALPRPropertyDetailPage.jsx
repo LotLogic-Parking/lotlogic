@@ -663,7 +663,8 @@ export function ALPRPropertyDetailPage({
     };
     draw(tempQrRef.current, regLinks.shortTermUrl, 'temp');
     draw(permQrRef.current, regLinks.longTermUrl, 'perm');
-  }, [regLinks?.shortTermUrl, regLinks?.longTermUrl, isOwner, requestsOnly, loading]);
+    // `showSettings`: the office's tiles mount only when Settings opens.
+  }, [regLinks?.shortTermUrl, regLinks?.longTermUrl, isOwner, requestsOnly, loading, showSettings]);
 
   // ── Permanent plates (new /perm submissions land here) ──
   // Same live pattern as parking regs and plate events so the admin doesn't
@@ -879,14 +880,17 @@ export function ALPRPropertyDetailPage({
 
   return (
     <div className="page-enter">
-      <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>
+      {/* A one-property office has no list to go back to (App.jsx officeSingle). */}
+      {onBack && <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>}
 
       <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:12,padding:'16px',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
           <div style={{minWidth:0,flex:1}}>
             <div style={{fontSize:18,fontWeight:800,color:'var(--text-primary)'}}>{property.name}</div>
             <div style={{fontSize:13,color:'var(--text-muted)',marginTop:2}}>{property.address || 'No address'}</div>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',padding:'2px 7px',borderRadius:20,background:isTruckPlaza?'rgba(251,146,60,.12)':'rgba(96,165,250,.12)',color:isTruckPlaza?'#fb923c':'var(--info-ink)',border:isTruckPlaza?'1px solid rgba(251,146,60,.3)':'1px solid rgba(96,165,250,.3)',display:'inline-block',marginTop:6}}>{isTruckPlaza ? 'Truck Plaza' : 'Apartment'}</div>
+            {/* The property-type tag is for LotLogic and the tow company; the
+                office knows what its own property is. */}
+            {!managerOnly && <div style={{fontSize:10,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',padding:'2px 7px',borderRadius:20,background:isTruckPlaza?'rgba(251,146,60,.12)':'rgba(96,165,250,.12)',color:isTruckPlaza?'#fb923c':'var(--info-ink)',border:isTruckPlaza?'1px solid rgba(251,146,60,.3)':'1px solid rgba(96,165,250,.3)',display:'inline-block',marginTop:6}}>{isTruckPlaza ? 'Truck Plaza' : 'Apartment'}</div>}
           </div>
           {managerOnly ? (
             <button
@@ -1052,12 +1056,15 @@ export function ALPRPropertyDetailPage({
 
       {showSettings && settingsDraft && (
         <form onSubmit={handleSaveSettings} style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:10,padding:14,marginBottom:16,display:'flex',flexDirection:'column',gap:8}}>
+          {/* Read-only, set by LotLogic: not shown to the office, which cannot change it. */}
+          {!managerOnly && <>
           <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase'}}>Property Type</label>
           <div style={{padding:'10px 12px',background:'var(--bg-inset)',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-primary)',fontSize:14,opacity:0.8}}>
             {settingsDraft.property_type === 'truck_plaza' ? 'Truck Plaza' : 'Apartment'}
           </div>
           {/* Not spec copy: wording from the G2b brief. */}
           <div style={{fontSize:11,color:'var(--text-faint)'}}>{PROPERTY_TYPE_READONLY_NOTE}</div>
+          </>}
           {settingsDraft.property_type === 'truck_plaza' && (
             <>
               <label style={{fontSize:11,color:'var(--text-muted)',fontWeight:700,letterSpacing:'.04em',textTransform:'uppercase',marginTop:4}}>Parking Policy Text</label>
@@ -1118,7 +1125,8 @@ export function ALPRPropertyDetailPage({
       {/* Two QR codes — one for Temporary, one for Permanent. Owner-only.
           Partners don't share QR codes with drivers — that's the property
           owner's onboarding flow. */}
-      {isOwner && !requestsOnly && property.qr_code_id && (
+      {/* The office finds the QR codes in one place, Settings (Victor, 2026-11-12). */}
+      {isOwner && !requestsOnly && property.qr_code_id && (!managerOnly || showSettings) && (
         <div className="pd-qr-grid">
           <div className="pd-qr-tile">
             <div className="pd-qr-head">
@@ -1181,7 +1189,9 @@ export function ALPRPropertyDetailPage({
         </form>
       )}
 
-      {isOwner && !requestsOnly && (
+      {/* The office reviews and lists approved passes in the Registrations
+          queue (its Approved tab); this headerless list repeated it. */}
+      {isOwner && !requestsOnly && (!managerOnly || showSection('plates')) && (
         <div style={{display:'flex',flexDirection:'column',gap:6}}>
           {plates.map(p => {
             const mySightings = events.filter(e => e.resident_plate_id === p.id);
@@ -1255,6 +1265,7 @@ export function ALPRPropertyDetailPage({
                company gets no such button. Same role rule RequestsSection
                applies to its composer. */
             onRequestTow={canRequestTow ? requestTow : undefined}
+            title={managerOnly ? 'Registrations' : undefined}
           />
         </ErrorBoundary>
       ))}
@@ -1284,7 +1295,8 @@ export function ALPRPropertyDetailPage({
       {showSection('cameras') && features?.cameras === false && (
         <UpsellPanel feature="cameras" propertyName={property.name} propertyId={propertyId} />
       )}
-      {(showSettings || showSection('cameras')) && isOwner && features?.cameras !== false && (
+      {/* Cameras are installed and registered by LotLogic, not the office. */}
+      {(showSettings || showSection('cameras')) && isOwner && !managerOnly && features?.cameras !== false && (
         <>
           <div className="pd-section-head">
             <div style={{display:'flex',alignItems:'baseline',gap:8}}>

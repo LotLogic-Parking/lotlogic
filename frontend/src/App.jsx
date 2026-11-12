@@ -341,6 +341,15 @@ export function App() {
     } catch { return false; }
   })();
 
+  // The leasing office (Victor, 2026-11-12): an owner who is not a platform
+  // admin and whose every property uses the office screen (not Stevenson's
+  // classic page). Owner-only controls (Archive, Add a property, camera
+  // registration, refresh/system settings) are hidden for it, and with one
+  // property there is no list to go back to. Platform admins and classic
+  // properties keep the page exactly as it was.
+  const officeMode = isOwner && !isPlatformAdmin && !viewAs && propertiesKnown
+    && (properties || []).length > 0 && !(properties || []).some(isClassicOffice);
+  const officeSingle = officeMode && properties.length === 1;
   // When viewing as a partner, filter lots/violations to that partner's lots
   // `_platformAdmin` rides on the user object so the property page can tell
   // Gabe's account (keeps the owner "All" surfaces) from a manager's.
@@ -393,7 +402,10 @@ export function App() {
   const navTabs = (() => {
     const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
     const account = base.filter(t => t.id === 'account');
-    return [...base.filter(t => t.id !== 'account'), ...navExtras, ...account];
+    // One property: the tab opens it, so "Properties" (a list of one) reads "Home".
+    const rest = base.filter(t => t.id !== 'account')
+      .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Home' } : t));
+    return [...rest, ...navExtras, ...account];
   })();
   // Overview has no nav button (it is reached from the cards) but is a real
   // owner tab, so it stays valid.
@@ -1005,12 +1017,16 @@ export function App() {
           <div className="header-wordmark">Lot<span>Logic</span></div>
         </div>
         <div className="header-right">
+          {/* The office gets "Dark mode" as a labelled row on Account instead
+              of an unlabelled switch in the header. */}
+          {!officeMode && (
           <button
             className={`theme-toggle-btn ${theme === 'light' ? 'light' : ''}`}
             onClick={() => { toggleTheme(); haptic('light'); }}
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           />
+          )}
           {lastRefresh && (
             <div className={`conn-indicator ${online ? 'online' : 'offline'}`} title={lastRefreshLabel ? `Updated ${lastRefreshLabel}` : ''}>
               <span className={`conn-dot ${online ? 'on' : 'off'}`} />
@@ -1101,7 +1117,7 @@ export function App() {
         />
       )}
 
-      <main id="main-content" className="page-content" role="main">
+      <main id="main-content" className={`page-content${officeMode ? ' page-content--office' : ''}`} role="main">
         {/* "Viewing as Partner" banner */}
         {viewAs && (
           <div style={{
@@ -1128,8 +1144,9 @@ export function App() {
             <span className="spin" />{refreshing ? 'Refreshing…' : 'Release to refresh'}
           </div>
         )}
-        {/* Last updated */}
-        {lastRefresh && !loading && (
+        {/* Last updated. The office's Passes screen carries its own
+            "As of … · Refresh" line, so it does not get a second one. */}
+        {lastRefresh && !loading && !officeMode && (
           <div className="last-updated" aria-live="polite">Updated {lastRefreshLabel}</div>
         )}
 
@@ -1147,6 +1164,8 @@ export function App() {
             firstrun={deepLink.firstrun}
             verify={deepLink.verify}
             onNeedVerify={onNeedVerify}
+            office={officeMode}
+            singleProperty={officeSingle}
           />}
           {tab === 'towactivity' && isOwner && <TowActivityPage user={effectiveUser} />}
           {tab === 'earnings' && isOwner && showMoney && <EarningsPage violations={effectiveViolations} lots={effectiveLots} isOwner={isOwner} user={effectiveUser} onNavigate={setTab} />}
@@ -1161,7 +1180,7 @@ export function App() {
           />}
           {tab === 'lookup' && isOperator && <PlateLookupPage user={effectiveUser} plate={deepLink.plate} property={deepLink.property} noPropertyNote={noPropertyNote} />}
           {tab === 'activity' && isOperator && !truck && <OperatorActivityPage violations={effectiveViolations} lots={effectiveLots} />}
-          {tab === 'account' && <AccountPage user={effectiveUser} isImpersonating={!!viewAs} onLogout={logout} autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh} refreshInterval={refreshInterval} setRefreshInterval={setRefreshInterval} showFees={showMoney} isPlatformAdmin={isPlatformAdmin} properties={isOwner ? properties : []} onPropertyAdded={refreshProperties} />}
+          {tab === 'account' && <AccountPage user={effectiveUser} isImpersonating={!!viewAs} onLogout={logout} autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh} refreshInterval={refreshInterval} setRefreshInterval={setRefreshInterval} showFees={showMoney} isPlatformAdmin={isPlatformAdmin} properties={isOwner ? properties : []} onPropertyAdded={refreshProperties} office={officeMode} theme={theme} onToggleTheme={toggleTheme} />}
           </React.Suspense>
         </div>
       </main>

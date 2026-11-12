@@ -544,6 +544,12 @@
       margin: 0 auto;
       width: 100%;
     }
+    /* The leasing office on a laptop (App.jsx officeMode): the Passes screen's
+       two columns get room for a name on one line and an opened person's
+       details. Declared after the base rule so it wins the cascade. */
+    @media (min-width: 1024px) {
+      .page-content.page-content--office { max-width: 1040px; }
+    }
 
     /* ── Section headers ── */
     .section-header {
@@ -3529,9 +3535,13 @@
     .ls-person-sum { font-size: 13px; line-height: 1.45; color: var(--ll-text-2); overflow-wrap: anywhere; }
     .ls-person-caret { flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ll-line); border-radius: 999px; font-size: 16px; font-weight: 700; color: var(--ll-link); }
     .ls-person.is-open .ls-person-caret { background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); }
-    .ls-panel { display: flex; flex-direction: column; gap: 16px; padding: 4px 16px 16px; border-top: 1px solid var(--ll-line); }
+    /* The panel splits into two columns by its OWN width, not the screen's: on a
+       laptop the Passes screen puts each person in a ~290 px column, and a
+       screen-width rule split that into two ~120 px groups whose 110 px label
+       left the values 0 px wide (Victor, 2026-11-12). */
+    .ls-panel { display: flex; flex-direction: column; gap: 16px; padding: 4px 16px 16px; border-top: 1px solid var(--ll-line); container-type: inline-size; }
     .ls-panel-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    @media (min-width: 640px) { .ls-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @container (min-width: 560px) { .ls-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .ls-panel-group { display: flex; flex-direction: column; gap: 8px; }
     .ls-panel-label { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
     .ls-panel-dl { margin: 0; border: 1px solid var(--ll-line); border-radius: 10px; overflow: hidden; }
