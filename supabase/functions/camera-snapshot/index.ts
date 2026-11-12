@@ -1095,17 +1095,21 @@ Deno.serve(async (req: Request) => {
           priorQ = priorQ.eq("alpr_cameras.gate_id", cameraGateId);
         }
         const { data: priorAtGate } = await priorQ;
-        // Only the same car pairs. A busy apartment gate carries both
-        // directions at once: on 2026-11-12 08:16 ET the exit camera read a
-        // van leaving and, a second later, the entry camera read a different
-        // car coming in; paired by time alone, the entry was dropped as "the
-        // other camera already opened this". A read of some other plate is
-        // not this car firing first.
-        const priorRow = (priorAtGate ?? []).find((r) => {
-          const pr = String((r as { normalized_plate?: string | null; plate_text?: string | null }).normalized_plate
-            || (r as { plate_text?: string | null }).plate_text || "").toUpperCase();
-          return pr !== "" && (pr === normalized || plateSimilar(pr, normalized, true));
-        });
+        // At an apartment only the same car pairs. A busy apartment gate
+        // carries both directions at once: on 2026-11-12 08:16 ET the exit
+        // camera read a van leaving and, a second later, the entry camera
+        // read a different car coming in; paired by time alone, the entry
+        // was dropped as "the other camera already opened this". A read of
+        // some other plate is not this car firing first. A truck plaza keeps
+        // pairing by time: a tractor and its trailer carry different plates
+        // and the two cameras read one each.
+        const priorRow = propertyType === "apartment"
+          ? (priorAtGate ?? []).find((r) => {
+            const pr = String((r as { normalized_plate?: string | null; plate_text?: string | null }).normalized_plate
+              || (r as { plate_text?: string | null }).plate_text || "").toUpperCase();
+            return pr !== "" && (pr === normalized || plateSimilar(pr, normalized, true));
+          })
+          : (priorAtGate ?? [])[0];
         if (priorRow) {
           isPairedRead = true;
           // Direction comes from comparing per-direction firing order. The
@@ -1319,7 +1323,11 @@ Deno.serve(async (req: Request) => {
             : new Date(openSession.entered_at).getTime();
           const gap = now.getTime() - lastSeen;
 
-          if (gap > DEDUP_WINDOW_MS) {
+          // At an apartment the entry camera only sees cars coming in, so a
+          // re-read of an open visit is the same visit however long the gap
+          // (Gabe, 2026-11-12: "still the same visit"); only the exit camera
+          // closes one. A truck plaza keeps the re-pass rule.
+          if (gap > DEDUP_WINDOW_MS && propertyType !== "apartment") {
             // EXIT — re-pass after dedup expired. Close the session.
             const exitEv = await db.from("plate_events")
               .insert({ ...baseEventRow(openSession.id, "unmatched"), event_type: "exit" })
@@ -1604,7 +1612,12 @@ Deno.serve(async (req: Request) => {
         // portal (sessions opening + closing in rapid succession).
         // For the first PARKING_BUFFER_MINUTES after entry, exit reads
         // are recorded but don't close the session.
-        const PARKING_BUFFER_MINUTES = 6;
+        // An apartment gate is a different place: the exit camera reads the
+        // front plate of a car stopped at the keypad on its way in, seconds
+        // after the entry camera opened the visit, and a real exit (a
+        // drop-off) can come three minutes later and must close it. 90 s
+        // covers the keypad, not the drop-off (Gabe, 2026-11-12).
+        const PARKING_BUFFER_MINUTES = propertyType === "apartment" ? 1.5 : 6;
         const sessionAgeMs = openSession.entered_at
           ? now.getTime() - new Date(openSession.entered_at).getTime()
           : 0;
