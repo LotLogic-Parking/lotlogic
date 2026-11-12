@@ -11,7 +11,7 @@ import { lazyPage } from './lib/lazyPage.js';
 import { readDeepLink, cleanDeepLink, readPublicRoute, readJoinSlug, emptyDeepLink, readJoinReturnTo } from './lib/deepLink.js';
 import { NATIVE, nativeSession, nativeSignedOut, onNativeOpen, nativeDeepLink } from './lib/native.js';
 import { readActionToken, hideActionToken } from './lib/requestAction.js';
-import { navTabsFor, partnerRequestsReady, isKnownTab, homeTabFor } from './lib/features.js';
+import { navTabsFor, partnerRequestsReady, isKnownTab, homeTabFor, isClassicOffice } from './lib/features.js';
 import { verifyState, secondsUntilResend, cooldownRetryAfter, sentAtForRetryAfter } from './lib/verifyState.js';
 import { requestsApi } from './lib/requestsApi.js';
 import { VerifyBanner } from './ui/VerifyBanner.jsx';
@@ -391,7 +391,7 @@ export function App() {
     ]
     : [];
   const navTabs = (() => {
-    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin });
+    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
     const account = base.filter(t => t.id === 'account');
     return [...base.filter(t => t.id !== 'account'), ...navExtras, ...account];
   })();
@@ -1140,7 +1140,7 @@ export function App() {
           {tab === 'lots' && !truck && <ALPRPropertiesPage
             user={effectiveUser}
             impersonating={!!viewAs}
-            initialSelectedId={deepLink.property || ((isOwner && !isPlatformAdmin && (properties || []).length === 1) ? properties[0].id : undefined)}
+            initialSelectedId={deepLink.property || ((isOwner && !isPlatformAdmin && (properties || []).length === 1 && !isClassicOffice(properties[0])) ? properties[0].id : undefined)}
             initialSection={deepLink.section}
             request={deepLink.request}
             upload={deepLink.upload}

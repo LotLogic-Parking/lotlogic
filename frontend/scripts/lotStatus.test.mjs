@@ -188,3 +188,10 @@ test('passTarget: "Open pass" lands on the queue, Approved, searched for the pla
   assert.deepEqual(passTarget('ABC1234'), { section: 'log', status: 'approved', q: 'ABC1234' });
   assert.deepEqual(passTarget(null), { section: 'log', status: 'approved', q: '' });
 });
+
+test('withActivityChips: the classic office page keeps Live and Traffic, as before 2026-11-11', () => {
+  const chips = [{ id: 'requests', label: 'Requests' }, { id: 'all', label: 'All' }];
+  assert.deepEqual(withActivityChips(chips, { classic: true }).map(c => c.id), ['requests', 'all', 'live', 'traffic']);
+  assert.deepEqual(withActivityChips(chips).map(c => c.id), ['requests', 'all', 'traffic']);
+  assert.deepEqual(withActivityChips(chips, { isPartner: true, classic: true }).map(c => c.id), ['requests', 'all', 'live']);
+});

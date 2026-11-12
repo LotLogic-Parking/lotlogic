@@ -244,10 +244,11 @@ export const ACTIVITY_CHIPS = Object.freeze([
 
 // The office's "who is here" is the Passes home screen, so it gets Traffic
 // only; a partner keeps Live (Gabe, 2026-11-11).
-export function withActivityChips(chips, { isPartner = false } = {}) {
+// A classic office page (features.js isClassicOffice) keeps both, as before.
+export function withActivityChips(chips, { isPartner = false, classic = false } = {}) {
   const ids = new Set(ACTIVITY_CHIPS.map(c => c.id));
   const list = (Array.isArray(chips) ? chips : []).filter(c => !ids.has(c.id));
-  const add = ACTIVITY_CHIPS.filter(c => (isPartner ? c.id !== 'traffic' : c.id !== 'live'));
+  const add = ACTIVITY_CHIPS.filter(c => (isPartner ? c.id !== 'traffic' : classic ? true : c.id !== 'live'));
   const at = list.findIndex(c => c.id === LOT_STATUS_CHIP.id);
   if (at < 0) return [...list, ...add];
   return [...list.slice(0, at + 1), ...add, ...list.slice(at + 1)];

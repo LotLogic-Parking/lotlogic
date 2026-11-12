@@ -27,6 +27,7 @@ import { lockedChips } from '../lib/upsell.js';
 import { UpsellPanel } from './property/UpsellPanel.jsx';
 import { LotStatusTab } from './lot/LotStatusTab.jsx';
 import { SOLO_SECTION_IDS, passTarget, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
+import { isClassicOffice } from '../lib/features.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
@@ -240,7 +241,7 @@ function SightingStrip({ sightings, cameras, nowTick }) {
 // Lot status (task F7) is an apartment chip: first for a partner session, right
 // after Visitor passes for an owner or office session. Live and Traffic
 // (build plan F1) follow it; a partner gets Live only.
-export function sectionChipsFor(propertyType, features, { isPartner = false, isAdmin = false } = {}) {
+export function sectionChipsFor(propertyType, features, { isPartner = false, isAdmin = false, classic = false } = {}) {
   const isTruckPlaza = propertyType === 'truck_plaza';
   if (isTruckPlaza) {
     return [
@@ -262,6 +263,16 @@ export function sectionChipsFor(propertyType, features, { isPartner = false, isA
       { id: 'requests', label: 'Requests' },
       lockedById.get('log') || { id: 'log', label: 'Parking passes' },
     ], { isPartner }), { isPartner });
+  }
+  // The classic office page (features.js isClassicOffice — Stevenson's): the
+  // chips as they were before 2026-11-11. Requests first and default.
+  if (classic && !isAdmin) {
+    return withActivityChips(withLotStatusChip([
+      { id: 'requests', label: 'Requests' },
+      { id: 'all', label: 'All' },
+      lockedById.get('log') || { id: 'log', label: 'Visitor passes' },
+      ...locked.filter(c => c.id !== 'log'),
+    ], { isPartner }), { isPartner, classic: true });
   }
   // The office (Gabe, 2026-11-11: "reduce and simplify"): the page is the
   // Passes screen and nothing else. Requests, the registration queue and any
@@ -312,8 +323,8 @@ export function sectionStorageKey(propertyType) {
 // property's chip list is ignored outright. Apartments default to Requests —
 // the portal's whole point; truck plazas have no Requests chip and stay on the
 // Parking Log, the surface their operators actually use.
-export function resolveSectionFilter({ propertyType, features, initialSection, stored, isPartner = false, isAdmin = false }) {
-  const ids = sectionChipsFor(propertyType, features, { isPartner, isAdmin }).map(c => c.id);
+export function resolveSectionFilter({ propertyType, features, initialSection, stored, isPartner = false, isAdmin = false, classic = false }) {
+  const ids = sectionChipsFor(propertyType, features, { isPartner, isAdmin, classic }).map(c => c.id);
   if (initialSection && ids.includes(initialSection)) return initialSection;
   if (stored && ids.includes(stored)) return stored;
   // A partner opens an apartment on its lot status: that is what the driver
@@ -351,13 +362,25 @@ export function ALPRPropertyDetailPage({
   // QR codes + camera registration are owner-only surfaces. Partners see
   // the property + plates + parking log but not the operational chrome.
   const isOwner = user?._role === 'owner';
-  // A manager's session (the office): one screen, the rest behind "More".
-  const managerOnly = isOwner && !user?._platformAdmin;
   const { addToast } = useToast();
   const [property, setProperty] = useState(null);
+  // Stevenson's keeps the classic page (features.js isClassicOffice).
+  const classic = isClassicOffice(property);
+  // A manager's session (the office) at every other property: one screen,
+  // the rest behind "More".
+  const managerOnly = isOwner && !user?._platformAdmin && !classic;
   const [plates, setPlates] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [events, setEvents] = useState([]);
+  // Group-by-session toggle for the classic page's Plate Detections list.
+  // Default ON to match the user's expectation: "1-2 shots per vehicle, not
+  // 100." Off shows the raw per-frame timeline. Persisted to localStorage.
+  const [groupBySession, setGroupBySession] = useState(() => {
+    try { return localStorage.getItem('lotlogic_pd_group') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lotlogic_pd_group', groupBySession ? '1' : '0'); } catch {}
+  }, [groupBySession]);
   const [loading, setLoading] = useState(true);
   const [showAddPlate, setShowAddPlate] = useState(false);
   const [showAddCam, setShowAddCam] = useState(false);
@@ -379,6 +402,9 @@ export function ALPRPropertyDetailPage({
   // One tap used to delete the pass outright (usability audit 2026-11-11).
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [passTotalCount, setPassTotalCount] = useState(0);
+  // The classic page's In Lot Now and 24-Hour Holds.
+  const [openSessions, setOpenSessions] = useState([]);
+  const [activeHolds, setActiveHolds] = useState([]);
   // Stuck tows — overstay violations whose partner dispatch exhausted its
   // retries (status='dispatch_failed'). These are invisible everywhere else
   // and never auto-retry, so the operator needs an explicit queue.
@@ -428,10 +454,11 @@ export function ALPRPropertyDetailPage({
       stored,
       isPartner: user?._role === 'partner',
       isAdmin: !!user?._platformAdmin,
+      classic,
     });
     setSectionFilter(next);
     if (managerOnly && next !== 'passes') setMoreOpen(true);
-  }, [property, features, initialSection, user?._role, user?._platformAdmin, managerOnly]);
+  }, [property, features, initialSection, user?._role, user?._platformAdmin, managerOnly, classic]);
   useEffect(() => {
     if (!sectionFilter || !property) return;
     try { localStorage.setItem(sectionStorageKey(property.property_type), sectionFilter); } catch { /* blocked storage */ }
@@ -491,12 +518,14 @@ export function ALPRPropertyDetailPage({
   const loadAll = useCallback(async () => {
     if (!propertyId) return;
     setLoading(true);
-    const [prop, pl, cam, ev, pCount, mine] = await Promise.all([
+    const [prop, pl, cam, ev, pCount, os, ah, mine] = await Promise.all([
       db.getProperty(propertyId),
       db.getResidentPlates(propertyId),
       db.getALPRCameras(propertyId),
       db.getRecentPlateEvents(propertyId, 50),
       db.countVisitorPasses(propertyId),
+      db.getOpenSessions(propertyId),
+      db.getActiveHolds(propertyId),
       // `/auth/me`'s property shape carries what the raw `properties` row
       // cannot: this account's member `role`, and the tow company's `phone`
       // for the §5.2 "couldn't reach N Style" banner. Best-effort — an older
@@ -509,6 +538,8 @@ export function ALPRPropertyDetailPage({
     setCameras(cam);
     setEvents(ev);
     setPassTotalCount(pCount);
+    setOpenSessions(os);
+    setActiveHolds(ah);
     setLoading(false);
   }, [propertyId, user?.id, user?._role]);
 
@@ -731,6 +762,29 @@ export function ALPRPropertyDetailPage({
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [refreshEvents]);
 
+  // ── Open sessions + active holds (the classic page) ──
+  const refreshSessions = useCallback(async () => {
+    if (!propertyId) return;
+    const [s, h] = await Promise.all([
+      db.getOpenSessions(propertyId),
+      db.getActiveHolds(propertyId),
+    ]);
+    setOpenSessions(s);
+    setActiveHolds(h);
+  }, [propertyId]);
+  useIntervalFetch(refreshSessions, 20000, [refreshSessions]);
+  useEffect(() => {
+    if (!supabase || !propertyId) return;
+    const debouncedRefresh = makeDebounced(refreshSessions, 200);
+    const ch1 = supabase.channel('plate-sessions-' + propertyId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'plate_sessions', filter: 'property_id=eq.' + propertyId }, debouncedRefresh)
+      .subscribe();
+    const ch2 = supabase.channel('plate-holds-' + propertyId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'plate_holds', filter: 'property_id=eq.' + propertyId }, debouncedRefresh)
+      .subscribe();
+    return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2); };
+  }, [propertyId, refreshSessions]);
+
   const cameraById = useMemo(() => Object.fromEntries((cameras || []).map(c => [c.id, c])), [cameras]);
 
   async function handleAddPlate(e) {
@@ -868,7 +922,7 @@ export function ALPRPropertyDetailPage({
         borderBottom: '1px solid var(--border-subtle, transparent)',
       }}>
         {(() => {
-          const chips = sectionChipsFor(property?.property_type, features, { isPartner: user?._role === 'partner', isAdmin: !!user?._platformAdmin })
+          const chips = sectionChipsFor(property?.property_type, features, { isPartner: user?._role === 'partner', isAdmin: !!user?._platformAdmin, classic })
             .filter(c => !c.hidden);
           if (managerOnly) chips.push({ id: 'settings', label: 'Settings' });
           return chips.map(c => {
@@ -1553,6 +1607,214 @@ export function ALPRPropertyDetailPage({
           </>
         );
       })()}
+
+      {/* In Lot Now / Plate Holds / Plate Detections — the classic office page
+          (Stevenson's) only, as before 2026-11-11. Owner-only.
+          Partners' single function is "who's signed in / allowed to be here" —
+          that's the parking log above. Operational signals below are noise
+          for them. */}
+      {isOwner && !requestsOnly && !showSettings && classic && (
+      <>
+      <div className="pd-section-head">
+        <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+          <span className="pd-section-title">In Lot Now</span>
+          <span className="pd-section-count">{openSessions.length}</span>
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        {openSessions.length === 0 ? (
+          <div className="pd-empty">Lot is empty</div>
+        ) : openSessions.map(s => {
+          const enteredMs = new Date(s.entered_at).getTime();
+          const mins = Math.floor((nowTick - enteredMs) / 60000);
+          const stateColor = s.state === 'registered' ? '#4ade80'
+            : s.state === 'resident' ? '#60a5fa'
+            : s.state === 'grace'    ? 'var(--accent-text)'
+            : s.state === 'expired'  ? '#f87171'
+            : 'var(--text-faint)';
+          return (
+            <div key={s.id} style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',alignItems:'center',gap:12}}>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{s.plate_text}</span>
+                  {(s.plate_text || '').startsWith('DOT-') && (
+                    <span title="No license plate visible — read via USDOT OCR" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>USDOT</span>
+                  )}
+                  {(s.plate_text || '').startsWith('MC-') && (
+                    <span title="Matched by Motor Carrier number, not plate" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>MC#</span>
+                  )}
+                  <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:`${stateColor}20`,color:stateColor,border:`1px solid ${stateColor}40`}}>{(s.state || 'unknown').replace('_',' ')}</span>
+                  {s.vehicle_type && <span style={{fontSize:11,color:'var(--text-muted)'}}>{s.vehicle_type}</span>}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>
+                  Here {mins}m · entered {new Date(s.entered_at).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}
+                  {s.last_detected_at && s.last_detected_at !== s.entered_at && (
+                    <> · last seen {Math.max(0, Math.floor((nowTick - new Date(s.last_detected_at).getTime()) / 60000))}m ago</>
+                  )}
+                </div>
+                {s.exit_hinted_at && (
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',marginTop:4,color:'#fb923c'}}>
+                    Closing soon · exit inferred {Math.max(0, Math.floor((nowTick - new Date(s.exit_hinted_at).getTime()) / 60000))}m ago
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Plate Holds */}
+      <div className="pd-section-head">
+        <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+          <span className="pd-section-title">24-Hour Holds</span>
+          <span className="pd-section-count">{activeHolds.length}</span>
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        {activeHolds.length === 0 ? (
+          <div className="pd-empty">No active holds</div>
+        ) : activeHolds.map(h => {
+          const untilMs = new Date(h.hold_until).getTime();
+          const remaining = Math.max(0, Math.floor((untilMs - nowTick) / 60000));
+          return (
+            <div key={h.id} style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',alignItems:'center',gap:12}}>
+              <div style={{minWidth:0,flex:1}}>
+                <span style={{fontFamily:"'Courier New',monospace",background:'#fee2e2',color:'#7f1d1d',border:'1.5px solid #f87171',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{h.normalized_plate}</span>
+                <span style={{fontSize:11,color:'var(--text-muted)',marginLeft:8}}>
+                  held {new Date(h.held_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · {remaining}m left · reason: {h.reason}
+                </span>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Release the 24h hold on ${h.normalized_plate}?`)) return;
+                  try {
+                    await db.releasePlateHold(h.id);
+                    addToast({ kind:'success', text:`Hold released for ${h.normalized_plate}` });
+                    refreshSessions();
+                  } catch (err) {
+                    addToast({ kind:'error', text:`Release failed: ${err.message}` });
+                  }
+                }}
+                style={{background:'#1f2937',color:'#f9fafb',border:'1px solid #374151',borderRadius:6,padding:'5px 10px',fontSize:11,cursor:'pointer'}}
+              >Release</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Recent plate detections (live ALPR feed) */}
+      <div className="pd-section-head">
+        <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+          <span className="pd-section-title">Plate Detections</span>
+          <span className="pd-section-count">{events.length}</span>
+        </div>
+        <div className="pd-section-meta" style={{display:'flex',alignItems:'center',gap:10}}>
+          <button onClick={() => setGroupBySession(g => !g)}
+            title={groupBySession ? 'Showing one row per vehicle visit. Click to see every individual frame.' : 'Showing every individual frame. Click to collapse same-vehicle frames into one row.'}
+            style={{
+              fontSize:10, fontWeight:700, padding:'3px 9px', borderRadius:14,
+              background: groupBySession ? 'rgba(59,130,246,.18)' : 'transparent',
+              color: groupBySession ? '#60a5fa' : 'var(--text-muted)',
+              border: groupBySession ? '1px solid #3b82f655' : '1px solid var(--border)',
+              cursor:'pointer', textTransform:'uppercase', letterSpacing:'.05em',
+            }}>
+            {groupBySession ? '◉ Grouped' : '○ Group by vehicle'}
+          </button>
+          <span style={{display:'flex',alignItems:'center',gap:4}}>
+            <span style={{width:6,height:6,borderRadius:'50%',background:'#4ade80',animation:'pulse-dot 1.5s infinite'}} />
+            Live
+          </span>
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:6}}>
+        {events.length === 0 ? (
+          <div className="pd-empty">No plate detections yet</div>
+        ) : (() => {
+          // When groupBySession is on, collapse all events sharing a session_id
+          // into a single representative row (the most recent confirmed-plate
+          // event in the session, or the most recent overall if none was a
+          // confirmed match). Show a "+N more" badge so the operator knows
+          // how many frames are hidden. Click to expand inline.
+          let displayRows;
+          if (groupBySession) {
+            // Frames with no session (stray reads, paired-read rows) still
+            // belong to one physical car when they are seconds apart on one
+            // camera with a similar plate: bundle them so a six-frame burst
+            // is one row, the same way the plaza log does.
+            const strayKey = new Map();
+            for (const b of bundleVehicleEvents(events.filter(e => !e.session_id))) {
+              for (const id of b._bundle.plate_event_ids) strayKey.set(id, b.id);
+            }
+            const groups = new Map();
+            for (const ev of events) {
+              const key = ev.session_id || strayKey.get(ev.id) || ev.id;
+              if (!groups.has(key)) groups.set(key, []);
+              groups.get(key).push(ev);
+            }
+            displayRows = Array.from(groups.values()).map(grp => {
+              // Pick representative: prefer the highest-confidence non-suppressed
+              // event (the canonical PR read), fall back to the most recent.
+              const canonical = grp
+                .filter(e => e.match_status !== 'dedup_suppressed')
+                .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0]
+                || grp.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+              const groupCount = grp.length;
+              return { ...canonical, _groupCount: groupCount, _groupAll: grp };
+            }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          } else {
+            displayRows = events;
+          }
+          return displayRows.map(ev => {
+          const cam = cameraById[ev.camera_id];
+          const conf = typeof ev.confidence === 'number' ? Math.round(ev.confidence * (ev.confidence <= 1 ? 100 : 1)) : null;
+          const evType = ev.event_type || 'patrol';
+          const evColor = evType === 'entry' ? '#4ade80' : (evType === 'exit' ? '#f59e0b' : '#60a5fa');
+          const statusColor = ['matched','resident','visitor_pass','self_registered','visitor_pass_fuzzy','partner_truck'].includes(ev.match_status) ? '#4ade80'
+            : ['low_confidence','review_needed','camera_suspended','grace_window','pending','overstay'].includes(ev.match_status) ? 'var(--accent-text)'
+            : ev.match_status === 'unmatched' ? '#f87171'
+            : ev.match_status === 'dedup_suppressed' ? '#94a3b8'
+            : 'var(--text-faint)';
+          return (
+            <div key={ev.id} style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',display:'flex',alignItems:'center',gap:12}}>
+              {ev.image_url && (
+                <img src={ev.image_url} alt="plate" loading="lazy"
+                  style={{width:52,height:40,objectFit:'cover',borderRadius:6,border:'1px solid var(--border-subtle)',flexShrink:0,background:'var(--bg-inset)'}} />
+              )}
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  <span style={{fontFamily:"'Courier New',monospace",background:'var(--bg-card)',color:'var(--text-primary)',border:'1.5px solid var(--border)',fontWeight:800,letterSpacing:'.08em',fontSize:13,padding:'3px 9px',borderRadius:4}}>{ev.plate_text}</span>
+                  {(ev.plate_text || '').startsWith('DOT-') && (
+                    <span title="No license plate visible — read via USDOT OCR (ParkPow)" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>USDOT</span>
+                  )}
+                  {(ev.plate_text || '').startsWith('MC-') && (
+                    <span title="Matched by Motor Carrier number" style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1d4ed820',color:'#60a5fa',border:'1px solid #3b82f640'}}>MC#</span>
+                  )}
+                  <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:`${evColor}20`,color:evColor,border:`1px solid ${evColor}40`}}>{evType}</span>
+                  {ev.match_status && (
+                    <span title={ev.match_reason || ev.match_status} style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:`${statusColor}18`,color:statusColor,border:`1px solid ${statusColor}40`}}>{ev.match_status.replace(/_/g, ' ')}</span>
+                  )}
+                  {ev.plate_sessions?.state && (
+                    <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',padding:'3px 8px',borderRadius:20,background:'#1f293720',color:'#9ca3af',border:'1px solid #37415140'}}>session: {ev.plate_sessions.state.replace('_',' ')}</span>
+                  )}
+                  {ev._groupCount > 1 && (
+                    <span title="Same-vehicle frames collapsed; click 'Group by vehicle' off to see all"
+                      style={{fontSize:10,fontWeight:700,padding:'3px 8px',borderRadius:20,background:'rgba(59,130,246,.18)',color:'#60a5fa',border:'1px solid #3b82f655'}}>
+                      +{ev._groupCount - 1} more frame{ev._groupCount > 2 ? 's' : ''}
+                    </span>
+                  )}
+                  {conf != null && <span style={{fontSize:11,color:'var(--text-faint)'}}>{conf}%</span>}
+                </div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {cam ? cam.name : 'Camera'}{cam?.location_description ? ` · ${cam.location_description}` : ''} · {new Date(ev.created_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
+                </div>
+              </div>
+            </div>
+          );
+        });
+        })()}
+      </div>
+      </>
+      )}
 
       {confirmRemove && (
         <ConfirmDialog
