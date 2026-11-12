@@ -1125,8 +1125,10 @@ export function ALPRPropertyDetailPage({
       {/* Two QR codes — one for Temporary, one for Permanent. Owner-only.
           Partners don't share QR codes with drivers — that's the property
           owner's onboarding flow. */}
-      {/* The office finds the QR codes in one place, Settings (Victor, 2026-11-12). */}
-      {isOwner && !requestsOnly && property.qr_code_id && (!managerOnly || showSettings) && (
+      {/* The office finds the QR codes in one place, Settings (Victor, 2026-11-12).
+          A truck plaza has no office screen (no Passes, no Registrations), so a
+          plaza manager keeps the tile on every section, as before. */}
+      {isOwner && !requestsOnly && property.qr_code_id && (!managerOnly || isTruckPlaza || showSettings) && (
         <div className="pd-qr-grid">
           <div className="pd-qr-tile">
             <div className="pd-qr-head">
@@ -1190,8 +1192,9 @@ export function ALPRPropertyDetailPage({
       )}
 
       {/* The office reviews and lists approved passes in the Registrations
-          queue (its Approved tab); this headerless list repeated it. */}
-      {isOwner && !requestsOnly && (!managerOnly || showSection('plates')) && (
+          queue (its Approved tab); this headerless list repeated it. A truck
+          plaza has no Registrations queue, so its manager keeps the list. */}
+      {isOwner && !requestsOnly && (!managerOnly || isTruckPlaza || showSection('plates')) && (
         <div style={{display:'flex',flexDirection:'column',gap:6}}>
           {plates.map(p => {
             const mySightings = events.filter(e => e.resident_plate_id === p.id);
