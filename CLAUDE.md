@@ -269,6 +269,7 @@ Resolved vs earlier versions of this note:
 
 ## Development Rules
 - The dashboard is `frontend/src/` (54 modules, esbuild-built) rendered into the `frontend/dashboard.html` shell — not a single file, and not Babel. See "How to change the dashboard" above.
+- **Leasing-office screen** (what a non-admin property manager sees in `/app`): read `docs/office-screen.md` before changing it. It records who gets the office screen (`officeMode` / `managerOnly`, Stevenson's stays classic) and why each part was changed.
 - QR registration flow is three entry points — `frontend/visit.html` (temporary), `frontend/resident.html` (permanent), `frontend/apt.html` (apartment) — each a thin `<script type="module" src="/{visit,resident,apt}.js">` over shared `src/shared/register.js` + `src/shared/policy.js` + `styles/register.css`, not standalone single-file pages.
 - Zone coordinates in the DB and new code are **0-1 normalized**. Legacy 0-100 values are converted on read by `_convert_camera_zones()` in `routers/snapshots.py` — do NOT write new 0-100 coords.
 - All timestamps are UTC (TIMESTAMPTZ)

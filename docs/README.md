@@ -17,6 +17,7 @@ works today.
 | [`../CLAUDE.md`](../CLAUDE.md) | The rulebook for this repo — architecture, the naming rule, deploy guardrails, what not to touch. Every AI session loads it at startup. (`AGENTS.md` is a pointer to it, not a second copy.) |
 | [`../RECOVERY.md`](../RECOVERY.md) | Disaster recovery and handoff: every service, every secret *name* and where its value lives, how to rebuild if the laptop is lost. |
 | [`ONBOARDING.md`](./ONBOARDING.md) | Getting a new collaborator access to every service in the stack. |
+| [`office-screen.md`](./office-screen.md) | The leasing-office screen: who sees it, which flags decide it, and why each part looks the way it does. Read before changing what a property manager sees. |
 | [`claude-code-setup.md`](./claude-code-setup.md) | The project-scoped Claude Code / MCP configuration in `.claude/`. |
 | `2026-09-03-enterprise-readiness-program.md` | The current work programme — the three waves and the fat decisions coming out of the 2026-09 audit. Lives in `docs/superpowers/specs/` on the branch it was written on, not on `main`. |
 
