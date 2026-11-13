@@ -13,6 +13,7 @@ import {
 import { isPlateHeld } from "./holds.ts";
 import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExitVisit, isReentry, minutesFromEnv } from "./apartment_close.ts";
+import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
 import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
@@ -55,6 +56,9 @@ const PR_MIN_SCORE_APARTMENT = Number(Deno.env.get("PR_MIN_SCORE_APARTMENT") ?? 
 // this many minutes ago or more means the car left unseen and came back
 // (apartment_close.ts, rule B).
 const APARTMENT_REENTRY_MINUTES = minutesFromEnv(Deno.env.get("APARTMENT_REENTRY_MINUTES"), REENTRY_MINUTES_DEFAULT);
+// Floor for a lone read to OPEN a new apartment visit (see open_floor.ts).
+// Weaker reads are still accepted and logged; they just cannot start a visit.
+const PR_MIN_OPEN_SCORE_APARTMENT = openFloorFromEnv(Deno.env.get("PR_MIN_OPEN_SCORE_APARTMENT"));
 // Per-camera PR_MIN_SCORE override. JSON map { "<camera_id>": <floor> }.
 // When a camera_id is in the map, its plate reads bypass BOTH the
 // length-scaled confidence ladder AND the vehicle-detection gate, and
@@ -1469,6 +1473,22 @@ Deno.serve(async (req: Request) => {
         let pass = resident ? null : await findActiveVisitorPass(db, camera.property_id, normalized, now);
         if (!resident && !pass && frameUsdot) pass = await findActiveVisitorPass(db, camera.property_id, `DOT${frameUsdot}`, now);
         if (!resident && !pass && frameMc)    pass = await findActiveVisitorPass(db, camera.property_id, `MC${frameMc}`, now);
+
+        // Apartment opening floor. A decal or a grille badge read at 0.68
+        // must not become a red tile on the office screen (Mayfield
+        // 2026-11-12: one plateless Amazon van opened three visits). A read
+        // that matches a resident or a live pass is corroborated and opens
+        // as usual; an unknown plate needs the floor. The read is logged so
+        // the Traffic log shows it; no visit opens.
+        if (!resident && !pass && !mayOpenVisit({ propertyType, score: result.score, floor: PR_MIN_OPEN_SCORE_APARTMENT })) {
+          const ev = await db.from("plate_events")
+            .insert(baseEventRow(null, "unmatched"))
+            .select("id").single();
+          if (ev.error) throw ev.error;
+          eventCount++;
+          console.log(`apartment open floor: read ${normalized} scored ${result.score} < ${PR_MIN_OPEN_SCORE_APARTMENT} at ${camera.id} — logged, no visit opened`);
+          continue;
+        }
 
         // Cooldown: a previously-REGISTERED vehicle that parked and left
         // within cooldown_hours blocks re-entry regardless of its current
