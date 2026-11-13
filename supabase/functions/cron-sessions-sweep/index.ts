@@ -24,6 +24,7 @@ import { findStaleGroups, flushGroup } from "../camera-snapshot/weak_plate_reads
 import { handleSystemPaused, heartbeat, redactError } from "./heartbeat.ts";
 import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision } from "./grace_policy.ts";
 import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
+import { EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT, EXIT_SWEEP_MIN_SCORE_DEFAULT, sweepStrayApartmentExits } from "./exit_sweep.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -46,6 +47,10 @@ const APARTMENT_GRACE_STALE_HOURS = Number(Deno.env.get("APARTMENT_GRACE_STALE_H
 const BOOT_DRIVER_PHONES = parsePhoneList(Deno.env.get("BOOT_DRIVER_PHONES"));
 const GRACE_DISPATCH_MINUTES = Number(Deno.env.get("GRACE_DISPATCH_MINUTES") ?? String(GRACE_DISPATCH_MINUTES_DEFAULT));
 const BOOT_STALE_HOURS = Number(Deno.env.get("BOOT_STALE_HOURS") ?? String(BOOT_STALE_HOURS_DEFAULT));
+// Apartments: exit-camera reads that closed no visit get a second look
+// against every open visit at the property (exit_sweep.ts).
+const EXIT_SWEEP_LOOKBACK_MINUTES = Number(Deno.env.get("EXIT_SWEEP_LOOKBACK_MINUTES") ?? String(EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT));
+const EXIT_SWEEP_MIN_SCORE = Number(Deno.env.get("EXIT_SWEEP_MIN_SCORE") ?? String(EXIT_SWEEP_MIN_SCORE_DEFAULT));
 const bootDeps = (): BootDeps => {
   const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
   const authToken = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
@@ -85,6 +90,7 @@ Deno.serve(async (_req: Request) => {
     const overstayExpired = await overstayExpiry();
     const passOverstay = await sweepUnexitedPassesForOverstay();
     const weakReads = await sweepWeakPlateReads();
+    const exitSweep = await sweepStrayApartmentExits({ db, lookbackMinutes: EXIT_SWEEP_LOOKBACK_MINUTES, minScore: EXIT_SWEEP_MIN_SCORE });
     // Combined per-tick fan-out budget shared by dispatch + stand-downs so the
     // two loops can't, together, burst the platform rate limiter (audit C1).
     const fanoutBudget = { remaining: DISPATCH_FANOUT_MAX_PER_TICK };
@@ -109,6 +115,7 @@ Deno.serve(async (_req: Request) => {
       overstay_expired: overstayExpired,
       pass_overstay_fired: passOverstay,
       weak_reads_flushed: weakReads,
+      apartment_exits_swept: exitSweep.closed,
       dispatched: dispatch.dispatched,
       dispatch_rate_limited: dispatch.rate_limited,
       auto_no_tow_left_before_tow: dispatch.left_before_tow,
