@@ -12,6 +12,7 @@ import {
 } from "./best_frame.ts";
 import { isPlateHeld } from "./holds.ts";
 import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
+import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExitVisit, isReentry, minutesFromEnv } from "./apartment_close.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
 import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
@@ -50,6 +51,10 @@ const PR_REGIONS = Deno.env.get("PR_REGIONS") ?? "us";
 // 0.80 floor. This knob lets the floor move without a deploy while the
 // cameras are brought closer to the lane. Unset = PR_MIN_SCORE.
 const PR_MIN_SCORE_APARTMENT = Number(Deno.env.get("PR_MIN_SCORE_APARTMENT") ?? String(PR_MIN_SCORE));
+// Apartments: the entry camera reading a plate whose open visit was last seen
+// this many minutes ago or more means the car left unseen and came back
+// (apartment_close.ts, rule B).
+const APARTMENT_REENTRY_MINUTES = minutesFromEnv(Deno.env.get("APARTMENT_REENTRY_MINUTES"), REENTRY_MINUTES_DEFAULT);
 // Per-camera PR_MIN_SCORE override. JSON map { "<camera_id>": <floor> }.
 // When a camera_id is in the map, its plate reads bypass BOTH the
 // length-scaled confidence ladder AND the vehicle-detection gate, and
@@ -1287,6 +1292,27 @@ Deno.serve(async (req: Request) => {
             eventCount++;
             continue;
           }
+          // Apartment: the visit may be hours old, outside the two-minute
+          // activity window findSimilarOpenSession looks at. Match this read
+          // against every open visit at the property (apartment_close.ts,
+          // rule A) before filing it as a stray.
+          if (propertyType === "apartment") {
+            const late = await findLateExitVisit(db, camera.property_id, normalized, now);
+            if (late) {
+              const ev = await db.from("plate_events")
+                .insert({
+                  ...baseEventRow(late.visit.id, "unmatched"),
+                  match_reason: `late exit (${late.reason}): read "${plateUpper}" closes visit ${late.visit.plate_text}`,
+                  matched_at: now.toISOString(),
+                })
+                .select("id").single();
+              if (ev.error) throw ev.error;
+              eventCount++;
+              const kind = await closeVisitOnExit(db, late.visit, camera.id, ev.data.id, now);
+              console.log(`late exit (${late.reason}): session=${late.visit.id} visit_plate=${late.visit.normalized_plate} read=${normalized} -> ${kind}`);
+              continue;
+            }
+          }
           const ev = await db.from("plate_events")
             .insert(baseEventRow(null, "unmatched"))
             .select("id").single();
@@ -1304,9 +1330,23 @@ Deno.serve(async (req: Request) => {
         // instead of spawning one session + one violation + one email per
         // misread character. Also match on USDOT/MC: frame 1 reads plate,
         // frame 2 reads DOT — both collapse onto the same session.
-        const openSession = await findSimilarOpenSession(
+        let openSession = await findSimilarOpenSession(
           db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
         );
+        // Apartment re-entry (apartment_close.ts, rule B): the entry camera
+        // only sees cars coming in, so a plate read again after a gap left
+        // while the exit camera was asleep. Close the old visit at its last
+        // sighting and let this read open a new one below.
+        let reentered = false;
+        if (openSession && isReentry({
+          propertyType, enteredAt: openSession.entered_at, lastDetectedAt: openSession.last_detected_at,
+          now, minutes: APARTMENT_REENTRY_MINUTES,
+        })) {
+          const exitedAt = await closeLeftUnseen(db, openSession, now);
+          console.log(`re-entry: session=${openSession.id} plate=${normalized} closed as left unseen at ${exitedAt}; opening a new visit`);
+          openSession = null;
+          reentered = true;
+        }
         if (openSession) {
           // The presence model: re-reads of an open session map to either
           //   (a) DEDUP — within the 15-min dedup window, treat as continued
@@ -1378,7 +1418,8 @@ Deno.serve(async (req: Request) => {
 
         // Re-pass exit burst: the frame before this one closed the session
         // on this camera; this one belongs to that exit, not to a new entry.
-        {
+        // Not after a re-entry close: that visit ended at its last sighting.
+        if (!reentered) {
           const closed = await recentlyClosed();
           if (closed) {
             await attachBurstFrame(closed.id, "exit", closed.plate_text, closed.normalized_plate,
