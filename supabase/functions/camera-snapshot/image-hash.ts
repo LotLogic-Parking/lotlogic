@@ -28,12 +28,14 @@ export type ImageHashes = {
   // sidecar/PR — observed in prod where the camera sends entirely-dark
   // images at night or with a covered lens.
   meanLuma: number;
+  width: number;   // 0 when the JPEG did not decode
+  height: number;
 };
 
 export async function computeImageHashes(bytes: Uint8Array): Promise<ImageHashes> {
   const sha256 = await sha256Hex(bytes);
   const result = await computeDHashSafe(bytes);
-  return { sha256, dhash: result.dhash, meanLuma: result.meanLuma };
+  return { sha256, dhash: result.dhash, meanLuma: result.meanLuma, width: result.width, height: result.height };
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -43,16 +45,16 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
-async function computeDHashSafe(bytes: Uint8Array): Promise<{ dhash: string | null; meanLuma: number }> {
+async function computeDHashSafe(bytes: Uint8Array): Promise<{ dhash: string | null; meanLuma: number; width: number; height: number }> {
   try {
     // Cap memory usage. Typical Milesight JPEGs decode to 2-8MB of raw
     // RGBA. 50MB is far above that ceiling but guards against malformed
     // headers claiming enormous dimensions.
     const decoded = decodeJpeg(bytes, { useTArray: true, maxMemoryUsageInMB: 50 });
-    return computeDHash(decoded.data as Uint8Array, decoded.width, decoded.height);
+    return { ...computeDHash(decoded.data as Uint8Array, decoded.width, decoded.height), width: decoded.width, height: decoded.height };
   } catch (err) {
     console.warn("dhash decode failed:", err instanceof Error ? err.message : String(err));
-    return { dhash: null, meanLuma: 0 };
+    return { dhash: null, meanLuma: 0, width: 0, height: 0 };
   }
 }
 

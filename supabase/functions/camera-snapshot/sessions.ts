@@ -372,6 +372,7 @@ export async function findSimilarOpenSession(
   usdotNumber: string | null = null,
   mcNumber: string | null = null,
   imageDhash: string | null = null,
+  candidates: string[] | null = null,
 ): Promise<OpenSessionRow | null> {
   const exact = await findOpenSession(db, propertyId, normalizedPlate);
   if (exact) return exact;
@@ -438,7 +439,7 @@ export async function findSimilarOpenSession(
   const bestCost = new Map<string, number>();
   for (const ev of recentEvents ?? []) {
     if (!ev.session_id || !ev.normalized_plate) continue;
-    const v = sameVehicle(ev.normalized_plate as string, normalizedPlate, { kind: "burst" });
+    const v = sameVehicle(ev.normalized_plate as string, normalizedPlate, { kind: "burst", candidates });
     if (!v.same) continue;
     const cur = bestCost.get(ev.session_id);
     if (cur === undefined || v.cost < cur) bestCost.set(ev.session_id, v.cost);
@@ -568,6 +569,7 @@ export async function findActiveResident(
   db: SupabaseClient,
   propertyId: string,
   normalizedPlate: string,
+  candidates: string[] | null = null,
 ): Promise<ResidentRow | null> {
   const fmcsa = extractFmcsaNumber(normalizedPlate);
 
@@ -605,6 +607,7 @@ export async function findActiveResident(
     (data ?? []) as Row[],
     normalizedPlate,
     (r) => ({ id: r.id }),
+    candidates,
   );
 }
 
@@ -620,6 +623,7 @@ export async function findActiveVisitorPass(
   propertyId: string,
   normalizedPlate: string,
   now: Date,
+  candidates: string[] | null = null,
 ): Promise<PassRow | null> {
   const fmcsa = extractFmcsaNumber(normalizedPlate);
 
@@ -668,6 +672,7 @@ export async function findActiveVisitorPass(
     valid,
     normalizedPlate,
     (r) => ({ id: r.id, valid_until: r.valid_until }),
+    candidates,
   );
 }
 
@@ -689,6 +694,7 @@ function matchPairedRow<
   rows: R[],
   normalizedPlate: string,
   pickBase: (r: R) => B,
+  candidates: string[] | null = null,
 ): (B & { paired_plate: string | null; normalized_paired_plate: string | null }) | null {
   type Cand = { front: string | null; back: string | null };
   const cand = (r: R): Cand => ({
@@ -720,7 +726,7 @@ function matchPairedRow<
 
   return (
     test((a, b) => a === b) ??
-    test((a, b) => sameVehicle(a, b, { kind: "registered" }).same) ??
+    test((a, b) => sameVehicle(a, b, { kind: "registered", candidates }).same) ??
     test((a, b) => plateMatchesPartial(b, a))
   );
 }

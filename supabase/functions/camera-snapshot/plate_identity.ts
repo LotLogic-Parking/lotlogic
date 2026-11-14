@@ -153,7 +153,15 @@ export type Compare = {
   /** scores of the two reads, when known (visit guard) */
   scoreA?: number | null;
   scoreB?: number | null;
+  /** Plate Recognizer's alternative readings of the read being compared
+   *  (normalized). When the other plate is one of them, PR itself said this
+   *  string could be that plate: on the security car's misread frames the
+   *  right plate was in the list 10 times out of 15. */
+  candidates?: string[] | null;
 };
+
+/** The cost a read is given against a plate PR listed as an alternative. */
+export const CANDIDATE_COST = 0.3;
 
 export type Verdict = { same: boolean; cost: number; why: string };
 
@@ -161,21 +169,26 @@ export type Verdict = { same: boolean; cost: number; why: string };
 export function sameVehicle(a: string, b: string, cmp: Compare, cfg: IdentityConfig = DEFAULT_CONFIG): Verdict {
   if (!a || !b) return { same: false, cost: Infinity, why: "empty" };
   if (a === b) return { same: true, cost: 0, why: "exact" };
-  const cost = plateDistance(a, b, cfg);
+  let cost = plateDistance(a, b, cfg);
+  let why = "";
+  if (cmp.candidates && (cmp.candidates.includes(a) || cmp.candidates.includes(b)) && cost > CANDIDATE_COST) {
+    cost = CANDIDATE_COST;
+    why = "PR candidate; ";
+  }
   switch (cmp.kind) {
     case "burst":
-      return { same: cost <= cfg.burstMax, cost, why: `burst ${cost.toFixed(1)} ${cost <= cfg.burstMax ? "≤" : ">"} ${cfg.burstMax}` };
+      return { same: cost <= cfg.burstMax, cost, why: `${why}burst ${cost.toFixed(1)} ${cost <= cfg.burstMax ? "≤" : ">"} ${cfg.burstMax}` };
     case "visit": {
-      if (cost > cfg.visitMax) return { same: false, cost, why: `visit ${cost.toFixed(1)} > ${cfg.visitMax}` };
+      if (cost > cfg.visitMax) return { same: false, cost, why: `${why}visit ${cost.toFixed(1)} > ${cfg.visitMax}` };
       const sa = cmp.scoreA ?? 0, sb = cmp.scoreB ?? 0;
       if (digitsOnlyDiffer(a, b) && sa >= cfg.digitGuardScore && sb >= cfg.digitGuardScore) {
         return { same: false, cost, why: "two confident reads disagree on a digit" };
       }
-      return { same: true, cost, why: `visit ${cost.toFixed(1)} ≤ ${cfg.visitMax}` };
+      return { same: true, cost, why: `${why}visit ${cost.toFixed(1)} ≤ ${cfg.visitMax}` };
     }
     case "registered": {
       if (Math.min(a.length, b.length) < cfg.registeredMinLen) return { same: false, cost, why: "too short to fuzzy-match a registration" };
-      return { same: cost <= cfg.registeredMax, cost, why: `registered ${cost.toFixed(1)} ${cost <= cfg.registeredMax ? "≤" : ">"} ${cfg.registeredMax}` };
+      return { same: cost <= cfg.registeredMax, cost, why: `${why}registered ${cost.toFixed(1)} ${cost <= cfg.registeredMax ? "≤" : ">"} ${cfg.registeredMax}` };
     }
   }
 }
@@ -215,4 +228,16 @@ export function consensusPlate(reads: ReadLite[], cfg: IdentityConfig = DEFAULT_
   const win = ranked[0];
   const b = byPlate.get(win)!;
   return { plate: win, support: b.support, confirmed: b.support >= 2 && !truncated(win), members: plates };
+}
+
+/** Normalized candidate plates from a Plate Recognizer result, top read excluded. */
+export function candidatePlates(result: unknown, top: string): string[] {
+  const raw = (result as { candidates?: Array<{ plate?: unknown; score?: unknown }> } | null)?.candidates;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const c of raw) {
+    const p = String(c?.plate ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (p && p !== top && !out.includes(p)) out.push(p);
+  }
+  return out;
 }

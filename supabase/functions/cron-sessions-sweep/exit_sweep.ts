@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { closeVisitOnExit, findLateExitVisit } from "../camera-snapshot/apartment_close.ts";
+import { candidatePlates } from "../camera-snapshot/plate_identity.ts";
 
 export const EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT = 15;
 export const EXIT_SWEEP_MIN_SCORE_DEFAULT = 0.8;
@@ -20,6 +21,7 @@ export type StrayExitRow = {
   plate_text: string | null;
   confidence: number | null;
   created_at: string;
+  cands?: unknown;
 };
 
 export type ExitSweepDeps = {
@@ -55,7 +57,7 @@ export async function sweepStrayApartmentExits(deps: ExitSweepDeps): Promise<{ e
   const since = new Date(now.getTime() - lookback * 60_000).toISOString();
 
   const q = await deps.db.from("plate_events")
-    .select("id,camera_id,property_id,normalized_plate,plate_text,confidence,created_at,properties!inner(property_type)")
+    .select("id,camera_id,property_id,normalized_plate,plate_text,confidence,created_at,cands:raw_data->_pr_response->results->0->candidates,properties!inner(property_type)")
     .is("session_id", null)
     .eq("event_type", "exit")
     .eq("properties.property_type", "apartment")
@@ -70,7 +72,7 @@ export async function sweepStrayApartmentExits(deps: ExitSweepDeps): Promise<{ e
   for (const r of rows) {
     try {
       const readAt = new Date(r.created_at);
-      const late = await find(deps.db, r.property_id, r.normalized_plate!, readAt, r.confidence);
+      const late = await find(deps.db, r.property_id, r.normalized_plate!, readAt, r.confidence, candidatePlates({ candidates: r.cands }, r.normalized_plate!));
       if (!late) continue;
       const kind = await close(deps.db, late.visit, r.camera_id, r.id, readAt);
       const upd = await deps.db.from("plate_events")
