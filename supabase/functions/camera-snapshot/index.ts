@@ -16,6 +16,7 @@ import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExi
 import { adoptConsensusPlate, findOpenVisitForRead, mergeIntoOlderTwin } from "./apartment_entry.ts";
 import { candidatePlates, sameVehicle } from "./plate_identity.ts";
 import { assessRead, qualityFromEnv, recentAgreeingRead } from "./read_quality.ts";
+import { isApproaching, recentBoxForPlate } from "./approach.ts";
 import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
@@ -1186,6 +1187,18 @@ Deno.serve(async (req: Request) => {
         console.log(`front plate at ${camera.id}: ${normalized} direction ${direction} -> ${flipped}`);
         direction = flipped;
       }
+      // A plate getting closer to the entry camera is a car driving out
+      // (approach.ts). Needs an earlier frame of the same car on this camera.
+      let approaching = false;
+      if (propertyType === "apartment" && direction === "entry" && !isPairedRead && cameraEntryOrder === 2) {
+        const prev = await recentBoxForPlate(db, camera.id, normalized, now);
+        const curBox = (result as { box?: { xmin?: number; ymin?: number; xmax?: number; ymax?: number } | null }).box ?? null;
+        if (prev && isApproaching(prev.box, curBox)) {
+          approaching = true;
+          direction = "exit";
+          console.log(`approaching the entry camera: ${normalized} at ${camera.id} (box ${JSON.stringify(prev.box)} -> ${JSON.stringify(curBox)}) — treated as leaving`);
+        }
+      }
 
       const baseEventRow = (sessionId: string | null, matchStatus: string) => ({
         camera_id: camera.id,
@@ -1762,7 +1775,7 @@ Deno.serve(async (req: Request) => {
         const sessionAgeMs = openSession.entered_at
           ? now.getTime() - new Date(openSession.entered_at).getTime()
           : 0;
-        if (sessionAgeMs < PARKING_BUFFER_MINUTES * 60 * 1000) {
+        if (sessionAgeMs < PARKING_BUFFER_MINUTES * 60 * 1000 && !approaching) {
           const ev = await db.from("plate_events")
             .insert(baseEventRow(openSession.id, "unmatched"))
             .select("id").single();
