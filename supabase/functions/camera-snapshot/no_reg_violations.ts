@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
-import { plateSimilar } from "./sessions.ts";
+import { sameVehicle } from "./plate_identity.ts";
 
 export const EVIDENCE_CAP = 20;
 export const LINGER_MS = 10_000;
@@ -207,7 +207,7 @@ export async function findPassForPlateInWindow(db: SupabaseClient, args: {
   if (args.normalized_plate.length >= 6) {
     for (const r of rows) {
       const norms = candidates(r);
-      if (norms.some((p) => plateSimilar(p, args.normalized_plate, true))) {
+      if (norms.some((p) => sameVehicle(p, args.normalized_plate, { kind: "registered" }).same)) {
         return { id: r.id, normalized_plate: args.normalized_plate };
       }
     }

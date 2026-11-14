@@ -1,93 +1,56 @@
 // One car, one tile (Gabe, 2026-11-14: "we still have plates that are close
-// to each other reading as separate visits"). Apartments only, unregistered
+// to each other reading as separate visits"; "there needs to be something
+// that catches the similarity of the plates"). Apartments only, unregistered
 // reads only: a read that matches a resident or a live pass is that car.
 //
-//  Twin. Two frames of one car at the gate read a plate two ways (TAK983
-//     and AK983 eleven seconds apart). findSimilarOpenSession misses them
-//     when the first visit is already "anchored" (three reads at 0.9+ make
-//     it match same-length plates only) or when the two frames are being
-//     ingested at the same moment and neither sees the other's visit. A
-//     read within TWIN_WINDOW_SECONDS of an open visit whose plate is close
-//     joins that visit; a visit that opened anyway merges into the older
-//     twin right after opening.
-//
-//  Like. The same car hours later read a little differently (SVL41 at 11 PM,
-//     SVL414 at 3:40 AM). The exact lookup misses it and the fuzzy lookup
-//     only looks two minutes back, so a second tile opens. A read that is
-//     plateSimilar to exactly one open unregistered visit of any age is that
-//     visit, and the re-entry rule (apartment_close.ts) decides whether it
-//     is the same stay or a new one.
-//
-//  Better plate. When a read joins a visit under a different plate, the
-//     visit takes the better read: a clearly higher score, or the longer
-//     plate at a similar score (the short one is the truncation).
+// All comparisons use plate_identity.ts (the one formula):
+//  Twin.  A read within TWIN_WINDOW_SECONDS of an open visit whose plate is
+//         the same car under the burst rule joins that visit; a visit that
+//         opened anyway (two frames ingested at the same moment) merges into
+//         the older twin right after opening.
+//  Like.  A read that is the same car as exactly one open unregistered visit
+//         of any age under the visit rule is that visit; the re-entry rule
+//         (apartment_close.ts) decides whether it is the same stay or a new one.
+//  Plate. A visit carries the consensus of its reads (consensusPlate), so a
+//         truncated or one-off read never names the tile.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { plateSimilar, type OpenSessionRow } from "./sessions.ts";
+import type { OpenSessionRow } from "./sessions.ts";
+import { consensusPlate, sameVehicle, type ReadLite } from "./plate_identity.ts";
 
 export const TWIN_WINDOW_SECONDS = 120;
-export const BETTER_SCORE_MARGIN = 0.05;
 
 const SESSION_COLUMNS = "id,property_id,normalized_plate,plate_text,state,entered_at,last_detected_at,visitor_pass_id,resident_plate_id,violation_id";
 
-function levenshteinBounded(a: string, b: string, max: number): number {
-  if (Math.abs(a.length - b.length) > max) return max + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let rowMin = i;
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      cur.push(Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost));
-      rowMin = Math.min(rowMin, cur[j]);
-    }
-    if (rowMin > max) return max + 1;
-    prev = cur;
-  }
-  return prev[b.length];
-}
-
-/** Two reads of one car within the twin window. plateSimilar, or two edits
- *  apart on plates of five or more characters. */
 export function twinSimilar(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (plateSimilar(a, b, false)) return true;
-  return Math.max(a.length, b.length) >= 5 && levenshteinBounded(a, b, 2) <= 2;
+  return sameVehicle(a, b, { kind: "burst" }).same;
 }
 
-/** The same car read a little differently, any time apart. plateSimilar only. */
-export function likeSimilar(a: string, b: string): boolean {
-  return !!a && !!b && plateSimilar(a, b, false);
-}
-
-/** Should the visit take the new read's plate? */
-export function betterPlate(current: { plate: string; score: number }, read: { plate: string; score: number }): boolean {
-  if (!read.plate || read.plate === current.plate) return false;
-  if (read.score >= current.score + BETTER_SCORE_MARGIN) return true;
-  if (read.score + BETTER_SCORE_MARGIN < current.score) return false;
-  return read.plate.length > current.plate.length;
+export function likeSimilar(a: string, b: string, scoreA?: number | null, scoreB?: number | null): boolean {
+  return sameVehicle(a, b, { kind: "visit", scoreA, scoreB }).same;
 }
 
 type Lite = Pick<OpenSessionRow, "id" | "normalized_plate" | "state" | "entered_at">;
 
-/** The open unregistered visit this read joins, or null: an earliest twin
- *  inside the window, else a single like visit of any age. */
+/** The open unregistered visit this read joins, or null: the closest twin
+ *  inside the window, else a single like visit of any age. `visitScores`
+ *  is each visit's best score for its own plate (the digit guard). */
 export function pickOpenVisitForRead<T extends Lite>(
   read: string,
   open: T[],
   now: Date,
   windowSeconds: number = TWIN_WINDOW_SECONDS,
+  readScore: number | null = null,
+  visitScores: Map<string, number> = new Map(),
 ): { visit: T; how: "twin" | "like" } | null {
   if (!read) return null;
   const grace = open.filter((v) => v.state === "grace" && v.normalized_plate !== read);
   const twins = grace
-    .filter((v) => {
-      const t = Date.parse(v.entered_at);
-      return Number.isFinite(t) && now.getTime() - t <= windowSeconds * 1000 && now.getTime() - t >= -windowSeconds * 1000 && twinSimilar(v.normalized_plate, read);
-    })
-    .sort((x, y) => Date.parse(x.entered_at) - Date.parse(y.entered_at));
-  if (twins.length > 0) return { visit: twins[0], how: "twin" };
-  const like = grace.filter((v) => likeSimilar(v.normalized_plate, read));
+    .map((v) => ({ v, t: Date.parse(v.entered_at), r: sameVehicle(v.normalized_plate, read, { kind: "burst" }) }))
+    .filter(({ t, r }) => Number.isFinite(t) && Math.abs(now.getTime() - t) <= windowSeconds * 1000 && r.same)
+    .sort((x, y) => x.r.cost - y.r.cost || x.t - y.t);
+  if (twins.length > 0) return { visit: twins[0].v, how: "twin" };
+  const like = grace.filter((v) => sameVehicle(v.normalized_plate, read, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore }).same);
   if (like.length === 1) return { visit: like[0], how: "like" };
   return null;
 }
@@ -100,7 +63,7 @@ export function pickOlderTwin<T extends Lite>(
 ): T | null {
   const t0 = Date.parse(mine.entered_at);
   const older = open
-    .filter((v) => v.id !== mine.id && v.state === "grace" && twinSimilar(v.normalized_plate, mine.normalized_plate))
+    .filter((v) => v.id !== mine.id && v.state === "grace" && sameVehicle(v.normalized_plate, mine.normalized_plate, { kind: "burst" }).same)
     .filter((v) => {
       const t = Date.parse(v.entered_at);
       return Number.isFinite(t) && t0 - t >= 0 && t0 - t <= windowSeconds * 1000 && (t < t0 || v.id < mine.id);
@@ -115,39 +78,65 @@ async function openVisits(db: SupabaseClient, propertyId: string): Promise<OpenS
   return (r.data ?? []) as OpenSessionRow[];
 }
 
-export async function findOpenVisitForRead(
-  db: SupabaseClient, propertyId: string, normalizedPlate: string, now: Date,
-): Promise<{ visit: OpenSessionRow; how: "twin" | "like" } | null> {
-  return pickOpenVisitForRead(normalizedPlate, await openVisits(db, propertyId), now);
+/** Each visit's best score for its own plate. */
+export async function visitPlateScores(db: SupabaseClient, visits: OpenSessionRow[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (visits.length === 0) return out;
+  const plateOf = new Map(visits.map((v) => [v.id, v.normalized_plate]));
+  const r = await db.from("plate_events")
+    .select("session_id,normalized_plate,confidence")
+    .in("session_id", visits.map((v) => v.id))
+    .gte("confidence", 0.8)
+    .limit(3000);
+  if (r.error) throw r.error;
+  for (const e of (r.data ?? []) as Array<{ session_id: string; normalized_plate: string | null; confidence: number | null }>) {
+    if (!e.session_id || e.normalized_plate !== plateOf.get(e.session_id) || typeof e.confidence !== "number") continue;
+    if ((out.get(e.session_id) ?? 0) < e.confidence) out.set(e.session_id, e.confidence);
+  }
+  return out;
 }
 
-/** The visit takes the read's plate when the read is better. Returns the
+export async function findOpenVisitForRead(
+  db: SupabaseClient, propertyId: string, normalizedPlate: string, now: Date, readScore: number | null = null,
+): Promise<{ visit: OpenSessionRow; how: "twin" | "like" } | null> {
+  const open = await openVisits(db, propertyId);
+  const scores = await visitPlateScores(db, open.filter((v) => v.state === "grace"));
+  return pickOpenVisitForRead(normalizedPlate, open, now, TWIN_WINDOW_SECONDS, readScore, scores);
+}
+
+/** The reads attributed to a visit (its own PR reads, not inherited frames). */
+async function visitReads(db: SupabaseClient, sessionId: string): Promise<ReadLite[]> {
+  const r = await db.from("plate_events")
+    .select("normalized_plate,confidence,inh:raw_data->>_inherited_from_session")
+    .eq("session_id", sessionId)
+    .not("normalized_plate", "is", null)
+    .limit(500);
+  if (r.error) throw r.error;
+  return ((r.data ?? []) as Array<{ normalized_plate: string | null; confidence: number | null; inh: string | null }>)
+    .filter((e) => e.normalized_plate && !e.inh)
+    .map((e) => ({ plate: e.normalized_plate as string, score: e.confidence }));
+}
+
+/** The visit takes the consensus of its reads plus this one. Returns the
  *  plate the visit now carries. A clash with another open visit on the new
  *  plate (one open visit per plate) leaves the visit as it was. */
-export async function adoptBetterPlate(
+export async function adoptConsensusPlate(
   db: SupabaseClient, session: OpenSessionRow, read: { plateText: string; normalized: string; score: number }, now: Date,
 ): Promise<string> {
-  const cur = await db.from("plate_events")
-    .select("confidence")
-    .eq("session_id", session.id)
-    .eq("normalized_plate", session.normalized_plate)
-    .order("confidence", { ascending: false })
-    .limit(1);
-  if (cur.error) throw cur.error;
-  const curScore = typeof cur.data?.[0]?.confidence === "number" ? cur.data[0].confidence : 0;
-  if (!betterPlate({ plate: session.normalized_plate, score: curScore }, { plate: read.normalized, score: read.score })) {
-    return session.normalized_plate;
-  }
+  const reads = await visitReads(db, session.id);
+  reads.push({ plate: read.normalized, score: read.score });
+  const c = consensusPlate(reads);
+  if (!c || c.plate === session.normalized_plate) return session.normalized_plate;
   const upd = await db.from("plate_sessions")
-    .update({ plate_text: read.plateText, normalized_plate: read.normalized, updated_at: now.toISOString() })
+    .update({ plate_text: c.plate, normalized_plate: c.plate, updated_at: now.toISOString() })
     .eq("id", session.id)
     .is("exited_at", null);
   if (upd.error) {
     if (String(upd.error.code) === "23505") return session.normalized_plate;
     throw upd.error;
   }
-  console.log(`better plate: session=${session.id} ${session.normalized_plate} (${curScore}) -> ${read.normalized} (${read.score})`);
-  return read.normalized;
+  console.log(`consensus plate: session=${session.id} ${session.normalized_plate} -> ${c.plate} (support ${c.support}${c.confirmed ? ", confirmed" : ""})`);
+  return c.plate;
 }
 
 /** After a visit opened: if an older twin is open, move this visit's reads
@@ -163,7 +152,6 @@ export async function mergeIntoOlderTwin(
   if (move.error) throw move.error;
   const del = await db.from("plate_sessions").delete().eq("id", mine.id).is("exited_at", null);
   if (del.error) {
-    // Something already points at the new row: close it instead of deleting.
     console.warn(`twin merge: could not delete ${mine.id} (${del.error.message}); closing it`);
     const close = await db.from("plate_sessions")
       .update({ state: "closed_clean", exited_at: mine.entered_at, updated_at: now.toISOString() })
@@ -172,7 +160,7 @@ export async function mergeIntoOlderTwin(
   }
   const bump = await db.from("plate_sessions").update({ last_detected_at: now.toISOString(), updated_at: now.toISOString() }).eq("id", twin.id);
   if (bump.error) throw bump.error;
-  await adoptBetterPlate(db, twin, { plateText: mine.plate_text, normalized: mine.normalized_plate, score: mine.score }, now);
+  await adoptConsensusPlate(db, twin, { plateText: mine.plate_text, normalized: mine.normalized_plate, score: mine.score }, now);
   console.log(`twin merge: visit ${mine.id} (${mine.normalized_plate}) folded into ${twin.id} (${twin.normalized_plate})`);
   return twin;
 }

@@ -94,10 +94,10 @@ Deno.test("withinBurstWindow: inside, at the edge, past, before, and off", () =>
   assertEquals(withinBurstWindow(null, now, 90), false);
 });
 
-Deno.test("readMatchesSession: exact and anchored-similar only", () => {
+Deno.test("readMatchesSession: the burst rule of plate_identity", () => {
   assertEquals(readMatchesSession("ABC123", "ABC123"), true);
   assertEquals(readMatchesSession("ABC1Z3", "ABC123"), true);   // one confusable edit
-  assertEquals(readMatchesSession("ABC12", "ABC123"), false);   // different length: never
+  assertEquals(readMatchesSession("ABC12", "ABC123"), true);    // a dropped edge character is the same car in a burst
   assertEquals(readMatchesSession("XYZ789", "ABC123"), false);
   assertEquals(readMatchesSession("", "ABC123"), false);
 });

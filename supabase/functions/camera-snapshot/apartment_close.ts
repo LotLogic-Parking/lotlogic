@@ -3,7 +3,8 @@
 // are closing all passes"). Apartments only; a truck plaza keeps its rules.
 //
 //  A. Late exit match. An exit-camera read that matches no open visit exactly
-//     is compared against EVERY open visit at the property with plateSimilar,
+//     is compared against EVERY open visit at the property with the
+//     plate_identity "visit" rule,
 //     however old the visit. findSimilarOpenSession only considers visits
 //     with plate activity in the last two minutes, so an entry read of VS233
 //     at 9:19 never met the exit read VS2330 at 9:29 and the visit sat open.
@@ -20,7 +21,9 @@
 // Both honour the rule that only a plate read opens or closes a visit.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { applyExitOutcome, decideExitOutcome, plateSimilar, type ExitOutcome, type OpenSessionRow } from "./sessions.ts";
+import { applyExitOutcome, decideExitOutcome, type ExitOutcome, type OpenSessionRow } from "./sessions.ts";
+import { sameVehicle } from "./plate_identity.ts";
+import { visitPlateScores } from "./apartment_entry.ts";
 
 export const REENTRY_MINUTES_DEFAULT = 10;
 // The keypad buffer: an exit-camera read inside this many seconds of entry is
@@ -53,19 +56,21 @@ export function isBurstNoise(
     if (!c.exited_at) continue;
     const t = Date.parse(c.exited_at);
     if (!Number.isFinite(t) || Math.abs(readAt.getTime() - t) > windowMs) continue;
-    if (c.normalized_plate === readPlate || plateSimilar(c.normalized_plate, readPlate, false)) return true;
+    if (sameVehicle(c.normalized_plate, readPlate, { kind: "burst" }).same) return true;
   }
   return false;
 }
 
 /** The one open visit an exit read belongs to, or null. Exact plate first;
- *  otherwise a single plateSimilar candidate. Visits younger than
+ *  otherwise a single visit the formula calls the same car. Visits younger than
  *  minAgeSeconds are the keypad case and never match. */
 export function pickLateExitMatch<T extends OpenVisitLite>(
   readPlate: string,
   open: T[],
   readAt: Date,
   minAgeSeconds: number = LATE_EXIT_MIN_AGE_SECONDS,
+  readScore: number | null = null,
+  visitScores: Map<string, number> = new Map(),
 ): { visit: T; reason: "exact" | "similar" } | null {
   if (!readPlate) return null;
   const aged = open.filter((v) => {
@@ -74,7 +79,7 @@ export function pickLateExitMatch<T extends OpenVisitLite>(
   });
   const exact = aged.find((v) => v.normalized_plate === readPlate);
   if (exact) return { visit: exact, reason: "exact" };
-  const similar = aged.filter((v) => plateSimilar(v.normalized_plate, readPlate, false));
+  const similar = aged.filter((v) => sameVehicle(v.normalized_plate, readPlate, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore }).same);
   if (similar.length === 1) return { visit: similar[0], reason: "similar" };
   return null;
 }
@@ -126,6 +131,7 @@ export async function findLateExitVisit(
   propertyId: string,
   normalizedPlate: string,
   readAt: Date,
+  readScore: number | null = null,
 ): Promise<{ visit: OpenSessionRow; reason: "exact" | "similar" } | null> {
   const since = new Date(readAt.getTime() - BURST_NOISE_MINUTES * 60_000).toISOString();
   const closed = await db.from("plate_sessions")
@@ -141,7 +147,9 @@ export async function findLateExitVisit(
     .is("exited_at", null)
     .limit(500);
   if (open.error) throw open.error;
-  return pickLateExitMatch(normalizedPlate, (open.data ?? []) as OpenSessionRow[], readAt);
+  const visits = (open.data ?? []) as OpenSessionRow[];
+  const scores = await visitPlateScores(db, visits);
+  return pickLateExitMatch(normalizedPlate, visits, readAt, LATE_EXIT_MIN_AGE_SECONDS, readScore, scores);
 }
 
 /** Rule B close: the car left while the exit camera was asleep. exited_at is

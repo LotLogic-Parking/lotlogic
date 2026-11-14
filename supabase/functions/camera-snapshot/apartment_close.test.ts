@@ -11,7 +11,8 @@ Deno.test("late exit: VS2330 leaving at 9:29 closes the VS233 visit that came in
   assertEquals(pickLateExitMatch("VS2330", open, at("14:29"))?.visit.id, "a");
   assertEquals(pickLateExitMatch("VS2330", open, at("14:29"))?.reason, "similar");
   assertEquals(pickLateExitMatch("LKH2416", open, at("20:36"))?.visit.id, "b");
-  assertEquals(pickLateExitMatch("T85911", [v("d", "TD5911", "18:01")], at("18:09"))?.visit.id, "d");
+  // a plain (non-lookalike) substitution is not enough at any age: D/8 is not a measured confusion
+  assertEquals(pickLateExitMatch("T85911", [v("d", "TD5911", "18:01")], at("18:09")), null);
 });
 
 Deno.test("late exit: an exact plate wins, two look-alikes close nothing, a keypad-age visit never matches", () => {

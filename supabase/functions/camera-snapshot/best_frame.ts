@@ -31,7 +31,7 @@
 //     bug: frame 1 closed the session, frame 2 opened a new one).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { plateSimilar } from "./sessions.ts";
+import { sameVehicle } from "./plate_identity.ts";
 
 export const BURST_WINDOW_SECONDS_DEFAULT = 90;
 export const BURST_PR_CAP_DEFAULT = 3;
@@ -78,7 +78,7 @@ export function withinBurstWindow(anchorIso: string | null | undefined, now: Dat
 /** A burst frame may stand in for the session only when its read is the same plate, anchored. */
 export function readMatchesSession(normalizedRead: string, sessionNormalizedPlate: string): boolean {
   if (!normalizedRead || !sessionNormalizedPlate) return false;
-  return normalizedRead === sessionNormalizedPlate || plateSimilar(normalizedRead, sessionNormalizedPlate, true);
+  return sameVehicle(normalizedRead, sessionNormalizedPlate, { kind: "burst" }).same;
 }
 
 /** How many burst probes (PR-called frames flagged raw_data._burst) this session side already has. */

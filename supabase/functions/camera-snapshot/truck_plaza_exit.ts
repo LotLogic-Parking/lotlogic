@@ -20,6 +20,7 @@
 //      left on time).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { sameVehicle } from "./plate_identity.ts";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
 import { areCharsConfusable } from "./sessions.ts";
 import { insertWeakRead, findStaleGroups, flushGroup } from "./weak_plate_reads.ts";
@@ -99,30 +100,12 @@ const TRUCK_FUZZY_CANCEL_MIN = Number(Deno.env.get("TRUCK_FUZZY_CANCEL_MIN") ?? 
 // registration time for QR passes; app passes anchor on entry_seen_at.
 const EXIT_MIN_DWELL_MINUTES = Number(Deno.env.get("EXIT_MIN_DWELL_MINUTES") ?? "60");
 
-// Max TOTAL differing character positions (OCR-confusable swaps + true edits
-// combined) for a fuzzy exit read to auto-close a pass. The old rule allowed
-// UNLIMITED confusable swaps + 1 true edit, so a read could ride several "free"
-// confusable swaps onto a different vehicle's plate — e.g. MBD8497 closed a
-// WBD3427 pass via M↔W + 8↔3 (both confusable) + 9↔2 (the 1 true edit) = 3
-// real differences. Bounding the TOTAL diffs to 2 rejects that cross-vehicle
-// case while still allowing genuine 1–2 char night OCR drift. 0 = exact only.
-// Env-tunable so the threshold can be retuned without a redeploy.
-const EXIT_MATCH_MAX_TOTAL_DIFFS = Number(Deno.env.get("EXIT_MATCH_MAX_TOTAL_DIFFS") ?? "2");
 
-// Tighter fuzzy predicate for the EXIT close path ONLY (not session burst-dedup,
-// which keeps using the looser plateSimilar). Same-length required; counts every
-// differing position, distinguishing confusable swaps from true edits, and caps
-// both: at most 1 true edit AND at most EXIT_MATCH_MAX_TOTAL_DIFFS total diffs.
 function exitFuzzyMatch(read: string, registered: string): boolean {
-  if (read.length !== registered.length) return false;
-  let trueEdits = 0;
-  let totalDiffs = 0;
-  for (let i = 0; i < read.length; i++) {
-    if (read[i] === registered[i]) continue;
-    totalDiffs++;
-    if (!areCharsConfusable(read[i], registered[i])) trueEdits++;
-  }
-  return trueEdits <= 1 && totalDiffs <= EXIT_MATCH_MAX_TOTAL_DIFFS;
+  // plate_identity.ts "registered": one plain edit or two lookalikes, both
+  // plates at least six characters. MBD8497 vs WBD3427 scores 2.0 and is
+  // rejected; VK5131 vs VK5137 scores 1.0 and closes.
+  return sameVehicle(read, registered, { kind: "registered" }).same;
 }
 
 // Group key for burst dedup. SC211s at the same gate share a group so

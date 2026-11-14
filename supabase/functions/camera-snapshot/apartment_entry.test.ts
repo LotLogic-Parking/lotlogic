@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { betterPlate, likeSimilar, pickOlderTwin, pickOpenVisitForRead, twinSimilar } from "./apartment_entry.ts";
+import { likeSimilar, pickOlderTwin, pickOpenVisitForRead, twinSimilar } from "./apartment_entry.ts";
 
 const at = (s: string) => new Date(`2026-11-14T${s}:00Z`);
 const v = (id: string, plate: string, entered: string, state = "grace") =>
@@ -42,13 +42,4 @@ Deno.test("older twin: the visit that opened first keeps the car; the first by i
   const same = [v("x", "JHN6706", "10:38"), v("y", "JHV6706", "10:38")];
   assertEquals(pickOlderTwin({ id: "y", normalized_plate: "JHV6706", entered_at: at("10:38").toISOString() }, same)?.id, "x");
   assertEquals(pickOlderTwin({ id: "x", normalized_plate: "JHN6706", entered_at: at("10:38").toISOString() }, same), null);
-});
-
-Deno.test("better plate: a clearly higher score, or the longer plate at a similar score", () => {
-  assertEquals(betterPlate({ plate: "AK983", score: 1 }, { plate: "TAK983", score: 1 }), true);
-  assertEquals(betterPlate({ plate: "TAK983", score: 1 }, { plate: "AK983", score: 1 }), false);
-  assertEquals(betterPlate({ plate: "JHN6706", score: 0.832 }, { plate: "JHV6706", score: 0.999 }), true);
-  assertEquals(betterPlate({ plate: "LKL3974", score: 0.998 }, { plate: "LKL39", score: 0.9 }), false);
-  assertEquals(betterPlate({ plate: "SVL41", score: 0.986 }, { plate: "SVL414", score: 0.998 }), true);
-  assertEquals(betterPlate({ plate: "A", score: 1 }, { plate: "A", score: 1 }), false);
 });

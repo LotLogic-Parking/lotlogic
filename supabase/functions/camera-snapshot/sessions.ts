@@ -148,6 +148,7 @@ export async function findCooldownPriorSession(
 // here at startup — auto-mined pairs are ADDITIVE, never replace the
 // base.
 import autoFuzzyConfig from "./auto-fuzzy-config.json" with { type: "json" };
+import { sameVehicle } from "./plate_identity.ts";
 
 const OCR_CONFUSIONS_BASE: Array<[string, string]> = [
   // Letter ↔ digit (most common in production)
@@ -429,38 +430,33 @@ export async function findSimilarOpenSession(
     .limit(200);
   if (evErr) throw evErr;
 
-  // Bucket events by session_id: distinct plates + count hi-conf detections.
-  type Bucket = { plates: Set<string>; hiConfCount: number };
-  const perSession = new Map<string, Bucket>();
+  // Every read inside the window is a burst-time read of the same gate pass,
+  // so the plate_identity "burst" rule applies (plate_identity.ts): the
+  // session whose reads sit closest to this read wins. The old per-session
+  // "anchored" mode (three reads at 0.9+ restrict matching to same-length
+  // plates) is gone: it is what split TAK983 from AK983.
+  const bestCost = new Map<string, number>();
   for (const ev of recentEvents ?? []) {
-    if (!ev.session_id) continue;
-    let b = perSession.get(ev.session_id);
-    if (!b) { b = { plates: new Set(), hiConfCount: 0 }; perSession.set(ev.session_id, b); }
-    if (ev.normalized_plate) b.plates.add(ev.normalized_plate);
-    if (typeof ev.confidence === "number" && ev.confidence >= 0.9) b.hiConfCount++;
+    if (!ev.session_id || !ev.normalized_plate) continue;
+    const v = sameVehicle(ev.normalized_plate as string, normalizedPlate, { kind: "burst" });
+    if (!v.same) continue;
+    const cur = bestCost.get(ev.session_id);
+    if (cur === undefined || v.cost < cur) bestCost.set(ev.session_id, v.cost);
   }
-
-  const candidateIds = new Set<string>();
-  for (const [sessionId, bucket] of perSession) {
-    const anchored = bucket.hiConfCount >= 3;
-    for (const plate of bucket.plates) {
-      if (plateSimilar(plate, normalizedPlate, anchored)) {
-        candidateIds.add(sessionId);
-        break;
-      }
-    }
-  }
-  if (candidateIds.size === 0) return null;
+  if (bestCost.size === 0) return null;
 
   const { data: openRows, error: sErr } = await db
     .from("plate_sessions")
     .select("id,property_id,normalized_plate,plate_text,state,entered_at,last_detected_at,visitor_pass_id,resident_plate_id,violation_id")
-    .in("id", Array.from(candidateIds))
+    .in("id", Array.from(bestCost.keys()))
     .is("exited_at", null)
     .order("entered_at", { ascending: false })
-    .limit(1);
+    .limit(20);
   if (sErr) throw sErr;
-  return ((openRows ?? [])[0] as OpenSessionRow) ?? null;
+  const rows = (openRows ?? []) as OpenSessionRow[];
+  if (rows.length === 0) return null;
+  rows.sort((x, y) => (bestCost.get(x.id) ?? 9) - (bestCost.get(y.id) ?? 9));
+  return rows[0];
 }
 
 // Extract a pure DOT or MC number from a synthesized plate like "DOT-1234567"
@@ -547,7 +543,7 @@ export async function findRecentPrCallForCamera(
     // pairs). PR's read is high-confidence and we want to absorb sidecar
     // misreads aggressively here — false-merge risk is bounded by the
     // 3-min window (resets after).
-    if (plateSimilar(ev.normalized_plate as string, candidateNormalizedPlate, true)) {
+    if (sameVehicle(ev.normalized_plate as string, candidateNormalizedPlate, { kind: "burst" }).same) {
       return {
         session_id: (ev.session_id as string | null) ?? null,
         plate_text: ev.plate_text as string,
@@ -724,7 +720,7 @@ function matchPairedRow<
 
   return (
     test((a, b) => a === b) ??
-    test((a, b) => plateSimilar(a, b, true)) ??
+    test((a, b) => sameVehicle(a, b, { kind: "registered" }).same) ??
     test((a, b) => plateMatchesPartial(b, a))
   );
 }

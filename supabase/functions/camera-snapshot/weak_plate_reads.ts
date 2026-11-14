@@ -19,7 +19,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
-import { plateSimilar } from "./sessions.ts";
+import { sameVehicle } from "./plate_identity.ts";
 import {
   findOpenViolation,
   insertViolation,
@@ -317,7 +317,7 @@ async function findActiveUnexitedPassFuzzy(
     if (cands(r).includes(normalized)) return wrap(r, false);
   }
   for (const r of rows) {
-    if (cands(r).some((p) => plateSimilar(p, normalized, true))) return wrap(r, true);
+    if (cands(r).some((p) => sameVehicle(p, normalized, { kind: "registered" }).same)) return wrap(r, true);
   }
   // Partial-substring tier REMOVED 2026-05-29 (smarter-matching). It was the
   // path that mismatched 2R028 onto 24023 via a shared substring — the onboard
