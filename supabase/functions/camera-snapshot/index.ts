@@ -14,7 +14,8 @@ import { isPlateHeld } from "./holds.ts";
 import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExitVisit, isReentry, minutesFromEnv } from "./apartment_close.ts";
 import { adoptConsensusPlate, findOpenVisitForRead, mergeIntoOlderTwin } from "./apartment_entry.ts";
-import { sameVehicle } from "./plate_identity.ts";
+import { candidatePlates, sameVehicle } from "./plate_identity.ts";
+import { assessRead, qualityFromEnv, recentAgreeingRead } from "./read_quality.ts";
 import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
@@ -61,6 +62,12 @@ const APARTMENT_REENTRY_MINUTES = minutesFromEnv(Deno.env.get("APARTMENT_REENTRY
 // Floor for a lone read to OPEN a new apartment visit (see open_floor.ts).
 // Weaker reads are still accepted and logged; they just cannot start a visit.
 const PR_MIN_OPEN_SCORE_APARTMENT = openFloorFromEnv(Deno.env.get("PR_MIN_OPEN_SCORE_APARTMENT"));
+// Apartments: is the read a plate, and can it open a visit on its own
+// (read_quality.ts)? READ_QUALITY_CONFIG (JSON) overrides any number.
+const READ_QUALITY = qualityFromEnv(Deno.env.get("READ_QUALITY_CONFIG"));
+// Plate Recognizer orientation (needs the MMC add-on, PR_MMC_ENABLED): a
+// front plate seen by an apartment entry camera is a car driving out.
+const ORIENTATION_MIN_SCORE = Number(Deno.env.get("ORIENTATION_MIN_SCORE") ?? "0.7");
 // Per-camera PR_MIN_SCORE override. JSON map { "<camera_id>": <floor> }.
 // When a camera_id is in the map, its plate reads bypass BOTH the
 // length-scaled confidence ladder AND the vehicle-detection gate, and
@@ -909,6 +916,13 @@ Deno.serve(async (req: Request) => {
     // police unit numbers, URLs, decals, and industrial labels that PR
     // OCRs as plate-shaped text.
     let surviving = results.filter((r: PrResult) => isPlausiblePlate(r, camera.id, propertyType));
+    if (propertyType === "apartment") {
+      surviving = surviving.filter((r: PrResult) => {
+        const q = assessRead(readSignals(r, imageHashes.width, imageHashes.height), READ_QUALITY);
+        if (q.grade === "reject") console.log(`read rejected (not a plate): "${r.plate}" at ${camera.id}: ${q.reasons.join("; ")}`);
+        return q.grade !== "reject";
+      });
+    }
 
     // Burst mode: if a recent frame had no usable plate, usdot_active_until
     // is set N seconds in the future. USDOT OCR only fires when THIS frame
@@ -1033,6 +1047,15 @@ Deno.serve(async (req: Request) => {
       const plateUpper = (result.plate as string).toUpperCase();
       const normalized = normalizePlate(result.plate as string);
       const vehicleType = (result as { vehicle?: { type?: string | null } }).vehicle?.type ?? null;
+      // What PR also thought this plate could be, and how much to trust the read.
+      const readCandidates = candidatePlates(result, normalized);
+      const quality = propertyType === "apartment"
+        ? assessRead(readSignals(result, imageHashes.width, imageHashes.height), READ_QUALITY)
+        : null;
+      const orientationRaw = Array.isArray(result.orientation) ? result.orientation[0] : undefined;
+      const frontPlate = propertyType === "apartment"
+        && orientationRaw?.orientation === "Front"
+        && typeof orientationRaw.score === "number" && orientationRaw.score >= ORIENTATION_MIN_SCORE;
 
       // MMC extraction. When usdotSynthesizedPlate=true, `result` is a synthetic
       // object with no model_make/color arrays — extract MMC from the first real
@@ -1153,6 +1176,15 @@ Deno.serve(async (req: Request) => {
         }
       } else {
         direction = camera.orientation === "exit" ? "exit" : "entry";
+      }
+      // A front plate at an apartment gate faces the camera: at the entry
+      // camera that is a car driving out (a decorative "GOD IS" front plate
+      // opened a visit on 2026-11-13); at the exit camera it is the car at
+      // the keypad on its way in, which must not close anything.
+      if (frontPlate && !isPairedRead) {
+        const flipped = direction === "entry" ? "exit" : "entry";
+        console.log(`front plate at ${camera.id}: ${normalized} direction ${direction} -> ${flipped}`);
+        direction = flipped;
       }
 
       const baseEventRow = (sessionId: string | null, matchStatus: string) => ({
@@ -1288,7 +1320,7 @@ Deno.serve(async (req: Request) => {
       // out of the lot.
       if (direction === "exit") {
         const peekSession = await findSimilarOpenSession(
-          db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
+          db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash, readCandidates,
         );
         if (!peekSession) {
           const closed = await recentlyClosed();
@@ -1303,7 +1335,7 @@ Deno.serve(async (req: Request) => {
           // against every open visit at the property (apartment_close.ts,
           // rule A) before filing it as a stray.
           if (propertyType === "apartment") {
-            const late = await findLateExitVisit(db, camera.property_id, normalized, now, result.score ?? null);
+            const late = await findLateExitVisit(db, camera.property_id, normalized, now, result.score ?? null, readCandidates);
             if (late) {
               const ev = await db.from("plate_events")
                 .insert({
@@ -1337,15 +1369,15 @@ Deno.serve(async (req: Request) => {
         // misread character. Also match on USDOT/MC: frame 1 reads plate,
         // frame 2 reads DOT — both collapse onto the same session.
         let openSession = await findSimilarOpenSession(
-          db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
+          db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash, readCandidates,
         );
         // Apartment, unregistered read: a twin read of a car at the gate, or
         // the same car hours later read a little differently (apartment_entry.ts).
         if (!openSession && propertyType === "apartment") {
-          const known = (await findActiveResident(db, camera.property_id, normalized))
-            || (await findActiveVisitorPass(db, camera.property_id, normalized, now));
+          const known = (await findActiveResident(db, camera.property_id, normalized, readCandidates))
+            || (await findActiveVisitorPass(db, camera.property_id, normalized, now, readCandidates));
           if (!known) {
-            const same = await findOpenVisitForRead(db, camera.property_id, normalized, now, result.score ?? null);
+            const same = await findOpenVisitForRead(db, camera.property_id, normalized, now, result.score ?? null, readCandidates);
             if (same) {
               openSession = same.visit;
               console.log(`same car (${same.how}): read ${normalized} joins visit ${same.visit.id} (${same.visit.normalized_plate})`);
@@ -1484,11 +1516,11 @@ Deno.serve(async (req: Request) => {
         // Both lookups now check FRONT and BACK plate columns on the registered
         // row — drivers register both plates at QR check-in since tractors and
         // trailers can show different plates.
-        let resident = await findActiveResident(db, camera.property_id, normalized);
+        let resident = await findActiveResident(db, camera.property_id, normalized, readCandidates);
         if (!resident && frameUsdot)   resident = await findActiveResident(db, camera.property_id, `DOT${frameUsdot}`);
         if (!resident && frameMc)      resident = await findActiveResident(db, camera.property_id, `MC${frameMc}`);
 
-        let pass = resident ? null : await findActiveVisitorPass(db, camera.property_id, normalized, now);
+        let pass = resident ? null : await findActiveVisitorPass(db, camera.property_id, normalized, now, readCandidates);
         if (!resident && !pass && frameUsdot) pass = await findActiveVisitorPass(db, camera.property_id, `DOT${frameUsdot}`, now);
         if (!resident && !pass && frameMc)    pass = await findActiveVisitorPass(db, camera.property_id, `MC${frameMc}`, now);
 
@@ -1506,6 +1538,25 @@ Deno.serve(async (req: Request) => {
           eventCount++;
           console.log(`apartment open floor: read ${normalized} scored ${result.score} < ${PR_MIN_OPEN_SCORE_APARTMENT} at ${camera.id} — logged, no visit opened`);
           continue;
+        }
+        // A tentative read (cut by the frame edge, an unfamiliar format, PR
+        // unsure) opens a visit only with a second agreeing read on this
+        // camera in the last two minutes; the first frame of a burst waits
+        // for the second (read_quality.ts).
+        if (!resident && !pass && quality && quality.grade === "tentative") {
+          const agree = await recentAgreeingRead(db, camera.id, normalized, now, READ_QUALITY);
+          // A plate cut by the frame edge is only backed by a longer read of
+          // the same car, not by another cut frame of the same burst.
+          if (!agree || (quality.edgeCut && agree.plate.length <= normalized.length)) {
+            const ev = await db.from("plate_events")
+              .insert(baseEventRow(null, "unmatched"))
+              .select("id").single();
+            if (ev.error) throw ev.error;
+            eventCount++;
+            console.log(`tentative read: ${normalized} at ${camera.id} (${quality.reasons.join("; ")}) — logged, no visit opened yet`);
+            continue;
+          }
+          console.log(`tentative read ${normalized} backed by ${agree.plate} at ${agree.confidence}: opening`);
         }
 
         // Cooldown: a previously-REGISTERED vehicle that parked and left
@@ -2257,6 +2308,19 @@ async function maybePairedMotionExitHint(
     .is("exit_hinted_at", null);
   if (upd.error) console.warn("paired-motion exit hint update failed:", upd.error.message);
   else console.log(`exit inferred (paired-motion) session=${sessionId} gate=${camera.gate_id}`);
+}
+
+function readSignals(r: PrResult, imageWidth: number, imageHeight: number) {
+  const x = r as { dscore?: unknown; box?: unknown; candidates?: unknown[] };
+  return {
+    plate: normalizePlate(r.plate ?? ""),
+    score: typeof r.score === "number" ? r.score : 0,
+    dscore: typeof x.dscore === "number" ? x.dscore : null,
+    box: (x.box ?? null) as { xmin?: number; ymin?: number; xmax?: number; ymax?: number } | null,
+    imageWidth: imageWidth || null,
+    imageHeight: imageHeight || null,
+    candidateCount: Array.isArray(x.candidates) ? x.candidates.length : null,
+  };
 }
 
 function isPlausiblePlate(r: PrResult, cameraId: string, propertyType: string | null = null): boolean {

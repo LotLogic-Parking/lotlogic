@@ -69,6 +69,24 @@ The confusable set is the old lookalike table plus every pair seen three or more
 
 Not changed: exact lookups for cooldown and holds, the dHash image match, the backend SQL `plate_confusable_match`, the frontend grouping, and `cron-plate-pair-learn`. Those are display or audit paths, or compare typed values with typed values.
 
+## Plate Recognizer's candidates
+
+Every PR read carries a `candidates` list: the other strings it considered, with scores. On the misread frames of one car at Mayfield the right plate was in that list 10 times out of 15. When the plate being compared is one of the read's candidates, the distance is capped at 0.3 ("PR candidate"), which passes every threshold. The digit guard still applies, so two confident reads disagreeing on a digit stay two plates even when PR offered the other digit. Candidates flow through the session lookup, twin and like joins, late exit, the cron exit sweep, and registration matching.
+
+## Read quality (`read_quality.ts`, apartments)
+
+The photos behind Mayfield's stray tiles (2026-11-14): a decorative front plate on a car driving out past the entry camera; lettering on a van read once at night; real plates cut off by the frame edge, read as five characters at full confidence; a distant car and a trailer with no plate in view. Over 14 days, 1,598 agreed reads against 42 lone unrepeated reads: PR's detection score is below 0.5 on 31% of the lone reads and 4% of the agreed ones; eight or more candidates on 60% against 8%; five characters on 21% against 1%.
+
+| Grade | When | Effect |
+|---|---|---|
+| reject | dscore < 0.5, box wider than 3.2× its height, or under 20 px tall | logged as not a plate, never matched |
+| tentative | cut by the frame edge, a format not seen at our properties, 8+ candidates, or score under 0.80 | may join an open visit; opens a new one only with a second agreeing read on the same camera within two minutes (a cut plate needs a longer read) |
+| solid | none of the above | opens a visit on its own |
+
+Known formats are the shapes seen 20 or more times at full confidence: AAA9999, 99999A, AA9999, AAA999, AA99AA, 9AA999. A vanity plate in another shape still opens after two agreeing frames of the same burst. `READ_QUALITY_CONFIG` (JSON) overrides any number.
+
+**Orientation.** With the PR make-model-colour add-on enabled (`PR_MMC_ENABLED`), each read says whether it saw the Front or Rear of the car. At an apartment gate a front plate faces the camera: at the entry camera it is a car driving out, so the read is treated as an exit; at the exit camera it is the car at the keypad on its way in, so it closes nothing. Without the add-on this rule is inert.
+
 ## Test cases
 
 `plate_identity.test.ts` holds the production pairs: 23 one-car pairs from Mayfield bursts, 4 two-car bursts, 5 different-vehicle pairs across days, 4 same-car pairs across hours, and the Charlotte false close. The formula must keep all of them on the right side.

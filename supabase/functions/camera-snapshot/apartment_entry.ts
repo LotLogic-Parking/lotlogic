@@ -22,8 +22,8 @@ export const TWIN_WINDOW_SECONDS = 120;
 
 const SESSION_COLUMNS = "id,property_id,normalized_plate,plate_text,state,entered_at,last_detected_at,visitor_pass_id,resident_plate_id,violation_id";
 
-export function twinSimilar(a: string, b: string): boolean {
-  return sameVehicle(a, b, { kind: "burst" }).same;
+export function twinSimilar(a: string, b: string, candidates: string[] | null = null): boolean {
+  return sameVehicle(a, b, { kind: "burst", candidates }).same;
 }
 
 export function likeSimilar(a: string, b: string, scoreA?: number | null, scoreB?: number | null): boolean {
@@ -42,15 +42,16 @@ export function pickOpenVisitForRead<T extends Lite>(
   windowSeconds: number = TWIN_WINDOW_SECONDS,
   readScore: number | null = null,
   visitScores: Map<string, number> = new Map(),
+  candidates: string[] | null = null,
 ): { visit: T; how: "twin" | "like" } | null {
   if (!read) return null;
   const grace = open.filter((v) => v.state === "grace" && v.normalized_plate !== read);
   const twins = grace
-    .map((v) => ({ v, t: Date.parse(v.entered_at), r: sameVehicle(v.normalized_plate, read, { kind: "burst" }) }))
+    .map((v) => ({ v, t: Date.parse(v.entered_at), r: sameVehicle(v.normalized_plate, read, { kind: "burst", candidates }) }))
     .filter(({ t, r }) => Number.isFinite(t) && Math.abs(now.getTime() - t) <= windowSeconds * 1000 && r.same)
     .sort((x, y) => x.r.cost - y.r.cost || x.t - y.t);
   if (twins.length > 0) return { visit: twins[0].v, how: "twin" };
-  const like = grace.filter((v) => sameVehicle(v.normalized_plate, read, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore }).same);
+  const like = grace.filter((v) => sameVehicle(v.normalized_plate, read, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore, candidates }).same);
   if (like.length === 1) return { visit: like[0], how: "like" };
   return null;
 }
@@ -98,10 +99,11 @@ export async function visitPlateScores(db: SupabaseClient, visits: OpenSessionRo
 
 export async function findOpenVisitForRead(
   db: SupabaseClient, propertyId: string, normalizedPlate: string, now: Date, readScore: number | null = null,
+  candidates: string[] | null = null,
 ): Promise<{ visit: OpenSessionRow; how: "twin" | "like" } | null> {
   const open = await openVisits(db, propertyId);
   const scores = await visitPlateScores(db, open.filter((v) => v.state === "grace"));
-  return pickOpenVisitForRead(normalizedPlate, open, now, TWIN_WINDOW_SECONDS, readScore, scores);
+  return pickOpenVisitForRead(normalizedPlate, open, now, TWIN_WINDOW_SECONDS, readScore, scores, candidates);
 }
 
 /** The reads attributed to a visit (its own PR reads, not inherited frames). */

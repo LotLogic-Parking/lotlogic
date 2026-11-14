@@ -71,6 +71,7 @@ export function pickLateExitMatch<T extends OpenVisitLite>(
   minAgeSeconds: number = LATE_EXIT_MIN_AGE_SECONDS,
   readScore: number | null = null,
   visitScores: Map<string, number> = new Map(),
+  candidates: string[] | null = null,
 ): { visit: T; reason: "exact" | "similar" } | null {
   if (!readPlate) return null;
   const aged = open.filter((v) => {
@@ -79,7 +80,7 @@ export function pickLateExitMatch<T extends OpenVisitLite>(
   });
   const exact = aged.find((v) => v.normalized_plate === readPlate);
   if (exact) return { visit: exact, reason: "exact" };
-  const similar = aged.filter((v) => sameVehicle(v.normalized_plate, readPlate, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore }).same);
+  const similar = aged.filter((v) => sameVehicle(v.normalized_plate, readPlate, { kind: "visit", scoreA: visitScores.get(v.id) ?? null, scoreB: readScore, candidates }).same);
   if (similar.length === 1) return { visit: similar[0], reason: "similar" };
   return null;
 }
@@ -132,6 +133,7 @@ export async function findLateExitVisit(
   normalizedPlate: string,
   readAt: Date,
   readScore: number | null = null,
+  candidates: string[] | null = null,
 ): Promise<{ visit: OpenSessionRow; reason: "exact" | "similar" } | null> {
   const since = new Date(readAt.getTime() - BURST_NOISE_MINUTES * 60_000).toISOString();
   const closed = await db.from("plate_sessions")
@@ -149,7 +151,7 @@ export async function findLateExitVisit(
   if (open.error) throw open.error;
   const visits = (open.data ?? []) as OpenSessionRow[];
   const scores = await visitPlateScores(db, visits);
-  return pickLateExitMatch(normalizedPlate, visits, readAt, LATE_EXIT_MIN_AGE_SECONDS, readScore, scores);
+  return pickLateExitMatch(normalizedPlate, visits, readAt, LATE_EXIT_MIN_AGE_SECONDS, readScore, scores, candidates);
 }
 
 /** Rule B close: the car left while the exit camera was asleep. exited_at is
