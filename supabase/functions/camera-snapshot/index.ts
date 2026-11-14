@@ -13,6 +13,7 @@ import {
 import { isPlateHeld } from "./holds.ts";
 import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExitVisit, isReentry, minutesFromEnv } from "./apartment_close.ts";
+import { adoptBetterPlate, findOpenVisitForRead, mergeIntoOlderTwin } from "./apartment_entry.ts";
 import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
@@ -1337,6 +1338,19 @@ Deno.serve(async (req: Request) => {
         let openSession = await findSimilarOpenSession(
           db, camera.property_id, normalized, 120, frameUsdot, frameMc, imageHashes.dhash,
         );
+        // Apartment, unregistered read: a twin read of a car at the gate, or
+        // the same car hours later read a little differently (apartment_entry.ts).
+        if (!openSession && propertyType === "apartment") {
+          const known = (await findActiveResident(db, camera.property_id, normalized))
+            || (await findActiveVisitorPass(db, camera.property_id, normalized, now));
+          if (!known) {
+            const same = await findOpenVisitForRead(db, camera.property_id, normalized, now);
+            if (same) {
+              openSession = same.visit;
+              console.log(`same car (${same.how}): read ${normalized} joins visit ${same.visit.id} (${same.visit.normalized_plate})`);
+            }
+          }
+        }
         // Apartment re-entry (apartment_close.ts, rule B): the entry camera
         // only sees cars coming in, so a plate read again after a gap left
         // while the exit camera was asleep. Close the old visit at its last
@@ -1408,6 +1422,9 @@ Deno.serve(async (req: Request) => {
                 .insert(baseEventRow(openSession.id, "unmatched"))
                 .select().single();
           if (ev.error) throw ev.error;
+          if (propertyType === "apartment" && openSession.state === "grace" && normalized !== openSession.normalized_plate) {
+            await adoptBetterPlate(db, openSession, { plateText: plateUpper, normalized, score: result.score ?? 0 }, now);
+          }
           // Direction inference MUST run before the last_detected_at bump so
           // the silence-gap branch inside inferDirection sees the prior
           // timestamp.
@@ -1558,6 +1575,17 @@ Deno.serve(async (req: Request) => {
         } catch (err) {
           await db.from("plate_events").delete().eq("id", ev.data.id);
           throw err;
+        }
+
+        // Apartment: two frames of one car ingested at the same moment can
+        // both open a visit before either sees the other. The one that
+        // opened second folds into the first (apartment_entry.ts).
+        if (propertyType === "apartment" && state === "grace") {
+          const twin = await mergeIntoOlderTwin(db, {
+            id: sess.id, property_id: camera.property_id, normalized_plate: normalized, plate_text: plateUpper,
+            entered_at: now.toISOString(), score: result.score ?? 0,
+          }, now);
+          if (twin) { dedupCount++; continue; }
         }
 
         // Direction inference across cameras.
