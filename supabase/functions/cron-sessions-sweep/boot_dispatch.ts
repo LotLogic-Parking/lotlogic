@@ -29,14 +29,14 @@
 //   • A dispatch nobody resolves goes stale after BOOT_STALE_HOURS and is
 //     dismissed, so the session closes instead of hanging open for days.
 //   • Registration matching is the same fuzzy rule the entry uses
-//     (plateSimilar, anchored), over visitor passes AND resident plates.
+//     (plate_identity "registered"), over visitor passes AND resident plates.
 //   • Driver roster: BOOT_DRIVER_PHONES (comma-separated). Empty = the
 //     feature is off and nothing here runs, so no session is ever claimed
 //     with nobody to text. The backend's inbound SMS webhook authorizes
 //     DONE-<id> replies against the same list.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { plateSimilar } from "../camera-snapshot/sessions.ts";
+import { sameVehicle } from "../camera-snapshot/plate_identity.ts";
 
 export const GRACE_DISPATCH_MINUTES_DEFAULT = 10;
 export const SIGN_WINDOW_MINUTES = 15;
@@ -134,7 +134,7 @@ const norm = (s: unknown) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g,
 /** The entry's own rule: exact, or anchored-similar (one confusable edit, same length). */
 export function plateCovers(registered: unknown, sessionPlate: string): boolean {
   const a = norm(registered);
-  return !!a && !!sessionPlate && (a === sessionPlate || plateSimilar(a, sessionPlate, true));
+  return !!a && !!sessionPlate && sameVehicle(a, sessionPlate, { kind: "registered" }).same;
 }
 
 const TWILIO_API_BASE = "https://api.twilio.com/2010-04-01";

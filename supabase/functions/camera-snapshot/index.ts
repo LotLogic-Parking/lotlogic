@@ -4,7 +4,7 @@ import { makeR2Uploader } from "../pr-ingest/r2.ts";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
 import { extractFromRequest } from "./extract.ts";
 import { parsePath } from "./path.ts";
-import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit, plateSimilar } from "./sessions.ts";
+import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit } from "./sessions.ts";
 import { handleTruckPlazaExit } from "./truck_plaza_exit.ts";
 import {
   BURST_PR_CAP_DEFAULT, BURST_WINDOW_SECONDS_DEFAULT, countBurstProbes, findRecentlyClosedSession,
@@ -13,7 +13,8 @@ import {
 import { isPlateHeld } from "./holds.ts";
 import { isOwnCall, isSnapshotTopicPost, snapshotTopicSkipList, tagOwnCall, type PrWebhook } from "./pr_webhook.ts";
 import { REENTRY_MINUTES_DEFAULT, closeLeftUnseen, closeVisitOnExit, findLateExitVisit, isReentry, minutesFromEnv } from "./apartment_close.ts";
-import { adoptBetterPlate, findOpenVisitForRead, mergeIntoOlderTwin } from "./apartment_entry.ts";
+import { adoptConsensusPlate, findOpenVisitForRead, mergeIntoOlderTwin } from "./apartment_entry.ts";
+import { sameVehicle } from "./plate_identity.ts";
 import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
 import { extractUsdot } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
@@ -1117,7 +1118,7 @@ Deno.serve(async (req: Request) => {
           ? (priorAtGate ?? []).find((r) => {
             const pr = String((r as { normalized_plate?: string | null; plate_text?: string | null }).normalized_plate
               || (r as { plate_text?: string | null }).plate_text || "").toUpperCase();
-            return pr !== "" && (pr === normalized || plateSimilar(pr, normalized, true));
+            return pr !== "" && sameVehicle(pr, normalized, { kind: "burst" }).same;
           })
           : (priorAtGate ?? [])[0];
         if (priorRow) {
@@ -1302,7 +1303,7 @@ Deno.serve(async (req: Request) => {
           // against every open visit at the property (apartment_close.ts,
           // rule A) before filing it as a stray.
           if (propertyType === "apartment") {
-            const late = await findLateExitVisit(db, camera.property_id, normalized, now);
+            const late = await findLateExitVisit(db, camera.property_id, normalized, now, result.score ?? null);
             if (late) {
               const ev = await db.from("plate_events")
                 .insert({
@@ -1344,7 +1345,7 @@ Deno.serve(async (req: Request) => {
           const known = (await findActiveResident(db, camera.property_id, normalized))
             || (await findActiveVisitorPass(db, camera.property_id, normalized, now));
           if (!known) {
-            const same = await findOpenVisitForRead(db, camera.property_id, normalized, now);
+            const same = await findOpenVisitForRead(db, camera.property_id, normalized, now, result.score ?? null);
             if (same) {
               openSession = same.visit;
               console.log(`same car (${same.how}): read ${normalized} joins visit ${same.visit.id} (${same.visit.normalized_plate})`);
@@ -1423,7 +1424,7 @@ Deno.serve(async (req: Request) => {
                 .select().single();
           if (ev.error) throw ev.error;
           if (propertyType === "apartment" && openSession.state === "grace" && normalized !== openSession.normalized_plate) {
-            await adoptBetterPlate(db, openSession, { plateText: plateUpper, normalized, score: result.score ?? 0 }, now);
+            await adoptConsensusPlate(db, openSession, { plateText: plateUpper, normalized, score: result.score ?? 0 }, now);
           }
           // Direction inference MUST run before the last_detected_at bump so
           // the silence-gap branch inside inferDirection sees the prior

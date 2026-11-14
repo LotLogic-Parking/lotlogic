@@ -70,7 +70,7 @@ export async function sweepStrayApartmentExits(deps: ExitSweepDeps): Promise<{ e
   for (const r of rows) {
     try {
       const readAt = new Date(r.created_at);
-      const late = await find(deps.db, r.property_id, r.normalized_plate!, readAt);
+      const late = await find(deps.db, r.property_id, r.normalized_plate!, readAt, r.confidence);
       if (!late) continue;
       const kind = await close(deps.db, late.visit, r.camera_id, r.id, readAt);
       const upd = await deps.db.from("plate_events")
