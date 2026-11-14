@@ -87,6 +87,10 @@ Known formats are the shapes seen 20 or more times at full confidence: AAA9999, 
 
 **Orientation.** With the PR make-model-colour add-on enabled (`PR_MMC_ENABLED`), each read says whether it saw the Front or Rear of the car. At an apartment gate a front plate faces the camera: at the entry camera it is a car driving out, so the read is treated as an exit; at the exit camera it is the car at the keypad on its way in, so it closes nothing. Without the add-on this rule is inert.
 
+## Approach (`approach.ts`, apartments)
+
+A plate getting closer to the entry camera is a car driving out. Over 14 days, in all 34 bursts of a car that certainly entered (the exit camera later read it leaving) the plate box shrank and moved up the frame by 32 to 217 px; in the one burst of a car certainly leaving past the entry camera it grew 18 px and moved down 230 px. The rule: the box top moved down by more than 40 px, or grew by more than 8 px while moving down, compared with an earlier frame of the same car on the same camera within 60 s. A read that fires is treated as an exit, and it closes the visit its own first frame opened seconds before (the parking buffer does not apply). Single-frame bursts get no verdict.
+
 ## Test cases
 
 `plate_identity.test.ts` holds the production pairs: 23 one-car pairs from Mayfield bursts, 4 two-car bursts, 5 different-vehicle pairs across days, 4 same-car pairs across hours, and the Charlotte false close. The formula must keep all of them on the right side.
