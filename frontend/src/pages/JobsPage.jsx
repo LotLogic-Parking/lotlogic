@@ -191,7 +191,7 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
           extra._partner = { id: user.id, boot_fee: user.boot_fee, tow_fee: user.tow_fee, revenue_share: user.revenue_share };
         } else {
           // Owner acting directly — record gross revenue with 100% to LotLogic (no partner split)
-          extra._ownerFees = { boot_fee: 75, tow_fee: 250 };
+          extra._ownerFees = { boot_fee: 250, tow_fee: 250 };
           extra._ownerId = user.id;
         }
       }
@@ -931,8 +931,8 @@ export function JobsPage({ lots, violations, alprViolations = [], loading, lotSt
               ) : (
               <>
               <div className="job-actions-row" role="group" aria-label="Enforcement actions" style={{gap:8, padding:'10px 12px'}}>
-                <button className="action-btn boot" disabled={anyActing} onClick={() => requestAction(v.id, 'boot')} aria-label={`Boot vehicle for $${user?.boot_fee || 75}`} style={{padding:'12px 6px', fontSize:13}}>
-                  {isActing ? '…' : `Boot · $${user?.boot_fee || 75}`}
+                <button className="action-btn boot" disabled={anyActing} onClick={() => requestAction(v.id, 'boot')} aria-label={`Boot vehicle for $${user?.boot_fee || 250}`} style={{padding:'12px 6px', fontSize:13}}>
+                  {isActing ? '…' : `Boot · $${user?.boot_fee || 250}`}
                 </button>
                 <button className="action-btn tow" disabled={anyActing} onClick={() => requestAction(v.id, 'tow')} aria-label={`Tow vehicle for $${user?.tow_fee || 250}`} style={{padding:'12px 6px', fontSize:13}}>
                   {isActing ? '…' : `Tow · $${user?.tow_fee || 250}`}

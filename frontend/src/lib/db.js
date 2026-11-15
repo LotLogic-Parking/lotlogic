@@ -305,14 +305,14 @@ export const db = {
       if (action === 'boot' || action === 'tow') {
         if (extra._partner) {
           const p = extra._partner;
-          const grossFee = action === 'boot' ? (p.boot_fee || 75) : (p.tow_fee || 250);
+          const grossFee = action === 'boot' ? (p.boot_fee || 250) : (p.tow_fee || 250);
           const share = p.revenue_share != null ? p.revenue_share : 0.30;
           updates.gross_revenue = grossFee;
           updates.our_revenue = Math.round(grossFee * share);
           updates.partner_id = p.id;
         } else if (extra._ownerFees) {
           const f = extra._ownerFees;
-          const grossFee = action === 'boot' ? (f.boot_fee || 75) : (f.tow_fee || 250);
+          const grossFee = action === 'boot' ? (f.boot_fee || 250) : (f.tow_fee || 250);
           updates.gross_revenue = grossFee;
           updates.our_revenue = grossFee; // Owner keeps 100%
         }
@@ -360,7 +360,7 @@ export const db = {
           };
           if (extra._partner) {
             const p = extra._partner;
-            const grossFee = action === 'boot' ? (p.boot_fee || 75) : (p.tow_fee || 250);
+            const grossFee = action === 'boot' ? (p.boot_fee || 250) : (p.tow_fee || 250);
             const share = p.revenue_share != null ? p.revenue_share : 0.30;
             logEntry.partner_id = p.id;
             logEntry.performed_by = 'partner';
@@ -373,7 +373,7 @@ export const db = {
             logEntry.owner_id = extra._ownerId || null;
             logEntry.performed_by = 'owner';
             logEntry.performer_email = extra._performerEmail || null;
-            const grossFee = action === 'boot' ? (extra._ownerFees.boot_fee || 75) : (extra._ownerFees.tow_fee || 250);
+            const grossFee = action === 'boot' ? (extra._ownerFees.boot_fee || 250) : (extra._ownerFees.tow_fee || 250);
             logEntry.gross_fee = grossFee;
             logEntry.our_revenue = grossFee;
             logEntry.partner_payout = 0;
