@@ -134,7 +134,7 @@ export function OverviewPage({ violations, lots, partners, lotStates, onViewAs }
             {os.dismissed > 0 && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:700, color:'#a78bfa', background:'rgba(167,139,250,.1)', border:'1px solid rgba(167,139,250,.2)'}}>Dismissed ×{os.dismissed}</span>}
             {os.avgResponse != null && <span style={{padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600, color:'var(--text-muted)', background:'var(--bg-inset)', border:'1px solid var(--border)'}}>Avg {os.avgResponse < 60 ? `${os.avgResponse}m` : `${Math.round(os.avgResponse / 60)}h`} response</span>}
             <span style={{marginLeft:'auto', fontSize:11, color:'var(--text-faint)'}}>
-              Boot ${os.partner.boot_fee || 75} · Tow ${os.partner.tow_fee || 250} · {Math.round((os.partner.revenue_share || 0.3) * 100)}% share
+              Boot ${os.partner.boot_fee || 250} · Tow ${os.partner.tow_fee || 250} · {Math.round((os.partner.revenue_share || 0.3) * 100)}% share
             </span>
           </div>
 

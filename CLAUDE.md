@@ -157,7 +157,7 @@ bounding boxes against zone polygons from recent snapshots to find WHY zones fai
 - Snapshot poll interval: 30 seconds default
 
 ## Revenue Model
-- `gross_revenue` = boot_fee ($75 default) or tow_fee ($250 default)
+- `gross_revenue` = boot_fee ($250 default; Gabe, 2026-11-15: "boot fee is 250") or tow_fee ($250 default)
 - `our_revenue` = gross_revenue * revenue_share (30% default)
 - Revenue stored in dollars in DB, displayed as cents in frontend (multiplied by 100)
 
