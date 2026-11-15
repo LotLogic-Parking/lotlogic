@@ -74,3 +74,46 @@ test('actionsFor: the buttons that make sense for the boot right now', () => {
   assert.deepEqual(actionsFor({ state: 0 }, { status: 'release_authorized' }), ['release', 'emergency']);
   for (const k of ['open', 'place', 'store', 'release', 'waive', 'cancel', 'emergency', 'wifi']) assert.ok(ACTION_LABEL[k]);
 });
+
+import { meters, paymentFlags, paymentsSummary, placeLine } from '../src/lib/enforcement.js';
+
+const AT = { gps: { lat: 35.2831, lon: -80.8105, source: 'lock' }, geo: { at_property: true, property: 'Mayfield Memorial Apartments', distance_m: 85, nearest: 'Mayfield Memorial Apartments', nearest_m: 85 }, paid_amount_cents: 25000 };
+const OFF = { gps: { lat: 35.37, lon: -80.80, source: 'lock' }, geo: { at_property: false, property: null, distance_m: null, nearest: 'Charlotte Travel Plaza', nearest_m: 8300 } };
+
+test('meters and placeLine: at a property, off property, no GPS', () => {
+  assert.deepEqual([85, 1234, 12345, null].map(meters), ['85 m', '1.2 km', '12 km', '']);
+  assert.equal(placeLine(AT), 'Mayfield Memorial Apartments · 85 m from the address');
+  assert.equal(placeLine(OFF), 'Not at a LotLogic property · nearest Charlotte Travel Plaza, 8.3 km');
+  assert.equal(placeLine({ gps: null }), 'No GPS recorded');
+});
+
+test('paymentFlags: what needs a look on a payment', () => {
+  assert.deepEqual(paymentFlags({ kind: 'boot', square: { fee_cents: 755, refunded_cents: 0 }, placement: AT }), []);
+  assert.deepEqual(paymentFlags({ kind: 'boot', square: { fee_cents: null, refunded_cents: 0 }, placement: OFF }).map(f => f.key), ['off', 'nofee']);
+  assert.deepEqual(paymentFlags({ kind: 'boot', square: null, placement: { gps: null }, not_in_square: true }).map(f => f.key), ['nosquare', 'nogps']);
+  assert.deepEqual(paymentFlags({ kind: 'other', square: { fee_cents: 3, refunded_cents: 0 }, placement: null }).map(f => f.key), ['other']);
+});
+
+test('paymentsSummary: boot payments only, Square numbers first', () => {
+  const s = paymentsSummary([
+    { kind: 'boot', square: { amount_cents: 25000, fee_cents: 755, refunded_cents: 0, net_cents: 24245 }, placement: AT },
+    { kind: 'boot', square: { amount_cents: 25000, fee_cents: 755, refunded_cents: 25000, net_cents: -755 }, placement: OFF },
+    { kind: 'boot', square: null, not_in_square: true, placement: { ...AT, square_fee_cents: 0 } },
+    { kind: 'other', square: { amount_cents: 999, fee_cents: 30, net_cents: 969 }, placement: null },
+  ]);
+  assert.deepEqual(s, { count: 3, gross: 75000, fees: 1510, refunded: 25000, net: 48490, atProperty: 2, offProperty: 1, other: 1 });
+});
+
+test('paymentsSummary: a declined card is listed but not counted; a placement Square did not list nets its own numbers', () => {
+  const s = paymentsSummary([
+    { kind: 'boot', square: { status: 'FAILED', amount_cents: 25000, fee_cents: null, net_cents: 25000, refunded_cents: 0 }, placement: { geo: { at_property: true } } },
+    { kind: 'boot', square: { status: 'COMPLETED', amount_cents: 25000, fee_cents: 755, net_cents: 24245, refunded_cents: 0 }, placement: { geo: { at_property: true } } },
+    { kind: 'boot', square: null, not_in_square: true, placement: { paid_amount_cents: 25000, square_fee_cents: 700, refunded_amount_cents: 5000, geo: null } },
+  ]);
+  assert.equal(s.count, 2);
+  assert.equal(s.gross, 50000);
+  assert.equal(s.fees, 1455);
+  assert.equal(s.refunded, 5000);
+  assert.equal(s.net, 24245 + 19300);
+  assert.equal(s.other, 0);
+});

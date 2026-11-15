@@ -19,6 +19,8 @@
 //                                   -> any signed-in user: unlock now, paid or not; logged permanently for review
 //   POST /boot-portal/cancel       {boot_id}                    -> cancel a lock the boot has not picked up yet
 //   POST /boot-portal/setup-wifi   {boot_id}                    -> admin/dispatch: open the boot's setup Wi-Fi (free boot only)
+//   GET  /boot-portal/payments?days=  LotLogic admins: every Square payment joined to its boot placement, with the
+//                                   placement GPS matched to the nearest property (payments.ts)
 // LotLogic admins (BOOT_ADMIN_EMAILS, default gabriel@ and victor@lotlogicparking.com) can call every route with
 // their main-dashboard session instead of a portal token: the backend's /auth/me says who it is (admin.ts). An admin
 // sees and acts on every partner's boots, as role admin.
@@ -27,6 +29,7 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword, wifiSsid } from "../_shared/boot.ts";
 import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt } from "./admin.ts";
+import { joinSquare, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
 
 const SESSION_H = 12;
 const LOCK_TTL_S = 600;
@@ -56,6 +59,7 @@ Deno.serve(async (req) => {
       if (route === "boots") return json(await listBoots(db, me));
       if (route === "boot") return json(await bootDetail(db, me, url.searchParams.get("id")));
       if (route === "properties") return json(await listProperties(db, me));
+      if (route === "payments") return json(await payments(db, me, url));
     }
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
@@ -205,6 +209,8 @@ async function bootDetail(db: SupabaseClient, me: Me, id: string | null) {
   const signature_url = await signedRead(db, dep?.driver_signature_path);
   let property: string | null = null;
   if (dep?.property_id) property = (await db.from("properties").select("name").eq("id", dep.property_id).maybeSingle()).data?.name ?? null;
+  const point = dep ? placementPoint(dep) : null;
+  const geo = point ? matchProperty(point.lat, point.lon, await propertyPoints(db)) : null;
   return {
     ok: true, me,
     boot: {
@@ -223,6 +229,8 @@ async function bootDetail(db: SupabaseClient, me: Me, id: string | null) {
       emergency_unlocked_at: dep.emergency_unlocked_at, emergency_reason: dep.emergency_reason,
       emergency_reason_label: dep.emergency_reason ? EMERGENCY_REASONS[dep.emergency_reason] ?? dep.emergency_reason : null,
       emergency_explanation: dep.emergency_explanation,
+      gps: point ? { ...point, accuracy_m: dep.lock_accuracy_m ?? null } : null,
+      geo,
     } : null,
     commands: cmds ?? [],
     emergency_reasons: EMERGENCY_REASONS,
@@ -344,7 +352,18 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   const pending = await pendingCommand(db, b.id);
   if (pending) throw new HttpError(409, "command_pending", "The boot has another command waiting. Try again once it's done.");
 
-  const propertyId = str(body.property_id, 36);
+  let propertyId = str(body.property_id, 36);
+  let geoNote: string | null = null;
+  if (!propertyId && num(body.lat) != null && num(body.lon) != null) {
+    // No property picked: take the one the phone's GPS puts the car at, if any (payments.ts).
+    const { properties: mine } = await listProperties(db, me);
+    const ids = new Set(mine.map((p: { id: string }) => p.id));
+    const m = matchProperty(num(body.lat), num(body.lon), (await propertyPoints(db)).filter((p) => ids.has(p.id)));
+    if (m.at_property && m.property_id) {
+      propertyId = m.property_id;
+      geoNote = `property set from GPS: ${m.property} (${m.distance_m} m)`;
+    }
+  }
   if (propertyId) {
     if (!UUID.test(propertyId)) throw new HttpError(400, "bad_property");
     const { properties } = await listProperties(db, me);
@@ -360,7 +379,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     boot_id: b.id, partner_id: b.partner_id, property_id: propertyId, plate_text: plate, plate_state: plateState,
     vehicle_make: str(body.vehicle_make, 40), vehicle_model: str(body.vehicle_model, 40), vehicle_color: str(body.vehicle_color, 30),
     lock_photo_url: photo, lock_lat: num(body.lat), lock_lon: num(body.lon), lock_accuracy_m: num(body.accuracy_m),
-    applied_by: me.member_id, fee_cents: fee, notes: str(body.notes, 1000),
+    applied_by: me.member_id, fee_cents: fee, notes: [str(body.notes, 1000), geoNote].filter(Boolean).join("\n") || null,
     driver_signature_path: sig, driver_signed_name: signedName, driver_signed_at: signedAt.toISOString(), driver_attestation: attest,
   }).select("id").single();
   if (error) {
@@ -545,4 +564,112 @@ async function setupWifi(db: SupabaseClient, me: Me, body: Record<string, unknow
       ? "Setup Wi-Fi requested. It opens at the boot's next check-in (about a minute)."
       : "Setup Wi-Fi queued, but this boot hasn't checked in recently. It opens when the boot next connects (within 10 minutes).",
   };
+}
+
+// ---------------------------------------------------------------- payments log (LotLogic admins)
+async function propertyPoints(db: SupabaseClient): Promise<PropertyPoint[]> {
+  const { data, error } = await db.from("properties").select("id, name, lat, lng").is("archived_at", null);
+  if (error) throw error;
+  return (data ?? []) as PropertyPoint[];
+}
+
+async function listSquarePayments(sinceIso: string): Promise<{ ok: boolean; error?: string; payments: SquarePayment[] }> {
+  const token = Deno.env.get("SQUARE_ACCESS_TOKEN");
+  const location = Deno.env.get("SQUARE_LOCATION_ID");
+  if (!token || !location) return { ok: false, error: "square_not_configured", payments: [] };
+  const base = (Deno.env.get("SQUARE_ENV") ?? "sandbox") === "production" ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
+  const out: SquarePayment[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const qs = new URLSearchParams({ location_id: location, begin_time: sinceIso, sort_order: "DESC", limit: "100" });
+    if (cursor) qs.set("cursor", cursor);
+    let r: Response;
+    try {
+      r = await fetch(`${base}/v2/payments?${qs}`, { headers: { Authorization: `Bearer ${token}`, "Square-Version": "2025-01-23" } });
+    } catch {
+      return { ok: false, error: "square_unreachable", payments: out };
+    }
+    const j = await r.json().catch(() => null) as { payments?: SquarePayment[]; cursor?: string } | null;
+    if (!r.ok) return { ok: false, error: `square_${r.status}`, payments: out };
+    out.push(...(j?.payments ?? []));
+    cursor = j?.cursor;
+    if (!cursor) break;
+  }
+  return { ok: true, payments: out };
+}
+
+async function payments(db: SupabaseClient, me: Me, url: URL) {
+  if (!me.lotlogic) throw new HttpError(403, "not_allowed", "The payments log is for LotLogic admins.");
+  const days = Math.min(730, Math.max(1, Number(url.searchParams.get("days")) || 180));
+  const since = new Date(Date.now() - days * 86400_000).toISOString();
+  const [deps, props, boots, partners, refunds, square] = await Promise.all([
+    db.from("boot_deployments").select("*").gte("created_at", new Date(Date.now() - (days + 30) * 86400_000).toISOString())
+      .order("created_at", { ascending: false }).limit(2000),
+    propertyPoints(db),
+    db.from("boots").select("id, label, qr_code"),
+    db.from("enforcement_partners").select("id, company_name"),
+    db.from("boot_refunds").select("deployment_id, square_refund_id, amount_cents, status, reason, created_at"),
+    listSquarePayments(since),
+  ]);
+  if (deps.error) throw deps.error;
+  const bootBy = new Map((boots.data ?? []).map((b) => [b.id, b]));
+  const partnerBy = new Map((partners.data ?? []).map((p) => [p.id, p.company_name]));
+  const propBy = new Map(props.map((p) => [p.id, p.name]));
+  const refundsBy = new Map<string, unknown[]>();
+  for (const r of refunds.data ?? []) refundsBy.set(r.deployment_id, [...(refundsBy.get(r.deployment_id) ?? []), r]);
+
+  const placement = (d: Record<string, unknown>) => {
+    const point = placementPoint(d);
+    const geo = point ? matchProperty(point.lat, point.lon, props) : null;
+    const declared = typeof d.property_id === "string" ? propBy.get(d.property_id) ?? null : null;
+    const b = bootBy.get(d.boot_id as string);
+    return {
+      id: d.id, status: d.status, boot: b?.label ?? null, boot_qr: b?.qr_code ?? null, company: partnerBy.get(d.partner_id as string) ?? null,
+      plate: d.plate_text, plate_state: d.plate_state,
+      vehicle: [d.vehicle_color, d.vehicle_make, d.vehicle_model].filter(Boolean).join(" ") || null,
+      property: declared, gps: point ? { ...point, accuracy_m: d.lock_accuracy_m ?? null } : null, geo,
+      property_mismatch: !!(declared && geo?.at_property && geo.property_id !== d.property_id),
+      applied_at: d.applied_at, driver: d.driver_signed_name, paid_at: d.paid_at, released_at: d.released_at,
+      release_reason: d.release_reason, unlocked_at: d.unlocked_at, cancelled_at: d.cancelled_at,
+      fee_cents: d.fee_cents, paid_amount_cents: d.paid_amount_cents, square_fee_cents: d.square_fee_cents,
+      lotlogic_share_cents: d.lotlogic_share_cents, partner_share_cents: d.partner_share_cents,
+      refunded_amount_cents: d.refunded_amount_cents, refunds: refundsBy.get(d.id as string) ?? [],
+      payer_phone: d.payer_phone, payer_email: d.payer_email, partner_paid_out_at: d.partner_paid_out_at,
+      square_payment_id: d.square_payment_id, square_order_id: d.square_order_id,
+    };
+  };
+
+  const { pairs, paidNotInSquare } = joinSquare(square.payments, (deps.data ?? []) as Array<Record<string, unknown> & { id: string }>);
+  const rows = [];
+  for (const { square: p, deployment: d } of pairs) {
+    const fee = squareFeeCents(p);
+    // Keep the deployment's record of Square in step: the payment id, and the processing fee, which the
+    // payment webhook does not carry when it first fires (both paid tests on 2026-11-11 recorded 0).
+    // Only a completed payment is written back: a declined card that was retried must not claim the placement.
+    if (d && p.status === "COMPLETED" && ((fee != null && fee > 0 && !d.square_fee_cents) || !d.square_payment_id)) {
+      const patch: Record<string, unknown> = {};
+      if (fee != null && fee > 0 && !d.square_fee_cents) { patch.square_fee_cents = fee; d.square_fee_cents = fee; }
+      if (!d.square_payment_id) { patch.square_payment_id = p.id; d.square_payment_id = p.id; }
+      await db.from("boot_deployments").update(patch).eq("id", d.id);
+    }
+    const amount = p.amount_money?.amount ?? null;
+    rows.push({
+      kind: d ? "boot" : "other",
+      square: {
+        id: p.id, created_at: p.created_at, status: p.status, amount_cents: amount, currency: p.amount_money?.currency ?? "USD",
+        fee_cents: fee, net_cents: amount != null ? amount - (fee ?? 0) - (p.refunded_money?.amount ?? 0) : null,
+        refunded_cents: p.refunded_money?.amount ?? 0, card_brand: p.card_details?.card?.card_brand ?? null,
+        card_last4: p.card_details?.card?.last_4 ?? null, receipt_url: p.receipt_url ?? null, receipt_number: p.receipt_number ?? null,
+        buyer_email: p.buyer_email_address ?? null, source: p.source_type ?? null, note: p.note ?? null,
+        dashboard_url: squareDashboardUrl(p.id),
+      },
+      placement: d ? placement(d) : null,
+    });
+  }
+  // Placements marked paid in this period that Square did not list. Only a claim when Square answered;
+  // deployments are read 30 days further back than Square so a late payment still joins.
+  for (const d of paidNotInSquare) {
+    if (typeof d.paid_at === "string" && d.paid_at >= since) rows.push({ kind: "boot", square: null, placement: placement(d), not_in_square: square.ok });
+  }
+  return { ok: true, days, since, square_ok: square.ok, square_error: square.error ?? null, rows };
 }
