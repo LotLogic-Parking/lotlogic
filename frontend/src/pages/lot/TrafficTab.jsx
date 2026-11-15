@@ -4,7 +4,7 @@ import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { asOfLine } from '../../lib/lotStatus.js';
 import { db } from '../../lib/db.js';
 import { PhotoFrame } from './Photo.jsx';
-import { VISITS_EMPTY, visitMetrics, visitRows, visitsSummary } from '../../lib/visits.js';
+import { VISITS_EMPTY, groupVisitRows, visitLine, visitMetrics, visitRows, visitsSummary } from '../../lib/visits.js';
 import {
   DAY_OPTIONS,
   DEFAULT_DAYS,
@@ -70,7 +70,7 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
   const series = useMemo(() => pickSeries(data), [data]);
   const bars = useMemo(() => hourBars(series.by_hour), [series]);
   const grid = useMemo(() => heatGrid(series), [series]);
-  const rows = useMemo(() => visitRows(visits), [visits]);
+  const rows = useMemo(() => groupVisitRows(visitRows(visits)), [visits]);
   const stats = useMemo(() => visitMetrics(visits), [visits]);
   const tiles = useMemo(() => counters(data, stats), [data, stats]);
   const total = series.by_hour.reduce((a, b) => a + b, 0);
@@ -179,16 +179,25 @@ export function TrafficTab({ propertyId, propertyName = '' }) {
                       <figcaption>{r.in.label}</figcaption>
                     </figure>
                     <figure className="ls-visit-photo">
-                      {r.out
+                      {r.out && !r.out.unseen
                         ? <PhotoFrame url={r.out.photo} plate={r.plate} alt={`Leaving, ${r.plate}`} />
                         : <span className="ls-thumb ls-thumb--empty" aria-hidden="true" />}
-                      <figcaption>{r.out ? r.out.label : 'Still on the property'}</figcaption>
+                      <figcaption>
+                        {r.out ? r.out.label : 'Still on the property'}
+                        {r.out?.sub && <span className="ls-visit-sub">{r.out.sub}</span>}
+                      </figcaption>
                     </figure>
                   </div>
                   <div className="ls-visit-meta">
                     <span className="ls-badge">{r.plate || '—'}</span>
                     {r.stay && <span className="ls-visit-stay">{r.stay}</span>}
                     {r.covered && <span className="ls-visit-pass">Parking pass</span>}
+                    {r.count > 1 && (
+                      <details className="ls-visit-more">
+                        <summary>{r.count} visits</summary>
+                        <ul>{r.visits.map(v => <li key={v.id}>{visitLine(v)}</li>)}</ul>
+                      </details>
+                    )}
                   </div>
                 </li>
               ))}
