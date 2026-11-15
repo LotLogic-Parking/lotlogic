@@ -346,32 +346,26 @@ function PaymentRow({ r }) {
   );
 }
 
+// The server starts the log on 2026-11-15 (Gabe: "it should only go back to today"); earlier payments were tests.
 function PaymentsLog() {
-  const [days, setDays] = React.useState(90);
   const [d, setD] = React.useState(null);
   const [err, setErr] = React.useState('');
   const load = React.useCallback(async () => {
-    try { setD(await portal('payments', { query: { days: String(days) } })); setErr(''); } catch (x) { setErr(x.message || 'Could not load payments.'); }
-  }, [days]);
+    try { setD(await portal('payments')); setErr(''); } catch (x) { setErr(x.message || 'Could not load payments.'); }
+  }, []);
   React.useEffect(() => {
-    setD(null); load();
+    load();
     const id = setInterval(load, 60000);
     return () => clearInterval(id);
   }, [load]);
   const s = paymentsSummary(d?.rows);
+  const since = d?.since ? new Date(d.since).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' }) : '';
   return (
     <section className="ls-card enf-pay" aria-labelledby="enf-pay-title" data-testid="enf-payments">
       <div className="ls-card-head">
         <h3 id="enf-pay-title" className="ls-card-title">Payments</h3>
-        <div className="enf-range" role="group" aria-label="Period">
-          {[30, 90, 365].map(n => (
-            <button key={n} type="button" className={`enf-range-btn${days === n ? ' is-on' : ''}`} aria-pressed={days === n} onClick={() => setDays(n)}>
-              {n === 365 ? '1 year' : `${n} days`}
-            </button>
-          ))}
-        </div>
       </div>
-      <p className="ls-note">Every Square payment, joined to the boot placement it paid for, with the placement's GPS matched to our properties.</p>
+      <p className="ls-note">Every Square payment{since ? ` since ${since}` : ''}, joined to the boot placement it paid for, with the placement's GPS matched to our properties.</p>
       {err && <p className="enf-err" role="alert">{err}</p>}
       {d && !d.square_ok && <p className="enf-warn">Square did not answer ({d.square_error}). Showing what the boots recorded.</p>}
       {!d && !err && <p className="ls-note">Loading payments…</p>}
@@ -385,7 +379,7 @@ function PaymentsLog() {
             <div className="ls-tile"><dt className="ls-tile-l">Net</dt><dd className="ls-tile-n">{money(s.net)}</dd></div>
             <div className="ls-tile"><dt className="ls-tile-l">At a property</dt><dd className="ls-tile-n">{s.atProperty} of {s.count}</dd></div>
           </dl>
-          {d.rows.length === 0 && <p className="ls-note">No Square payments in this period.</p>}
+          {d.rows.length === 0 && <p className="ls-note">No Square payments yet{since ? ` since ${since}` : ''}.</p>}
           <ul className="enf-pay-list">
             {d.rows.map((r, i) => <PaymentRow key={r.square?.id || r.placement?.id || i} r={r} />)}
           </ul>

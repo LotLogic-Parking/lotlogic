@@ -9,6 +9,16 @@
 
 export const PROPERTY_MATCH_M = 500; // a placement within this of a property's address point is at that property
 
+// Gabe, 2026-11-15: "FOR THE boot payments it should only go back to today". Everything before that day was
+// testing (the two $1 payments on 2026-11-11), so the log starts at midnight Eastern on 2026-11-15 (EST, UTC-5).
+export const PAYMENTS_LOG_START = "2026-11-15T05:00:00.000Z";
+
+/** Where the payments log starts: the log start, or `days` back from now when that is later. */
+export function logSince(nowMs: number, days: number | null, start = PAYMENTS_LOG_START): string {
+  const startMs = Date.parse(start);
+  return new Date(days == null ? startMs : Math.max(startMs, nowMs - days * 86400_000)).toISOString();
+}
+
 export type PropertyPoint = { id: string; name: string; lat: number | null; lng: number | null };
 export type GeoMatch = {
   property_id: string | null; property: string | null; distance_m: number | null;

@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { deploymentIdFromNote, haversineM, joinSquare, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents } from "./payments.ts";
+import { deploymentIdFromNote, haversineM, joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents } from "./payments.ts";
 
 // Property points as stored in production on 2026-11-15.
 const PROPS = [
@@ -72,4 +72,13 @@ Deno.test("joinSquare: by payment id, order id or note; paid deployments Square 
   ], deps);
   assertEquals(pairs.map((p) => p.deployment?.id.slice(0, 1) ?? null), ["1", "2", "3", null]);
   assertEquals(paidNotInSquare.map((d) => d.id.slice(0, 1)), ["4"]);
+});
+
+Deno.test("logSince: the log never reaches back past 2026-11-15, and ?days= only narrows it", () => {
+  const now = Date.parse("2026-11-15T17:00:00Z");
+  assertEquals(logSince(now, null), "2026-11-15T05:00:00.000Z");
+  assertEquals(logSince(now, 90), "2026-11-15T05:00:00.000Z"); // the $1 tests on 2026-11-11 stay out
+  const later = Date.parse("2027-03-01T12:00:00Z");
+  assertEquals(logSince(later, null), "2026-11-15T05:00:00.000Z");
+  assertEquals(logSince(later, 30), "2027-01-30T12:00:00.000Z");
 });
