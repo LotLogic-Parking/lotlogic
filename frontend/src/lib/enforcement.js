@@ -154,3 +154,56 @@ export async function uploadBootFile(bootId, blob, kind) {
   if (!res.ok) throw new PortalError(res.status, 'upload_failed', 'The photo did not upload. Try again.');
   return photo_path;
 }
+
+// ── Payments log (GET /boot-portal/payments) ─────────────────
+
+/** "85 m", "1.2 km", "12 km". */
+export function meters(m) {
+  if (typeof m !== 'number' || !Number.isFinite(m)) return '';
+  if (m < 1000) return `${Math.round(m)} m`;
+  return m < 10000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 1000)} km`;
+}
+
+/** Where a boot was, in words: the property it was at, or how far from the nearest one. */
+export function placeLine(p) {
+  if (!p?.gps) return 'No GPS recorded';
+  const g = p.geo;
+  if (g?.at_property) return `${g.property} · ${meters(g.distance_m)} from the address`;
+  if (g?.nearest) return `Not at a LotLogic property · nearest ${g.nearest}, ${meters(g.nearest_m)}`;
+  return 'GPS recorded, no property to compare';
+}
+
+/** Flags a person should look at on one payment row. */
+export function paymentFlags(row) {
+  const f = [];
+  const p = row?.placement;
+  if (row?.not_in_square) f.push({ key: 'nosquare', label: 'Marked paid, not found in Square', tone: 'bad' });
+  if (row?.kind === 'other') f.push({ key: 'other', label: 'Not a boot payment', tone: 'muted' });
+  if (p && !p.gps) f.push({ key: 'nogps', label: 'No GPS', tone: 'warn' });
+  if (p?.gps && p.geo && !p.geo.at_property) f.push({ key: 'off', label: 'Off property', tone: 'warn' });
+  if (p?.property_mismatch) f.push({ key: 'mismatch', label: "GPS differs from the driver's property", tone: 'warn' });
+  if (row?.square && row.square.fee_cents == null) f.push({ key: 'nofee', label: 'Square fee not reported yet', tone: 'muted' });
+  if (row?.square?.refunded_cents > 0) f.push({ key: 'refund', label: 'Refunded', tone: 'warn' });
+  return f;
+}
+
+/** Square statuses that are money that never arrived; they are listed but never counted. */
+export const UNCOLLECTED = new Set(['FAILED', 'CANCELED']);
+
+/** Totals over the payment rows: collected boot payments only, Square's numbers where Square has them. */
+export function paymentsSummary(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const boot = list.filter(r => r.kind === 'boot' && !UNCOLLECTED.has(r.square?.status));
+  const sum = (xs, f) => xs.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+  const placementNet = (p) => (Number(p?.paid_amount_cents) || 0) - (Number(p?.square_fee_cents) || 0) - (Number(p?.refunded_amount_cents) || 0);
+  return {
+    count: boot.length,
+    gross: sum(boot, r => r.square?.amount_cents ?? r.placement?.paid_amount_cents),
+    fees: sum(boot, r => r.square?.fee_cents ?? r.placement?.square_fee_cents),
+    refunded: sum(boot, r => r.square ? r.square.refunded_cents : r.placement?.refunded_amount_cents),
+    net: sum(boot, r => r.square?.net_cents ?? placementNet(r.placement)),
+    atProperty: boot.filter(r => r.placement?.geo?.at_property).length,
+    offProperty: boot.filter(r => r.placement && !r.placement.geo?.at_property).length,
+    other: list.filter(r => r.kind === 'other').length,
+  };
+}

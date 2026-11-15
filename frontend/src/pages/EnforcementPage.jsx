@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   ACTION_LABEL, actionsFor, ago, batteryTone, bootFlags, commandLabel, deploymentLabel, fleetSummary,
-  isOnCar, mapUrl, money, portal, stateLabel, uploadBootFile,
+  isOnCar, mapUrl, money, paymentFlags, paymentsSummary, placeLine, portal, stateLabel, uploadBootFile,
 } from '../lib/enforcement.js';
 import { fmtETStamp } from '../lib/holdTime.js';
 
@@ -252,6 +252,7 @@ function BootDetail({ bootId, properties, onChanged }) {
             <div><dt>Plate</dt><dd className="enf-mono">{dep.plate_text}{dep.plate_state ? ` (${dep.plate_state})` : ''}</dd></div>
             <div><dt>Vehicle</dt><dd>{dep.vehicle || '—'}</dd></div>
             <div><dt>Property</dt><dd>{dep.property || '—'}</dd></div>
+            <div className="enf-wide"><dt>Placed at</dt><dd>{placeLine(dep)}{dep.gps && mapUrl(dep.gps.lat, dep.gps.lon) ? <> · <a href={mapUrl(dep.gps.lat, dep.gps.lon)} target="_blank" rel="noreferrer">map</a></> : null}</dd></div>
             <div><dt>Fee</dt><dd>{money(dep.fee_cents)}{dep.paid_at ? ` · paid ${money(dep.paid_amount_cents)} ${stamp(dep.paid_at)}` : ' · unpaid'}</dd></div>
             <div><dt>Placed</dt><dd>{stamp(dep.applied_at)}{dep.driver_signed_name ? ` · ${dep.driver_signed_name}` : ''}</dd></div>
             <div><dt>Released</dt><dd>{dep.released_at ? `${stamp(dep.released_at)} · ${dep.release_reason}` : '—'}{dep.unlocked_at ? ` · opened ${stamp(dep.unlocked_at)}` : ''}</dd></div>
@@ -300,6 +301,97 @@ function BootDetail({ bootId, properties, onChanged }) {
         </section>
       )}
     </div>
+  );
+}
+
+function PaymentRow({ r }) {
+  const p = r.placement;
+  const q = r.square;
+  const flags = paymentFlags(r);
+  const map = p?.gps ? mapUrl(p.gps.lat, p.gps.lon) : null;
+  return (
+    <li className="enf-pay-row" data-testid="enf-payment">
+      <div className="enf-pay-top">
+        <span className="enf-pay-amt">{money(q?.amount_cents ?? p?.paid_amount_cents)}</span>
+        <span className="enf-muted">{stamp(q?.created_at || p?.paid_at)}</span>
+        {q?.status && <Chip tone={q.status === 'COMPLETED' ? 'ok' : 'warn'}>{q.status.toLowerCase()}</Chip>}
+        {flags.map(f => <Chip key={f.key} tone={f.tone}>{f.label}</Chip>)}
+      </div>
+      {p && (
+        <dl className="enf-facts">
+          <div><dt>Plate</dt><dd className="enf-mono">{p.plate}{p.plate_state ? ` (${p.plate_state})` : ''}</dd></div>
+          <div><dt>Vehicle</dt><dd>{p.vehicle || '—'}</dd></div>
+          <div><dt>Boot</dt><dd>{p.boot || '—'}{p.company ? ` · ${p.company}` : ''}</dd></div>
+          <div className="enf-wide"><dt>Location</dt><dd>{placeLine(p)}{map ? <> · <a href={map} target="_blank" rel="noreferrer">map</a></> : null}{p.gps?.accuracy_m ? ` · ±${Math.round(p.gps.accuracy_m)} m` : ''}</dd></div>
+          <div><dt>Driver's property</dt><dd>{p.property || '—'}</dd></div>
+          <div><dt>Placed</dt><dd>{stamp(p.applied_at)}{p.driver ? ` · ${p.driver}` : ''}</dd></div>
+          <div><dt>Released</dt><dd>{p.released_at ? `${stamp(p.released_at)} · ${p.release_reason}` : '—'}{p.unlocked_at ? ` · opened ${stamp(p.unlocked_at)}` : ''}</dd></div>
+          <div><dt>Payer</dt><dd>{[p.payer_phone, p.payer_email || q?.buyer_email].filter(Boolean).join(' · ') || '—'}</dd></div>
+          <div><dt>Split</dt><dd>LotLogic {money(p.lotlogic_share_cents)} · partner {money(p.partner_share_cents)}</dd></div>
+        </dl>
+      )}
+      {q && (
+        <dl className="enf-facts">
+          <div><dt>Card</dt><dd>{q.card_brand ? `${q.card_brand} ${q.card_last4 || ''}` : '—'}</dd></div>
+          <div><dt>Square fee</dt><dd>{q.fee_cents == null ? 'pending' : money(q.fee_cents)}</dd></div>
+          <div><dt>Net</dt><dd>{money(q.net_cents)}</dd></div>
+          <div><dt>Refunded</dt><dd>{q.refunded_cents ? money(q.refunded_cents) : '—'}</dd></div>
+          <div className="enf-wide"><dt>Square</dt><dd>
+            {q.receipt_url ? <><a href={q.receipt_url} target="_blank" rel="noreferrer">Receipt {q.receipt_number || ''}</a> · </> : null}
+            <a href={q.dashboard_url} target="_blank" rel="noreferrer">Open in Square</a> · <span className="enf-mono">{q.id}</span>
+          </dd></div>
+        </dl>
+      )}
+    </li>
+  );
+}
+
+function PaymentsLog() {
+  const [days, setDays] = React.useState(90);
+  const [d, setD] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const load = React.useCallback(async () => {
+    try { setD(await portal('payments', { query: { days: String(days) } })); setErr(''); } catch (x) { setErr(x.message || 'Could not load payments.'); }
+  }, [days]);
+  React.useEffect(() => {
+    setD(null); load();
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [load]);
+  const s = paymentsSummary(d?.rows);
+  return (
+    <section className="ls-card enf-pay" aria-labelledby="enf-pay-title" data-testid="enf-payments">
+      <div className="ls-card-head">
+        <h3 id="enf-pay-title" className="ls-card-title">Payments</h3>
+        <div className="enf-range" role="group" aria-label="Period">
+          {[30, 90, 365].map(n => (
+            <button key={n} type="button" className={`enf-range-btn${days === n ? ' is-on' : ''}`} aria-pressed={days === n} onClick={() => setDays(n)}>
+              {n === 365 ? '1 year' : `${n} days`}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="ls-note">Every Square payment, joined to the boot placement it paid for, with the placement's GPS matched to our properties.</p>
+      {err && <p className="enf-err" role="alert">{err}</p>}
+      {d && !d.square_ok && <p className="enf-warn">Square did not answer ({d.square_error}). Showing what the boots recorded.</p>}
+      {!d && !err && <p className="ls-note">Loading payments…</p>}
+      {d && (
+        <>
+          <dl className="ls-tiles ls-tiles--wrap" aria-label="Payment totals">
+            <div className="ls-tile"><dt className="ls-tile-l">Boot payments</dt><dd className="ls-tile-n">{s.count}</dd></div>
+            <div className="ls-tile"><dt className="ls-tile-l">Collected</dt><dd className="ls-tile-n">{money(s.gross)}</dd></div>
+            <div className="ls-tile"><dt className="ls-tile-l">Square fees</dt><dd className="ls-tile-n">{money(s.fees)}</dd></div>
+            <div className="ls-tile"><dt className="ls-tile-l">Refunded</dt><dd className="ls-tile-n">{money(s.refunded)}</dd></div>
+            <div className="ls-tile"><dt className="ls-tile-l">Net</dt><dd className="ls-tile-n">{money(s.net)}</dd></div>
+            <div className="ls-tile"><dt className="ls-tile-l">At a property</dt><dd className="ls-tile-n">{s.atProperty} of {s.count}</dd></div>
+          </dl>
+          {d.rows.length === 0 && <p className="ls-note">No Square payments in this period.</p>}
+          <ul className="enf-pay-list">
+            {d.rows.map((r, i) => <PaymentRow key={r.square?.id || r.placement?.id || i} r={r} />)}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -375,6 +467,8 @@ export default function EnforcementPage() {
           </ul>
         </>
       )}
+
+      {!(err && err.startsWith('Enforcement is limited')) && <PaymentsLog />}
     </section>
   );
 }
