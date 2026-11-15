@@ -66,3 +66,15 @@ verify_jwt = false
 # JWT gate must be off (it would reject the dashboard's own token).
 [functions.walk-around-ocr]
 verify_jwt = false
+
+# Smart Boot (source recovered from the deployed functions, 2026-11-15).
+# boot-report: the boot has no Supabase key, HMAC is the auth. boot-pay: the
+# motorist's QR page and Square's webhook. boot-portal: its own sessions.
+[functions.boot-report]
+verify_jwt = false
+
+[functions.boot-pay]
+verify_jwt = false
+
+[functions.boot-portal]
+verify_jwt = false
