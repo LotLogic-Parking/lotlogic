@@ -12,6 +12,7 @@ import { readDeepLink, cleanDeepLink, readPublicRoute, readJoinSlug, emptyDeepLi
 import { NATIVE, nativeSession, nativeSignedOut, onNativeOpen, nativeDeepLink } from './lib/native.js';
 import { readActionToken, hideActionToken } from './lib/requestAction.js';
 import { navTabsFor, partnerRequestsReady, isKnownTab, homeTabFor, isClassicOffice } from './lib/features.js';
+import { canSeeEnforcement } from './lib/enforcement.js';
 import { verifyState, secondsUntilResend, cooldownRetryAfter, sentAtForRetryAfter } from './lib/verifyState.js';
 import { requestsApi } from './lib/requestsApi.js';
 import { VerifyBanner } from './ui/VerifyBanner.jsx';
@@ -38,6 +39,7 @@ const JobsPage         = lazyPage(() => import('./pages/JobsPage.jsx'));
 const AnalyticsPage    = lazyPage(() => import('./pages/AnalyticsPage.jsx'));
 const TowActivityPage  = lazyPage(() => import('./pages/TowActivityPage.jsx'));
 const AdminConsolePage = lazyPage(() => import('./pages/AdminConsolePage.jsx'));
+const EnforcementPage  = lazyPage(() => import('./pages/EnforcementPage.jsx'));
 const PartnerRequestsPage = lazyPage(() => import('./pages/PartnerRequestsPage.jsx'));
 
 // The public (no-session) routes `vercel.json` rewrites into this bundle, and
@@ -385,6 +387,7 @@ export function App() {
   // tab id `lots`; any camera brings back the five). The account-specific
   // extras — money surfaces, the platform-admin console
   // — splice in ahead of Account, which stays last.
+  const enforcementAllowed = canSeeEnforcement(owner, viewAs);
   const navExtras = isOwner
     ? [
       // SaaS (all-apartment) owners have no per-tow money flow — see showMoney.
@@ -396,6 +399,12 @@ export function App() {
       // feedback) folded in from admin.html. Gated again at render.
       ...(isPlatformAdmin ? [
         { id: 'admin', label: 'Admin' },
+      ] : []),
+      // The Smart Boot fleet: gabriel@ and victor@lotlogicparking.com only
+      // (lib/enforcement.js). The boot-portal function checks the email
+      // again on every call; this only decides whether the tab shows.
+      ...(enforcementAllowed ? [
+        { id: 'enforcement', label: 'Enforcement' },
       ] : []),
     ]
     : [];
@@ -986,7 +995,8 @@ export function App() {
   const NavIconTow = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('path', {d:'M10 17h4V5H2v12h3'}), React.createElement('path', {d:'M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5'}), React.createElement('circle', {cx:'7.5',cy:'17.5',r:'2.5'}), React.createElement('circle', {cx:'17.5',cy:'17.5',r:'2.5'}));
   const NavIconAdmin = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('path', {d:'M12 2l7 4v6c0 4.4-3 7.5-7 9-4-1.5-7-4.6-7-9V6z'}));
   const NavIconLookup = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'11',cy:'11',r:'7'}), React.createElement('line', {x1:'21',y1:'21',x2:'16.65',y2:'16.65'}));
-  const navIcons = { overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
+  const NavIconEnforce = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'12',cy:'12',r:'8'}), React.createElement('circle', {cx:'12',cy:'12',r:'3'}), React.createElement('path', {d:'M12 4v5M12 15v5M4 12h5M15 12h5'}));
+  const navIcons = { enforcement: NavIconEnforce, overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
   // Tab roles (kept intentionally narrow so each surface has one meaning):
   //   Jobs     → every violation needing action (enforcement + ALPR unified)
   //   Lots     → register + manage properties (plates, passes, cameras, plate detections)
@@ -1172,6 +1182,7 @@ export function App() {
           {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} />}
           {tab === 'invoices' && isOwner && showMoney && <InvoicesPage lots={lots} partners={partners} user={owner} isOwner={isOwner} isPlatformAdmin={isPlatformAdmin} />}
           {tab === 'admin' && isPlatformAdmin && <AdminConsolePage user={owner} />}
+          {tab === 'enforcement' && enforcementAllowed && <EnforcementPage />}
           {tab === 'requests' && isOperator && <PartnerRequestsPage
             pendingJoins={pendingJoins}
             propertyNames={propertyNames}
