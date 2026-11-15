@@ -1,0 +1,36 @@
+# Auto-deploy the boot-portal edge function whenever its source changes on
+# main. Only boot-portal: boot-report (the boots' check-in) and boot-pay (the
+# motorist's payment) are deployed by hand, so a change to the portal can never
+# redeploy the path that unlocks a paid boot.
+#
+# Required secret on the GitHub repo:
+#   SUPABASE_ACCESS_TOKEN — same token the other auto-deploy workflows use.
+
+name: Auto-deploy boot-portal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/boot-portal/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy boot-portal
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy boot-portal \
+            --project-ref nzdkoouoaedbbccraoti \
+            --no-verify-jwt \
+            --yes

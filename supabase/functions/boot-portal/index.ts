@@ -19,10 +19,14 @@
 //                                   -> any signed-in user: unlock now, paid or not; logged permanently for review
 //   POST /boot-portal/cancel       {boot_id}                    -> cancel a lock the boot has not picked up yet
 //   POST /boot-portal/setup-wifi   {boot_id}                    -> admin/dispatch: open the boot's setup Wi-Fi (free boot only)
+// LotLogic admins (BOOT_ADMIN_EMAILS, default gabriel@ and victor@lotlogicparking.com) can call every route with
+// their main-dashboard session instead of a portal token: the backend's /auth/me says who it is (admin.ts). An admin
+// sees and acts on every partner's boots, as role admin.
 // Deploy with verify_jwt = false.
 import bcrypt from "npm:bcryptjs@2.4.3";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword, wifiSsid } from "../_shared/boot.ts";
+import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt } from "./admin.ts";
 
 const SESSION_H = 12;
 const LOCK_TTL_S = 600;
@@ -30,7 +34,14 @@ const PHOTO_BUCKET = "boot-photos";
 // bcrypt of a random string: compared against when the email is unknown, so timing doesn't reveal accounts.
 const DUMMY_HASH = "$2a$10$laXPKNaVcX4xyuw2SthIfeOzusR3T4Wj6YYIEqzQxb/.8KDv9KD.2";
 
-type Me = { member_id: string; partner_id: string; role: "admin" | "dispatcher" | "driver"; name: string; email: string; company: string };
+type Me = {
+  member_id: string | null; partner_id: string | null; role: "admin" | "dispatcher" | "driver"; name: string; email: string; company: string;
+  lotlogic?: boolean; // a LotLogic admin on a dashboard session: every partner's boots, no partner_members row
+};
+const ADMIN_EMAILS = adminEmails(Deno.env.get("BOOT_ADMIN_EMAILS"));
+const DASHBOARD_API = (Deno.env.get("LOTLOGIC_API_URL") ?? DEFAULT_DASHBOARD_API).replace(/\/+$/, "");
+/** Who did it, for the audit details: the admin's email when there is no member id to point at. */
+const by = (me: Me) => (me.lotlogic ? { admin_email: me.email } : {});
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -49,7 +60,7 @@ Deno.serve(async (req) => {
     if (req.method === "POST") {
       const body = await req.json().catch(() => ({}));
       if (route === "logout") {
-        await db.from("boot_portal_sessions").update({ revoked_at: new Date().toISOString() }).eq("token_hash", tokenHash);
+        if (tokenHash) await db.from("boot_portal_sessions").update({ revoked_at: new Date().toISOString() }).eq("token_hash", tokenHash);
         return json({ ok: true });
       }
       if (route === "photo-url") return json(await photoUrl(db, me, body));
@@ -112,8 +123,23 @@ async function login(db: SupabaseClient, req: Request) {
   return { ok: true, token, expires_in_s: SESSION_H * 3600, me };
 }
 
+async function dashboardAdmin(token: string): Promise<Me> {
+  let r: Response;
+  try {
+    r = await fetch(`${DASHBOARD_API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new HttpError(503, "auth_unavailable", "Couldn't check your sign-in. Try again.");
+  }
+  if (r.status === 401 || r.status === 403) throw new HttpError(401, "signed_out", "Please sign in again.");
+  if (!r.ok) throw new HttpError(503, "auth_unavailable", "Couldn't check your sign-in. Try again.");
+  const me = adminFromAuthMe(await r.json().catch(() => null), ADMIN_EMAILS);
+  if (!me) throw new HttpError(403, "not_allowed", "Enforcement is limited to LotLogic admins.");
+  return me;
+}
+
 async function requireSession(db: SupabaseClient, req: Request): Promise<{ me: Me; tokenHash: string }> {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (looksLikeJwt(token)) return { me: await dashboardAdmin(token), tokenHash: "" };
   if (!/^[0-9a-f]{64}$/.test(token)) throw new HttpError(401, "signed_out", "Please sign in.");
   const tokenHash = await sha256Hex(token);
   const { data: s } = await db.from("boot_portal_sessions").select("member_id, partner_id, expires_at, revoked_at, last_seen_at")
@@ -136,7 +162,9 @@ const canManage = (me: Me) => me.role === "admin" || me.role === "dispatcher";
 async function myBoot(db: SupabaseClient, me: Me, bootId: unknown) {
   if (typeof bootId !== "string" || !UUID.test(bootId)) throw new HttpError(400, "boot_required");
   const { data: b } = await db.from("boots").select("*").eq("id", bootId).maybeSingle();
-  if (!b || !b.active || b.partner_id !== me.partner_id) throw new HttpError(404, "unknown_boot", "That boot isn't in your company.");
+  if (!b || !b.active) throw new HttpError(404, "unknown_boot", "That boot isn't in your company.");
+  if (me.lotlogic) return b;
+  if (b.partner_id !== me.partner_id) throw new HttpError(404, "unknown_boot", "That boot isn't in your company.");
   if (me.role === "driver" && b.assigned_member_id && b.assigned_member_id !== me.member_id) {
     throw new HttpError(403, "not_your_boot", "That boot is assigned to someone else.");
   }
@@ -147,13 +175,15 @@ const isOnline = (b: { last_report_at: string | null; poll_s: number }) =>
   !!b.last_report_at && Date.now() - new Date(b.last_report_at).getTime() < (3 * b.poll_s + 60) * 1000;
 
 async function listBoots(db: SupabaseClient, me: Me) {
-  const { data, error } = await db.from("boot_health").select("*").eq("partner_id", me.partner_id).order("label");
+  let bq = db.from("boot_health").select("*").order("label");
+  if (!me.lotlogic) bq = bq.eq("partner_id", me.partner_id);
+  const { data, error } = await bq;
   if (error) throw error;
   const rows = (data ?? []).filter((r) => me.role !== "driver" || !r.assigned_member_id || r.assigned_member_id === me.member_id);
   return {
     ok: true, me,
     boots: rows.map((r) => ({
-      id: r.id, label: r.label, qr_code: r.qr_code,
+      id: r.id, label: r.label, qr_code: r.qr_code, partner_id: r.partner_id,
       state: r.state, battery_pct: r.battery_pct, low_battery: r.low_battery, lock_refused_battery: r.lock_refused_battery,
       online: r.online, last_report_at: r.last_report_at, fault: r.fault, tamper: r.tamper,
       lat: r.lat, lon: r.lon, fix_at: r.fix_at,
@@ -206,6 +236,11 @@ async function signedRead(db: SupabaseClient, path: string | null | undefined) {
 }
 
 async function listProperties(db: SupabaseClient, me: Me) {
+  if (me.lotlogic) {
+    const { data, error } = await db.from("properties").select("id, name, address").is("archived_at", null).order("name");
+    if (error) throw error;
+    return { ok: true, properties: data ?? [] };
+  }
   let ids: string[] | null = null;
   if (me.role === "driver") {
     const { data } = await db.from("partner_member_properties").select("property_id").eq("member_id", me.member_id);
@@ -227,7 +262,7 @@ async function photoUrl(db: SupabaseClient, me: Me, body: Record<string, unknown
   if (!ext) throw new HttpError(400, "bad_photo_type", "Use a JPEG, PNG, WebP or HEIC photo.");
   const kind = body.kind === "signature" ? "sig" : body.kind === "emergency" ? "emergency" : "lock";
   if (kind === "sig" && type !== "image/png") throw new HttpError(400, "bad_signature_type", "The signature must be a PNG.");
-  const path = `${me.partner_id}/${b.id}/${kind}-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  const path = `${b.partner_id}/${b.id}/${kind}-${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
   const { data, error } = await db.storage.from(PHOTO_BUCKET).createSignedUploadUrl(path);
   if (error || !data) throw new HttpError(500, "photo_upload_unavailable", "Couldn't start the photo upload. Try again.");
   return { ok: true, upload_url: data.signedUrl, photo_path: `${PHOTO_BUCKET}/${path}` };
@@ -248,12 +283,12 @@ async function pendingCommand(db: SupabaseClient, bootId: string) {
   return data;
 }
 /** The uploaded file exists and belongs to this boot, with the expected kind prefix. */
-async function checkUpload(db: SupabaseClient, me: Me, bootId: string, path: string | null, kind: "lock" | "sig" | "emergency") {
-  const prefix = `${PHOTO_BUCKET}/${me.partner_id}/${bootId}/`;
+async function checkUpload(db: SupabaseClient, partnerId: string, bootId: string, path: string | null, kind: "lock" | "sig" | "emergency") {
+  const prefix = `${PHOTO_BUCKET}/${partnerId}/${bootId}/`;
   if (!path || !path.startsWith(prefix)) return false;
   const name = path.slice(prefix.length);
   if (!name.startsWith(`${kind}-`) || name.includes("/")) return false;
-  const { data: objs } = await db.storage.from(PHOTO_BUCKET).list(`${me.partner_id}/${bootId}`, { search: name });
+  const { data: objs } = await db.storage.from(PHOTO_BUCKET).list(`${partnerId}/${bootId}`, { search: name });
   return !!objs?.some((o) => o.name === name);
 }
 function attestation(name: string, bootLabel: string, plate: string, state: string | null, at: Date) {
@@ -293,10 +328,10 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   const signedName = str(body.signed_name, 80);
   if (!plate) throw new HttpError(400, "plate_required", "Enter the plate.");
   if (!signedName || signedName.length < 2) throw new HttpError(400, "name_required", "Type your name to sign.");
-  if (!await checkUpload(db, me, b.id, photo, "lock")) {
+  if (!await checkUpload(db, b.partner_id, b.id, photo, "lock")) {
     throw new HttpError(400, "photo_required", "Take a photo of the boot on the wheel first (or it didn't finish uploading).");
   }
-  if (!await checkUpload(db, me, b.id, sig, "sig")) throw new HttpError(400, "signature_required", "Sign in the box first.");
+  if (!await checkUpload(db, b.partner_id, b.id, sig, "sig")) throw new HttpError(400, "signature_required", "Sign in the box first.");
   // Battery % comes from the boot (pack chemistry differs between builds), so gate on % not volts.
   if (b.battery_pct != null && b.battery_pct < 25) {
     throw new HttpError(409, "low_battery", "This boot's battery is too low to lock (under 25 %). Charge it or use another boot.");
@@ -315,14 +350,14 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     const { properties } = await listProperties(db, me);
     if (!properties.some((p: { id: string }) => p.id === propertyId)) throw new HttpError(403, "property_not_yours", "You can't boot at that property.");
   }
-  const { data: partner } = await db.from("enforcement_partners").select("boot_fee_cents").eq("id", me.partner_id).single();
+  const { data: partner } = await db.from("enforcement_partners").select("boot_fee_cents").eq("id", b.partner_id).single();
   const fee = partner?.boot_fee_cents ?? 0;
   if (fee <= 0) throw new HttpError(409, "no_boot_fee", "Your company has no boot fee set, so the motorist couldn't pay. Ask LotLogic to set it.");
 
   const signedAt = new Date();
   const attest = attestation(signedName, b.label, plate, plateState, signedAt);
   const { data: dep, error } = await db.from("boot_deployments").insert({
-    boot_id: b.id, partner_id: me.partner_id, property_id: propertyId, plate_text: plate, plate_state: plateState,
+    boot_id: b.id, partner_id: b.partner_id, property_id: propertyId, plate_text: plate, plate_state: plateState,
     vehicle_make: str(body.vehicle_make, 40), vehicle_model: str(body.vehicle_model, 40), vehicle_color: str(body.vehicle_color, 30),
     lock_photo_url: photo, lock_lat: num(body.lat), lock_lon: num(body.lon), lock_accuracy_m: num(body.accuracy_m),
     applied_by: me.member_id, fee_cents: fee, notes: str(body.notes, 1000),
@@ -335,7 +370,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   await db.from("boot_events").insert({
     boot_id: b.id, deployment_id: dep.id, source: "server", transport: "web", action: "driver_signed", actor_member_id: me.member_id,
     lat: num(body.lat), lon: num(body.lon), gps_accuracy_m: num(body.accuracy_m), photo_url: photo,
-    details: { signed_name: signedName, attestation: attest, signature_path: sig },
+    details: { signed_name: signedName, attestation: attest, signature_path: sig, ...by(me) },
   });
   const { data: cmdId, error: qErr } = await db.rpc("boot_queue_command", {
     p_boot_id: b.id, p_deployment_id: dep.id, p_cmd: CMD.LOCK, p_source: "portal", p_member: me.member_id,
@@ -370,7 +405,7 @@ async function unlock(db: SupabaseClient, me: Me, body: Record<string, unknown>)
     if (error) throw error;
     await db.from("boot_events").insert({
       boot_id: b.id, deployment_id: dep.id, source: "server", action: "released", actor_member_id: me.member_id,
-      details: { reason: "waived", note, role: me.role },
+      details: { reason: "waived", note, role: me.role, ...by(me) },
     });
     source = "waiver";
   }
@@ -422,7 +457,7 @@ async function emergency(db: SupabaseClient, me: Me, body: Record<string, unknow
     throw new HttpError(400, "explanation_required", `Explain what happened, who asked and why it couldn't wait (at least ${EMERGENCY_MIN_CHARS} characters).`);
   }
   const photo = str(body.photo_path, 300);
-  if (photo && !await checkUpload(db, me, b.id, photo, "emergency")) throw new HttpError(400, "photo_missing", "The photo didn't finish uploading. Take it again or leave it out.");
+  if (photo && !await checkUpload(db, b.partner_id, b.id, photo, "emergency")) throw new HttpError(400, "photo_missing", "The photo didn't finish uploading. Take it again or leave it out.");
   const lat = num(body.lat), lon = num(body.lon), acc = num(body.accuracy_m);
   const now = new Date().toISOString();
   const dep = await openDeployment(db, b.id);
@@ -450,7 +485,7 @@ async function emergency(db: SupabaseClient, me: Me, body: Record<string, unknow
       command_id: cmdId, reason, reason_label: EMERGENCY_REASONS[reason], explanation, role: me.role, name: me.name,
       plate: dep?.plate_text ?? null, paid: !!dep?.paid_at,
       ip: (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || null,
-      user_agent: (req.headers.get("user-agent") ?? "").slice(0, 300),
+      user_agent: (req.headers.get("user-agent") ?? "").slice(0, 300), ...by(me),
     },
   });
   console.warn("boot emergency unlock", b.id, me.member_id, reason);
@@ -476,7 +511,7 @@ async function cancel(db: SupabaseClient, me: Me, body: Record<string, unknown>)
   }
   await db.from("boot_events").insert({
     boot_id: b.id, deployment_id: c.deployment_id, source: "server", action: "lock_cancelled", actor_member_id: me.member_id,
-    details: { command_id: c.id },
+    details: { command_id: c.id, ...by(me) },
   });
   return { ok: true };
 }
