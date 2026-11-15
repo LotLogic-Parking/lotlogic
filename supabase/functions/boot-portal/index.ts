@@ -19,8 +19,9 @@
 //                                   -> any signed-in user: unlock now, paid or not; logged permanently for review
 //   POST /boot-portal/cancel       {boot_id}                    -> cancel a lock the boot has not picked up yet
 //   POST /boot-portal/setup-wifi   {boot_id}                    -> admin/dispatch: open the boot's setup Wi-Fi (free boot only)
-//   GET  /boot-portal/payments?days=  LotLogic admins: every Square payment joined to its boot placement, with the
-//                                   placement GPS matched to the nearest property (payments.ts)
+//   GET  /boot-portal/payments     LotLogic admins: every Square payment since PAYMENTS_LOG_START (2026-11-15) joined
+//                                   to its boot placement, with the placement GPS matched to the nearest property
+//                                   (payments.ts); ?days= narrows it to the last n days
 // LotLogic admins (BOOT_ADMIN_EMAILS, default gabriel@ and victor@lotlogicparking.com) can call every route with
 // their main-dashboard session instead of a portal token: the backend's /auth/me says who it is (admin.ts). An admin
 // sees and acts on every partner's boots, as role admin.
@@ -29,7 +30,7 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword, wifiSsid } from "../_shared/boot.ts";
 import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt } from "./admin.ts";
-import { joinSquare, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
+import { joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
 
 const SESSION_H = 12;
 const LOCK_TTL_S = 600;
@@ -600,10 +601,11 @@ async function listSquarePayments(sinceIso: string): Promise<{ ok: boolean; erro
 
 async function payments(db: SupabaseClient, me: Me, url: URL) {
   if (!me.lotlogic) throw new HttpError(403, "not_allowed", "The payments log is for LotLogic admins.");
-  const days = Math.min(730, Math.max(1, Number(url.searchParams.get("days")) || 180));
-  const since = new Date(Date.now() - days * 86400_000).toISOString();
+  const asked = Number(url.searchParams.get("days"));
+  const days = asked > 0 ? Math.min(730, asked) : null;
+  const since = logSince(Date.now(), days); // never before the log start: earlier payments were tests
   const [deps, props, boots, partners, refunds, square] = await Promise.all([
-    db.from("boot_deployments").select("*").gte("created_at", new Date(Date.now() - (days + 30) * 86400_000).toISOString())
+    db.from("boot_deployments").select("*").gte("created_at", new Date(Date.parse(since) - 30 * 86400_000).toISOString())
       .order("created_at", { ascending: false }).limit(2000),
     propertyPoints(db),
     db.from("boots").select("id, label, qr_code"),
