@@ -53,7 +53,9 @@ function groupedLine(match) {
   }
 }
 
-export function verdictPresentation(verdict, detail, scope) {
+export function verdictPresentation(verdict, detail, scope, companyName) {
+  // The tow company looking the plate up (the signed-in partner), by name.
+  const company = typeof companyName === 'string' && companyName.trim() ? companyName.trim() : '';
   const d = detail || {};
   switch (verdict) {
     case 'hold': {
@@ -95,12 +97,12 @@ export function verdictPresentation(verdict, detail, scope) {
     }
     case 'not_registered': {
       const reason = scope === 'all'
-        ? 'No parking pass or hold at any N Style property'
+        ? `No parking pass or hold at any ${company ? `${company} ` : ''}property`
         : `No parking pass or hold at ${d.property_name || 'this property'}`;
       return { signal: 'ELIGIBLE TO TOW', glyph: '✗', tone: 'stop', reason };
     }
     case 'hold_unconfirmed': {
-      const bits = [`Hold ${d.ref || ''} by ${d.property_name || 'the property'} (not yet confirmed by N Style)`];
+      const bits = [`Hold ${d.ref || ''} by ${d.property_name || 'the property'} (not yet confirmed by ${company || 'your company'})`];
       if (d.signed_up_by) bits.push(`signed up by ${d.signed_up_by}${d.signup_phone ? ' · ' + d.signup_phone : ''}`);
       if (d.expires_local) bits.push(`until ${d.expires_local}`);
       return { signal: 'HOLD — PROPERTY NOT CONFIRMED', glyph: '⚠', tone: 'amber', reason: bits.join(' · ') };

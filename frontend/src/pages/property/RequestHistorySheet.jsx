@@ -5,6 +5,7 @@ import { requestsApi } from '../../lib/requestsApi.js';
 import { requestErrorMessage } from '../../lib/requestErrors.js';
 import { fmtET, fmtETStamp } from '../../lib/holdTime.js';
 import { outcomeWords, refWithLineage, vehicleLine } from './RequestRow.jsx';
+import { TOW_PARTNER_FALLBACK } from '../../lib/towPartner.js';
 
 // ── History (spec §5.3) ──────────────────────────────────────
 //
@@ -20,8 +21,8 @@ import { outcomeWords, refWithLineage, vehicleLine } from './RequestRow.jsx';
 
 const PHOTO_ALT_PREFIX = 'Photo of ';
 
-/** The sentence for one `tow_request_events` row. */
-export function eventSentence(ev) {
+/** The sentence for one `tow_request_events` row; `partner` is the property's tow company. */
+export function eventSentence(ev, partner = TOW_PARTNER_FALLBACK) {
   const d = ev?.detail || {};
   const who = ev?.actor_display || d.actor_display || '';
   const role = d.position ? ` (${d.position})` : '';
@@ -30,13 +31,13 @@ export function eventSentence(ev) {
     case 'created':
       return [`Placed by ${who || 'the office'}${role}`, surface].filter(Boolean).join(' · ');
     case 'notified':
-      return 'Sent to N Style';
+      return `Sent to ${partner}`;
     case 'acked':
-      return `Seen by ${who || 'N Style'}${d.partner ? ' (N Style)' : ''}`;
+      return `Seen by ${who || partner}${d.partner && who ? ` (${partner})` : ''}`;
     case 'checked': {
       const via = surface ? ` via ${surface}` : '';
       const verdict = d.verdict ? ` · answer shown: ${String(d.verdict).toUpperCase().replace(/_/g, ' ')}` : '';
-      return `Checked by N Style${via}${verdict}`;
+      return `Checked by ${partner}${via}${verdict}`;
     }
     case 'extended': {
       const to = d.to ? fmtET(d.to) : '';
@@ -60,15 +61,15 @@ export function eventSentence(ev) {
   }
 }
 
-/** The sentence for one `tow_request_deliveries` row. */
-export function deliverySentence(dv) {
+/** The sentence for one `tow_request_deliveries` row; `partner` is the property's tow company. */
+export function deliverySentence(dv, partner = TOW_PARTNER_FALLBACK) {
   const ok = dv?.status === 'sent';
   const mark = ok ? ' ✓' : dv?.status === 'failed' ? ' — not delivered' : '';
   switch (dv?.channel) {
-    case 'email': return `Emailed ${dv.target || 'N Style'}${mark}`;
-    case 'slack': return `Posted to N Style Slack${mark}`;
-    case 'sms': return `Texted ${dv.target || 'N Style'}${mark}`;
-    default: return `Sent to N Style${mark}`;
+    case 'email': return `Emailed ${dv.target || partner}${mark}`;
+    case 'slack': return `Posted to ${partner} Slack${mark}`;
+    case 'sms': return `Texted ${dv.target || partner}${mark}`;
+    default: return `Sent to ${partner}${mark}`;
   }
 }
 
@@ -78,21 +79,21 @@ export function deliverySentence(dv) {
  * The `notified` event and the `tow_request_deliveries` rows it produced are
  * the same fact recorded twice, so when any delivery is present the event is
  * dropped: the delivery rows say which channel and whether it landed, which
- * is strictly more than "Sent to N Style" and is what a manager chasing a
+ * is strictly more than "Sent to <tow company>" and is what a manager chasing a
  * request came to read.
  */
-export function timeline(events, deliveries) {
+export function timeline(events, deliveries, partner = TOW_PARTNER_FALLBACK) {
   const rows = [];
   const deliveryRows = Array.isArray(deliveries) ? deliveries : [];
   const haveDeliveries = deliveryRows.length > 0;
   for (const ev of Array.isArray(events) ? events : []) {
     if (haveDeliveries && ev?.event === 'notified') continue;
-    rows.push({ at: ev?.created_at, text: eventSentence(ev), key: `e-${ev?.id ?? rows.length}` });
+    rows.push({ at: ev?.created_at, text: eventSentence(ev, partner), key: `e-${ev?.id ?? rows.length}` });
   }
   for (const dv of deliveryRows) {
     rows.push({
       at: dv?.sent_at || dv?.created_at,
-      text: deliverySentence(dv),
+      text: deliverySentence(dv, partner),
       key: `d-${dv?.id ?? rows.length}`,
     });
   }
@@ -105,7 +106,7 @@ export function timeline(events, deliveries) {
     });
 }
 
-export function RequestHistorySheet({ requestId, onClose, canAct, viewerName, onExtend, onRemove, addToast }) {
+export function RequestHistorySheet({ requestId, onClose, canAct, viewerName, partnerName = TOW_PARTNER_FALLBACK, onExtend, onRemove, addToast }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
@@ -138,7 +139,7 @@ export function RequestHistorySheet({ requestId, onClose, canAct, viewerName, on
     ? `${refWithLineage(request)} · ${kindLabel} · ${request.plate}`
     : 'History';
 
-  const rows = request ? timeline(data?.events, data?.deliveries) : [];
+  const rows = request ? timeline(data?.events, data?.deliveries, partnerName) : [];
   const vehicle = request ? vehicleLine(request) : '';
   const until = request?.expires_local || fmtET(request?.expires_at);
 
@@ -159,7 +160,7 @@ export function RequestHistorySheet({ requestId, onClose, canAct, viewerName, on
               alt={`${PHOTO_ALT_PREFIX}${request.plate}`} />
           )}
           {request.note && <div className="req-meta">"{request.note}"</div>}
-          {request.status !== 'active' && <div className="req-pill">{outcomeWords(request, viewerName)}</div>}
+          {request.status !== 'active' && <div className="req-pill">{outcomeWords(request, viewerName, partnerName)}</div>}
 
           <div className="req-section-title">History</div>
           <ul className="req-events">

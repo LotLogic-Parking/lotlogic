@@ -33,12 +33,12 @@ const TONE_STYLE = {
 
 // ── In-lot plate lookup (folded in from lookup.html) ──────────────
 // Partner-facing field tool: pick an apartment property (or, once the
-// backend route exists, "All N Style properties"), punch a plate, get a
+// backend route exists, "All <company> properties"), punch a plate, get a
 // glanceable verdict card straight off the spec §5.5 table.
-function PlateLookupVerdict({ out, scope, propertyName, history, typedPlate, onPick, onSwitchProperty }) {
+function PlateLookupVerdict({ out, scope, propertyName, companyName, history, typedPlate, onPick, onSwitchProperty }) {
   const detail = { ...(out.detail || {}) };
   if (scope !== 'all' && !detail.property_name && propertyName) detail.property_name = propertyName;
-  const pres = verdictPresentation(out.verdict, detail, scope);
+  const pres = verdictPresentation(out.verdict, detail, scope, companyName);
   const style = TONE_STYLE[pres.tone] || TONE_STYLE.neutral;
 
   const d = out.detail || {};
@@ -300,6 +300,7 @@ export function PlateLookupPage({ user, plate: deepPlate = null, property: deepP
           {error && <div style={{ background: 'rgba(217,83,79,.12)', border: '1px solid #D9534F', color: '#D9534F', borderRadius: 8, padding: '10px 12px', fontSize: 13, marginTop: 16, textAlign: 'center' }}>{error}</div>}
           {result && (
             <PlateLookupVerdict out={result} scope={scopeValue === ALL_SCOPE ? 'all' : 'property'} propertyName={selectedPropertyName}
+              companyName={user.company_name}
               history={history} typedPlate={searchedPlate} onPick={(pl) => { setPlate(pl); run(pl); }}
               onSwitchProperty={switchPropertyAndRecheck} />
           )}

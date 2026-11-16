@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { requestsApi } from '../../lib/requestsApi.js';
 import { requestErrorMessage } from '../../lib/requestErrors.js';
+import { towPartnerName } from '../../lib/towPartner.js';
 import { mustVerifyFirst, verifyResume } from '../../lib/requestGate.js';
 import { useNowTick } from '../../hooks.js';
 import {
@@ -33,7 +34,6 @@ import {
 //   holdCount       active holds on this property — the pending-property cap line
 //   emailVerified   false only when /auth/me says so; undefined means "unknown",
 //                   and the server's 422 `email_unverified` is then the gate
-//   partnerName     the tow company's display name ("N Style Towing")
 //   onCreated(req)  a 201 landed
 //   onNeedVerify(resume)  open the 6-digit code sheet; `resume` re-submits
 //   onConflict({requestId, plate, expiresLocal, kind})  the 409
@@ -63,7 +63,7 @@ const ATTESTATION =
   'I am the owner or lessee of this parking area, or their authorized agent, ' +
   'and I am requesting in writing that this vehicle be removed.';
 
-const TOW_NOTE_ERROR = 'Tell N Style why — they act on this.';
+const towNoteError = (partner) => `Tell ${partner} why — they act on this.`;
 const PHOTO_TOO_BIG = 'That photo is over 10 MB. Try a smaller one.';
 const PHOTO_FAILED = "Couldn't add the photo — the hold still works.";
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -109,6 +109,8 @@ export function RequestComposer({
   const resolved = resolveHoldRules(rules);
   const chips = useMemo(() => presets(now, resolved), [now, resolved.overnight_hour, resolved.max_days]);
   const isPending = property?.verification_status === 'pending';
+  // The property's own tow company (NMLD at The Volaire, N Style at its lots).
+  const partner = towPartnerName(property);
 
   // What the button promises. The picker wins when it has a value, otherwise
   // the selected chip; the server's `expires_local` replaces this the moment
@@ -222,10 +224,10 @@ export function RequestComposer({
     const plateMsg = plateFieldError(plate);
     setPlateError(plateMsg || '');
     const needsNote = kind === 'tow' && trimmedNote.length < 2;
-    setNoteError(needsNote ? TOW_NOTE_ERROR : '');
+    setNoteError(needsNote ? towNoteError(partner) : '');
     if (plateMsg || needsNote) return;
 
-    // Tow, photo, and a hold on a property N Style has not confirmed yet all
+    // Tow, photo, and a hold on a property the tow company has not confirmed yet all
     // need a verified email (§3.5). When /auth/me has already told us the
     // email is unverified, say so without a round trip; otherwise the server's
     // 422 below is the gate.
@@ -267,11 +269,11 @@ export function RequestComposer({
     const ref = request?.ref || '';
     if (kind === 'hold') {
       const until = request?.expires_local || '';
-      addToast?.(`Hold ${ref} placed until ${until} — sending to N Style.`, 'success');
+      addToast?.(`Hold ${ref} placed until ${until} — sending to ${partner}.`, 'success');
     } else if (kind === 'tow') {
-      addToast?.(`Tow ${ref} requested — sending to N Style.`, 'success');
+      addToast?.(`Tow ${ref} requested — sending to ${partner}.`, 'success');
     } else {
-      addToast?.(`Photo ${ref} requested — sending to N Style.`, 'success');
+      addToast?.(`Photo ${ref} requested — sending to ${partner}.`, 'success');
     }
   }
 
@@ -290,11 +292,11 @@ export function RequestComposer({
       return;
     }
     if (code === 'email_unverified') { askToVerify(); return; }
-    if (code === 'note_required') { setNoteError(TOW_NOTE_ERROR); return; }
+    if (code === 'note_required') { setNoteError(towNoteError(partner)); return; }
     // Every other code becomes a sentence through the map — the error's own
     // text is the route's `detail` code (`hold_window`,
     // `attestation_required`, …), which is an identifier, not copy.
-    addToast?.(requestErrorMessage(err, 'Could not send that request. Try again.'), 'error');
+    addToast?.(requestErrorMessage(err, 'Could not send that request. Try again.', partner), 'error');
   }
 
   const primaryLabel = kind === 'tow' ? 'Request tow'
@@ -378,7 +380,7 @@ export function RequestComposer({
 
       {kind === 'tow' && (
         <div style={{ marginTop: 12 }}>
-          <label className="req-label" htmlFor="req-note-tow">Why? N Style sees this</label>
+          <label className="req-label" htmlFor="req-note-tow">Why? {partner} sees this</label>
           <textarea
             id="req-note-tow"
             className="req-textarea"
@@ -508,7 +510,7 @@ export function RequestComposer({
 
       {kind === 'hold' && <p className="req-help">{HOLD_HELP}</p>}
       {kind === 'hold' && isPending && (
-        <p className="req-help">{holdCount} of {resolved.pending_hold_cap} holds while N Style confirms</p>
+        <p className="req-help">{holdCount} of {resolved.pending_hold_cap} holds while {partner} confirms</p>
       )}
     </form>
   );
