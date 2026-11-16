@@ -9,8 +9,8 @@
 ## Dependencies (Victor's work — build on it, don't fork it)
 
 - **PR #302 `today-admin-panel`** (Admin › Today + `admin-ops` edge function, `src/lib/ops.js` `opsFetch`, `src/pages/TodayPanel.jsx`). Merge before Task 6. Admin › Today stays where #302 puts it (first sub-tab of Admin) as the boots/agents/equipment view; the Properties tab is the portfolio table. Do not edit `admin-ops/**`, `TodayPanel.jsx`, `AdminConsolePage.jsx` or `lib/ops.js` in this plan; consume them.
-- **Branch `feat/agent-in-enforcement`** (session gabe-f7; folds `/agent` into the Enforcement tab): adds `agentMode = !viewAs && isLotLogicAgent(owner)` in `App.jsx`, an early return at the top of the `navTabs` IIFE giving agents `[Enforcement, Account]`, `canSeeEnforcement` = admin OR LotLogic agent (`lib/enforcement.js`), and rewrites `EnforcementPage.jsx` and boot-portal `requireSession`. Merge before Task 7. Do not edit `EnforcementPage.jsx`, `lib/enforcement.js` or `boot-portal/**` here; Task 7's nav change sits below the agent early return and must keep it first.
-- Frontend tasks branch from `main` after #302, `feat/agent-in-enforcement` and #303 have merged.
+- **PR #304 `feat/agent-in-enforcement`** (session gabe-f7; folds `/agent` into the Enforcement tab): adds `agentMode = !viewAs && isLotLogicAgent(owner)` in `App.jsx`, an early return at the top of the `navTabs` IIFE giving agents `[Enforcement, Account]`, `canSeeEnforcement` = admin OR LotLogic agent (`lib/enforcement.js`), and rewrites `EnforcementPage.jsx` and boot-portal `requireSession`. Merge before Task 7. Do not edit `EnforcementPage.jsx`, `lib/enforcement.js` or `boot-portal/**` here; Task 7's nav change sits below the agent early return and must keep it first.
+- Frontend tasks branch from `main` after #302, #304 and #303 have merged.
 
 **Tech Stack:** FastAPI + SQLAlchemy text SQL + Postgres (lotlogic-backend), React 18 JSX built by esbuild (lotlogic/frontend), `node --test`, Playwright.
 
@@ -22,14 +22,14 @@
 |---|---|---|---|---|---|
 | 1 | #303 `fix/tow-partner-name` | lotlogic | Requests name the property's own tow company | Gabe merges | open now |
 | 2 | #302 `today-admin-panel` | lotlogic | Victor's Admin › Today + `admin-ops` (CI deploys it) | Victor / Gabe | open now |
-| 3 | `feat/agent-in-enforcement` | lotlogic | `/agent` folded into Enforcement; boot-portal accepts dashboard JWTs (CI deploys boot-portal) | session gabe-f7 | no PR yet |
+| 3 | #304 `feat/agent-in-enforcement` | lotlogic | `/agent` folded into Enforcement; boot-portal accepts dashboard JWTs (CI deploys boot-portal) | session gabe-f7 | open |
 | 4 | A: Tasks 1–2 | lotlogic-backend | go-live/units, week counts, office summary; migration 1 | this plan | Gabe applies migration 1, then `regen_expected.sh` |
 | 5 | B: Tasks 3–7 | lotlogic | Office Today, admin Properties table, nav | this plan | after 1, 2, 3 merged and A deployed |
 | 6 | C: Task 8 | lotlogic-backend | pauses table + API, `paused` verdict, notices; migration 2 | this plan | Gabe applies migration 2 |
 | 7 | D: Tasks 9–10 | lotlogic | pipeline skips paused properties; boot-portal `lock()` refuses | this plan | after C deployed; CLAUDE.md agent triggers |
 | 8 | E: Task 11 | lotlogic | pause UI, banners, Lookup `paused` | this plan | after C and D |
 
-PR B must be rebased on 2 and 3; PR D touches `boot-portal/index.ts` after 3 has changed it, so it rebases on 3. When session gabe-f7 opens its PR, re-check Task 7's nav lines and Task 10's `lock()` against it.
+PR B must be rebased on 2 and 3; PR D touches `boot-portal/index.ts` after 3 has changed it, so it rebases on 3. Checked against #304 (2026-11-16): its `App.jsx` change is the `agentMode` early return in `navTabs`, `agentMode ? 'enforcement'` as the home tab in the `validTabs` effect, and `<EnforcementPage agent={agentMode} />`; it does not touch `features.js`, `AdminConsolePage.jsx`, `admin-ops` or `lock()`. Task 7 keeps all three lines; Task 10 adds its check inside `lock()`, which #304 leaves as is.
 
 ## Global Constraints
 
