@@ -138,15 +138,22 @@ test('not_registered -> ELIGIBLE TO TOW, stop tone, ✗, scoped to the property 
 });
 
 test('not_registered under scope=all reads "any N Style property", not one property\'s name', () => {
-  const p = verdictPresentation('not_registered', {}, 'all');
+  const p = verdictPresentation('not_registered', {}, 'all', 'N Style');
   assert.match(p.reason, /any N Style property/);
+});
+
+test('not_registered under scope=all names the signed-in tow company, never N Style for NMLD', () => {
+  const p = verdictPresentation('not_registered', {}, 'all', 'NMLD Towing');
+  assert.match(p.reason, /any NMLD Towing property/);
+  assert.doesNotMatch(p.reason, /N Style/);
+  assert.equal(verdictPresentation('not_registered', {}, 'all').reason, 'No parking pass or hold at any property');
 });
 
 test('hold_unconfirmed is amber, never green, and says not yet confirmed', () => {
   const p = verdictPresentation('hold_unconfirmed', {
     ref: 'H-1842', property_name: 'Sunset Ridge Apartments', signed_up_by: 'Dana Ortiz',
     signup_phone: '(704) 555-0123', expires_local: 'Fri Oct 10, 6:00 PM ET',
-  }, 'all');
+  }, 'all', 'N Style');
   assert.equal(p.signal, 'HOLD — PROPERTY NOT CONFIRMED');
   assert.equal(p.tone, 'amber');
   assert.notEqual(p.tone, 'go');

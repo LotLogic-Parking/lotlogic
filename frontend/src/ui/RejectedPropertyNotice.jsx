@@ -1,6 +1,7 @@
 import React from 'react';
+import { capitalized, towPartnerName } from '../lib/towPartner.js';
 
-// ── "N Style didn't recognize…" (spec §3.8, "Not ours") ───────
+// ── "<Tow company> didn't recognize…" (spec §3.8, "Not ours") ───────
 //
 // A rejected property is archived and excluded from `/auth/me.properties`
 // outright — Task 14c's owner shape instead lists it under
@@ -15,7 +16,7 @@ export function RejectedPropertyNotice({ rejectedProperties, onAddProperty }) {
   return (
     <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
       <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
-        N Style didn't recognize {first.name}.
+        {capitalized(towPartnerName(first))} didn't recognize {first.name}.
       </div>
       <div style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
         Reply to the email we sent if that's a mistake, or add a property.

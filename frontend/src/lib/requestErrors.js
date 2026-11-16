@@ -18,6 +18,8 @@
 // The rest are codes the spec names (§8.3) without giving copy; those
 // sentences are declared in the task report as deviations.
 
+import { TOW_PARTNER_FALLBACK, capitalized } from './towPartner.js';
+
 /** When neither the code nor the call site has anything better to say. */
 export const GENERIC_ERROR = 'Something went wrong. Try again.';
 
@@ -26,9 +28,9 @@ export const REQUEST_ERROR_COPY = Object.freeze({
   hold_window: 'Pick a time between an hour from now and 7 days from now.',
   email_unverified: 'Confirm your email first — enter the 6-digit code we sent.',
   pending_hold_limit:
-    'Unconfirmed properties can keep 3 holds at a time. N Style usually confirms the same day.',
+    'Unconfirmed properties can keep 3 holds at a time. {Partner} usually confirms the same day.',
   attestation_required: 'Tap "Request tow" again so we can record the statement above.',
-  note_required: 'Tell N Style why — they act on this.',
+  note_required: 'Tell {partner} why — they act on this.',
   active_hold_exists: 'That plate already has a hold at this property.',
 
   // POST …/{id}/extend · /remove · /reinstate
@@ -48,9 +50,13 @@ export const REQUEST_ERROR_COPY = Object.freeze({
  * @param {unknown} err       the error `requestsApi` rethrew from `apiFetch`
  * @param {string} [fallback] what this particular button should say when the
  *                            code is unknown, absent, or a Pydantic 422
+ * @param {string} [partner]  the property's tow company (lib/towPartner.js), for
+ *                            the sentences that name it
  * @returns {string} never a code, never `err.message`
  */
-export function requestErrorMessage(err, fallback = GENERIC_ERROR) {
+export function requestErrorMessage(err, fallback = GENERIC_ERROR, partner = TOW_PARTNER_FALLBACK) {
   const code = typeof err?.code === 'string' ? err.code : '';
-  return REQUEST_ERROR_COPY[code] || fallback || GENERIC_ERROR;
+  const copy = REQUEST_ERROR_COPY[code];
+  if (!copy) return fallback || GENERIC_ERROR;
+  return copy.replace('{Partner}', capitalized(partner)).replace('{partner}', partner);
 }

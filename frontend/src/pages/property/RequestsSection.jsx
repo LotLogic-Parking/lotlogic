@@ -9,6 +9,7 @@ import { RequestRow, isUnreached } from './RequestRow.jsx';
 import { RecentList } from './RecentList.jsx';
 import { RequestHistorySheet } from './RequestHistorySheet.jsx';
 import { ExtendSheet } from './ExtendSheet.jsx';
+import { towPartnerName, TOW_PARTNER_FALLBACK } from '../../lib/towPartner.js';
 
 // ── The Requests section (spec §5.2) ─────────────────────────
 //
@@ -36,7 +37,9 @@ import { ExtendSheet } from './ExtendSheet.jsx';
 const UNDO_MS = 5000;
 
 const EMPTY_TITLE = 'No requests yet.';
-const EMPTY_BODY = "Put a plate on hold so N Style won't tow it, request a tow, or ask for a photo. Every request is logged with who and when.";
+/** The empty state, naming the property's own tow company. */
+export const emptyBody = (partner = TOW_PARTNER_FALLBACK) =>
+  `Put a plate on hold so ${partner} won't tow it, request a tow, or ask for a photo. Every request is logged with who and when.`;
 const LOAD_ERROR = "Couldn't load requests. Your last list is still shown.";
 
 /** Active holds first, then tow and photo — the §5.2 grouping. */
@@ -50,21 +53,21 @@ export function groupActive(items) {
 
 /**
  * The persistent banner's sentence (§5.2), or '' when every request has
- * reached N Style. Named after the oldest unreached request, because that is
+ * reached the tow company. Named after the oldest unreached request, because that is
  * the one the manager should be phoning about.
  */
-export function unreachedBanner(items, phone, now = Date.now()) {
+export function unreachedBanner(items, phone, now = Date.now(), partner = TOW_PARTNER_FALLBACK) {
   const rows = (Array.isArray(items) ? items : [])
     .filter(r => r.status === 'active' && isUnreached(r, now))
     .sort((a, b) => Date.parse(a.created_at || '') - Date.parse(b.created_at || ''));
   if (rows.length === 0) return '';
   const ref = rows[0].ref || 'a request';
-  // `enforcement_partners.phone` must be set for N Style before go-live
+  // `enforcement_partners.phone` must be set for the tow company before go-live
   // (§11). Until it is, the sentence still names the request — a banner with
   // no number beats no banner at all.
   return phone
-    ? `⚠ We couldn't reach N Style about ${ref} — call ${phone}.`
-    : `⚠ We couldn't reach N Style about ${ref}.`;
+    ? `⚠ We couldn't reach ${partner} about ${ref} — call ${phone}.`
+    : `⚠ We couldn't reach ${partner} about ${ref}.`;
 }
 
 export function RequestsSection({
@@ -98,6 +101,8 @@ export function RequestsSection({
   if (!loadGateRef.current) loadGateRef.current = latestGate();
 
   const propertyId = property?.id || null;
+  // The property's own tow company: NMLD at The Volaire, N Style at its lots.
+  const partner = towPartnerName(property);
   const isViewer = role === 'viewer';
   const canAct = role === 'admin' || role === 'manager';
   // §8.3 scopes `POST …/{id}/fulfill` to "partner / Slack", and §6.5's
@@ -168,8 +173,8 @@ export function RequestsSection({
     return row?.expires_local || '';
   }, [active]);
   const banner = useMemo(
-    () => unreachedBanner(active || [], property?.partner_phone),
-    [active, property?.partner_phone],
+    () => unreachedBanner(active || [], property?.partner_phone, Date.now(), partner),
+    [active, property?.partner_phone, partner],
   );
 
   function onCreated(created) {
@@ -197,7 +202,7 @@ export function RequestsSection({
     try {
       await requestsApi.removeRequest(target.id, {});
     } catch (err) {
-      addToast?.(requestErrorMessage(err, 'Could not remove that hold.'), 'error');
+      addToast?.(requestErrorMessage(err, 'Could not remove that hold.', partner), 'error');
       load();
       return;
     }
@@ -228,7 +233,7 @@ export function RequestsSection({
       });
       load();
     } catch (err) {
-      addToast?.(requestErrorMessage(err, 'Could not undo that.'), 'error');
+      addToast?.(requestErrorMessage(err, 'Could not undo that.', partner), 'error');
       load();
     }
   }
@@ -239,8 +244,8 @@ export function RequestsSection({
       const next = out?.request || out;
       addToast?.(
         next?.expires_local
-          ? `Hold ${next.ref} placed until ${next.expires_local} — sending to N Style.`
-          : `Hold ${next?.ref || ''} placed — sending to N Style.`,
+          ? `Hold ${next.ref} placed until ${next.expires_local} — sending to ${partner}.`
+          : `Hold ${next?.ref || ''} placed — sending to ${partner}.`,
         'success',
       );
       load();
@@ -249,7 +254,7 @@ export function RequestsSection({
         onConflict({ requestId: err.body?.request_id });
         return;
       }
-      addToast?.(requestErrorMessage(err, 'Could not place that hold again.'), 'error');
+      addToast?.(requestErrorMessage(err, 'Could not place that hold again.', partner), 'error');
     }
   }
 
@@ -257,6 +262,7 @@ export function RequestsSection({
     canAct,
     canFulfill,
     viewerName,
+    partnerName: partner,
     onExtend: setExtending,
     onRemove: remove,
     onHistory: (r) => setHistoryId(r.id),
@@ -274,7 +280,7 @@ export function RequestsSection({
       )}
 
       {/* Only the office places, extends, removes or reinstates (§4.3). A
-          viewer gets the one muted line; N Style gets no composer at all —
+          viewer gets the one muted line; the tow company gets no composer at all —
           its own surface is the §5.4 Requests tab. */}
       {isViewer && <p className="req-quiet">{viewerLine(property)}</p>}
       {canAct && (
@@ -314,7 +320,7 @@ export function RequestsSection({
       {nothingYet && (
         <div className="req-card">
           <div className="req-empty-title">{EMPTY_TITLE}</div>
-          <p className="req-help">{EMPTY_BODY}</p>
+          <p className="req-help">{emptyBody(partner)}</p>
           {canAct && (
             <button type="button" className="req-btn" onClick={() => {
               try { plateRef.current?.focus({ preventScroll: false }); } catch { /* iOS without a gesture */ }
@@ -342,6 +348,7 @@ export function RequestsSection({
             canAct={canAct}
             canFulfill={canFulfill}
             viewerName={viewerName}
+            partnerName={partner}
             onHistory={(r) => setHistoryId(r.id)}
             onReinstate={reinstate}
             addToast={addToast}
@@ -351,7 +358,7 @@ export function RequestsSection({
 
       {isPending && (
         <p className="req-quiet" style={{ marginTop: 12 }}>
-          Waiting for N Style to confirm {property?.name} — holds work now.
+          Waiting for {partner} to confirm {property?.name} — holds work now.
         </p>
       )}
 
@@ -361,6 +368,7 @@ export function RequestsSection({
           onClose={() => setHistoryId(null)}
           canAct={canAct}
           viewerName={viewerName}
+          partnerName={partner}
           onExtend={setExtending}
           onRemove={remove}
           addToast={addToast}

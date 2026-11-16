@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { requestsApi } from '../lib/requestsApi.js';
 import { pendingProperties } from '../lib/membership.js';
+import { towPartnerName } from '../lib/towPartner.js';
 
 // ── PendingMembershipPage (spec §3.7 (b)) ────────────────────
 //
@@ -45,7 +46,7 @@ export function PendingMembershipPage({ me, user, onLogout, onAddProperty }) {
     <div className="page-enter" style={{ textAlign: 'center', padding: '40px 16px' }}>
       <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>Request sent.</div>
       <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 10, lineHeight: 1.6 }}>
-        We've asked {property?.name || 'the property'} and N Style to add you.
+        We've asked {property?.name || 'the property'} and {towPartnerName(property)} to add you.
       </div>
       <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.6 }}>
         We'll email {email || 'you'} when they do — usually the same day.
