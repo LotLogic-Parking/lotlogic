@@ -1,7 +1,8 @@
 import React from 'react';
 import {
-  ACTION_LABEL, actionsFor, ago, batteryTone, bootFlags, commandLabel, deploymentLabel, fleetSummary,
-  isOnCar, mapUrl, money, paymentFlags, paymentsSummary, placeLine, portal, stateLabel, uploadBootFile,
+  ACTION_LABEL, actionsFor, AGENT_ROLES, agentBody, agentCoverage, agentRoleLabel, agentStatus, ago, batteryTone,
+  bootFlags, commandLabel, deploymentLabel, fleetSummary, isOnCar, mapUrl, money, paymentFlags, paymentsSummary,
+  placeLine, portal, stateLabel, uploadBootFile,
 } from '../lib/enforcement.js';
 import { fmtETStamp } from '../lib/holdTime.js';
 
@@ -389,6 +390,131 @@ function PaymentsLog() {
   );
 }
 
+// ── Agents: who can sign in to the boot portal for LotLogic's boots ──
+const EMPTY_AGENT = { name: '', email: '', phone: '', role: 'driver', property_ids: [] };
+
+function AddAgentForm({ properties, onDone, onCancel }) {
+  const [f, setF] = React.useState(EMPTY_AGENT);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const set = (k) => (e) => setF(v => ({ ...v, [k]: e.target.value }));
+  const toggle = (id) => setF(v => ({ ...v, property_ids: v.property_ids.includes(id) ? v.property_ids.filter(x => x !== id) : [...v.property_ids, id] }));
+  const submit = async (e) => {
+    e.preventDefault();
+    const { body, error } = agentBody(f);
+    if (error) return setErr(error);
+    setErr(''); setBusy(true);
+    try {
+      const r = await portal('agent-add', { method: 'POST', body });
+      onDone(r.message || 'Agent added.');
+    } catch (x) {
+      setErr(x.message || 'Could not add the agent.');
+    } finally { setBusy(false); }
+  };
+  return (
+    <form className="enf-form" onSubmit={submit} data-testid="enf-agent-form">
+      <div className="enf-form-grid">
+        <label className="pq-field"><span className="pq-label">Name</span><input value={f.name} onChange={set('name')} autoComplete="off" required /></label>
+        <label className="pq-field"><span className="pq-label">Email</span><input type="email" value={f.email} onChange={set('email')} autoComplete="off" required /></label>
+        <label className="pq-field"><span className="pq-label">Phone</span><input type="tel" value={f.phone} onChange={set('phone')} autoComplete="off" /></label>
+        <label className="pq-field"><span className="pq-label">Role</span>
+          <select value={f.role} onChange={set('role')}>
+            {AGENT_ROLES.map(r => <option key={r} value={r}>{agentRoleLabel(r)}</option>)}
+          </select>
+        </label>
+      </div>
+      <fieldset className="pq-field enf-agent-props">
+        <legend className="pq-label">{f.role === 'dispatcher' ? 'Properties (a dispatcher works at every property)' : 'Properties this driver covers'}</legend>
+        {properties.length === 0 && <p className="ls-note">No live properties.</p>}
+        {properties.map(p => (
+          <label key={p.id} className="enf-check">
+            <input type="checkbox" checked={f.property_ids.includes(p.id)} onChange={() => toggle(p.id)} disabled={f.role === 'dispatcher'} />
+            <span>{p.name}</span>
+          </label>
+        ))}
+      </fieldset>
+      <p className="ls-note">LotLogic emails them a link to set a password. They then sign in to the boot portal with that email.</p>
+      {err && <p className="enf-err" role="alert">{err}</p>}
+      <div className="enf-actions">
+        <button className="pq-btn pq-btn--primary" disabled={busy}>{busy ? 'Adding…' : 'Add agent'}</button>
+        <button type="button" className="pq-btn pq-btn--quiet" onClick={onCancel} disabled={busy}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function AgentsPanel() {
+  const [d, setD] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+  const [adding, setAdding] = React.useState(false);
+  const [armed, setArmed] = React.useState(null); // agent id whose Remove is waiting for a second tap
+  const [busy, setBusy] = React.useState(null);
+  const [hidden, setHidden] = React.useState(false);
+  const load = React.useCallback(async () => {
+    try { setD(await portal('agents')); setErr(''); } catch (x) {
+      if (x.status === 403 && x.code === 'not_allowed') setHidden(true);
+      else setErr(x.message || 'Could not load the agents.');
+    }
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+  if (hidden) return null;
+
+  const act = async (route, a, done) => {
+    setBusy(a.id); setErr(''); setMsg('');
+    try {
+      const r = await portal(route, { method: 'POST', body: { member_id: a.id } });
+      setMsg(r.message || done); setArmed(null); load();
+    } catch (x) { setErr(x.message || 'That did not work. Try again.'); } finally { setBusy(null); }
+  };
+  const agents = d?.agents || [];
+  return (
+    <section className="ls-card enf-agents" aria-labelledby="enf-agents-title" data-testid="enf-agents">
+      <div className="ls-card-head">
+        <h3 id="enf-agents-title" className="ls-card-title">Agents</h3>
+        {d && !adding && <button type="button" className="pq-btn pq-btn--primary" onClick={() => { setAdding(true); setMsg(''); }}>Add agent</button>}
+      </div>
+      <p className="ls-note">The people who sign in to the boot portal to place and release LotLogic's boots.</p>
+      {msg && <p className="enf-ok" role="status">{msg}</p>}
+      {err && <p className="enf-err" role="alert">{err}</p>}
+      {!d && !err && <p className="ls-note">Loading agents…</p>}
+      {adding && d && (
+        <AddAgentForm properties={d.properties || []} onCancel={() => setAdding(false)} onDone={(m) => { setAdding(false); setMsg(m); load(); }} />
+      )}
+      {d && agents.length === 0 && !adding && <p className="ls-note">No agents yet. Add one so a driver or dispatcher can sign in.</p>}
+      <ul className="enf-agent-list">
+        {agents.map(a => {
+          const st = agentStatus(a);
+          return (
+            <li key={a.id} className="enf-agent" data-testid="enf-agent">
+              <div className="enf-agent-main">
+                <span className="enf-boot-name">{a.name}</span>
+                <span className="enf-boot-meta">
+                  <Chip tone="info">{agentRoleLabel(a.role)}</Chip>
+                  <Chip tone={st.tone}>{st.label}</Chip>
+                  <span className="enf-muted">{a.email}{a.phone ? ` · ${a.phone}` : ''}</span>
+                </span>
+                <span className="enf-muted">{agentCoverage(a)}</span>
+              </div>
+              <div className="enf-actions">
+                <button type="button" className="pq-btn" disabled={busy === a.id} onClick={() => act('agent-resend', a, 'Sent a new set-password link.')}>Resend set-password email</button>
+                {armed === a.id ? (
+                  <>
+                    <button type="button" className="pq-btn pq-btn--danger" disabled={busy === a.id} onClick={() => act('agent-remove', a, 'Removed.')}>Remove {a.name} and sign them out</button>
+                    <button type="button" className="pq-btn pq-btn--quiet" onClick={() => setArmed(null)}>Keep</button>
+                  </>
+                ) : (
+                  <button type="button" className="pq-btn pq-btn--quiet" disabled={busy === a.id} onClick={() => setArmed(a.id)}>Remove</button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export default function EnforcementPage() {
   const [boots, setBoots] = React.useState(null);
   const [properties, setProperties] = React.useState([]);
@@ -462,6 +588,7 @@ export default function EnforcementPage() {
         </>
       )}
 
+      {!(err && err.startsWith('Enforcement is limited')) && <AgentsPanel />}
       {!(err && err.startsWith('Enforcement is limited')) && <PaymentsLog />}
     </section>
   );

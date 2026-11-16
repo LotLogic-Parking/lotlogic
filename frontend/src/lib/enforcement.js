@@ -207,3 +207,43 @@ export function paymentsSummary(rows) {
     other: list.filter(r => r.kind === 'other').length,
   };
 }
+
+// ── Agents (GET /boot-portal/agents, POST agent-add|agent-resend|agent-remove) ──
+// LotLogic's boot agents: partner_members of the "LotLogic" company who sign in
+// to the boot portal. The server (boot-portal agents.ts) checks every rule
+// again; these only shape the form and the list.
+
+export const AGENT_ROLES = ['driver', 'dispatcher'];
+export const AGENT_ROLE_LABEL = { driver: 'Driver', dispatcher: 'Dispatcher', admin: 'Admin' };
+export function agentRoleLabel(role) {
+  return AGENT_ROLE_LABEL[role] || role || '';
+}
+
+/** The add form as the agent-add body, or the first thing to fix. */
+export function agentBody(form) {
+  const f = form || {};
+  const name = String(f.name || '').trim();
+  const email = String(f.email || '').trim().toLowerCase();
+  const phone = String(f.phone || '').trim();
+  const role = f.role;
+  const property_ids = [...new Set((Array.isArray(f.property_ids) ? f.property_ids : []).filter(Boolean))];
+  if (name.length < 2) return { error: "Enter the agent's name." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Enter a valid email address.' };
+  if (!AGENT_ROLES.includes(role)) return { error: 'Pick driver or dispatcher.' };
+  if (role === 'driver' && property_ids.length === 0) return { error: 'Pick at least one property this driver covers.' };
+  return { body: { name, email, phone: phone || undefined, role, property_ids } };
+}
+
+/** Where the agent's sign-in stands, in words. */
+export function agentStatus(a, now = Date.now()) {
+  if (!a?.has_password) return { label: 'Invited · no password yet', tone: 'warn' };
+  if (!a.last_login_at) return { label: 'Password set · never signed in', tone: 'muted' };
+  return { label: `Signed in ${ago(a.last_login_at, now)}`, tone: 'ok' };
+}
+
+/** "Every property" for a dispatcher, the names for a driver. */
+export function agentCoverage(a) {
+  if (a?.role === 'dispatcher' || a?.role === 'admin') return 'Every property';
+  const names = (a?.properties || []).map(p => p.name);
+  return names.length ? names.join(', ') : 'No properties: cannot boot anywhere';
+}
