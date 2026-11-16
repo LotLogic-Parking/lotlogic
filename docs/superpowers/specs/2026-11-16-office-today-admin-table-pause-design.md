@@ -158,6 +158,16 @@ the end in words ("Enforcement resumes Sat Nov 21, 6:00 PM") before Save.
   plate is on file nowhere, so a driver never reads ELIGIBLE TO TOW without seeing the pause (the
   answer becomes the existing grouped card).
 
+**When a pause ends — enforce right away (Gabe, 2026-11-16).** No fresh grace: the moment the
+pause ends, every car at the property is judged as if there had been no pause. A car that arrived
+during the pause and is unregistered, or whose pass expired during it, is enforceable immediately
+(the sweeps' normal next run picks it up). The "pause ended" notice to the tow company says so.
+
+**When a pause starts (my call).** Flags already sent to the tow company or a boot driver before the
+pause stand. Flags created but not yet sent (the 5-minute hold, the retry loop) are held, not
+dropped, and go out at the pause end if the car is still in violation then — which is the same
+outcome "enforce right away" gives.
+
 **What keeps working:** registration, passes, holds, plate reads, visit tracking, and **tow
 requests the office places itself** during the pause (an explicit written request; it shows
 "Requested by the office during a pause"). Photo requests keep working.
