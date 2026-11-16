@@ -117,3 +117,31 @@ test('paymentsSummary: a declined card is listed but not counted; a placement Sq
   assert.equal(s.net, 24245 + 19300);
   assert.equal(s.other, 0);
 });
+
+// ── Agents panel (lib/enforcement.js agent helpers) ──
+import { agentBody, agentCoverage, agentRoleLabel, agentStatus } from '../src/lib/enforcement.js';
+
+test('agentBody: a valid driver with a property becomes the agent-add body', () => {
+  assert.deepEqual(
+    agentBody({ name: ' Dana Reyes ', email: ' Dana@Example.com ', phone: '', role: 'driver', property_ids: ['p1', 'p1', ''] }),
+    { body: { name: 'Dana Reyes', email: 'dana@example.com', phone: undefined, role: 'driver', property_ids: ['p1'] } },
+  );
+  assert.equal(agentBody({ name: 'Al', email: 'a@b.co', role: 'dispatcher', property_ids: [] }).body.role, 'dispatcher');
+});
+
+test('agentBody: what to fix, first problem first', () => {
+  assert.equal(agentBody({}).error, "Enter the agent's name.");
+  assert.equal(agentBody({ name: 'Al', email: 'nope', role: 'driver' }).error, 'Enter a valid email address.');
+  assert.equal(agentBody({ name: 'Al', email: 'a@b.co', role: 'admin' }).error, 'Pick driver or dispatcher.');
+  assert.equal(agentBody({ name: 'Al', email: 'a@b.co', role: 'driver', property_ids: [] }).error, 'Pick at least one property this driver covers.');
+});
+
+test('agentStatus and agentCoverage', () => {
+  assert.equal(agentStatus({ has_password: false }).label, 'Invited · no password yet');
+  assert.equal(agentStatus({ has_password: true, last_login_at: null }).label, 'Password set · never signed in');
+  assert.equal(agentStatus({ has_password: true, last_login_at: '2026-11-15T12:00:00Z' }, NOW).label, 'Signed in 3 h ago');
+  assert.equal(agentCoverage({ role: 'dispatcher', properties: [] }), 'Every property');
+  assert.equal(agentCoverage({ role: 'driver', properties: [{ name: 'A' }, { name: 'B' }] }), 'A, B');
+  assert.equal(agentCoverage({ role: 'driver', properties: [] }), 'No properties: cannot boot anywhere');
+  assert.equal(agentRoleLabel('dispatcher'), 'Dispatcher');
+});

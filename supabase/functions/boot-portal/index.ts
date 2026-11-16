@@ -22,6 +22,12 @@
 //   GET  /boot-portal/payments     LotLogic admins: every Square payment since PAYMENTS_LOG_START (2026-11-15) joined
 //                                   to its boot placement, with the placement GPS matched to the nearest property
 //                                   (payments.ts); ?days= narrows it to the last n days
+//   GET  /boot-portal/agents       LotLogic admins: LotLogic's boot agents (agents.ts), with the properties to pick from
+//   POST /boot-portal/agent-add    {name, email, phone?, role: driver|dispatcher, property_ids}  -> set-password email
+//   POST /boot-portal/agent-resend {member_id}                  -> a new set-password email
+//   POST /boot-portal/agent-remove {member_id}                  -> removed_at, and their portal sessions ended
+// A LotLogic agent (a portal member of the "LotLogic" company) boots at the properties assigned to them if a driver,
+// at any live property if a dispatcher: LotLogic owns no property, it boots at its customers'.
 // LotLogic admins (BOOT_ADMIN_EMAILS, default gabriel@ and victor@lotlogicparking.com) can call every route with
 // their main-dashboard session instead of a portal token: the backend's /auth/me says who it is (admin.ts). An admin
 // sees and acts on every partner's boots, as role admin.
@@ -30,6 +36,7 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword, wifiSsid } from "../_shared/boot.ts";
 import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt } from "./admin.ts";
+import { addAgent, isLotLogicAgent, listAgents, removeAgent, resendAgent, supabaseStore, type TeamCall } from "./agents.ts";
 import { joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
 
 const SESSION_H = 12;
@@ -54,9 +61,10 @@ Deno.serve(async (req) => {
   const route = url.pathname.split("/").filter(Boolean).pop();
   try {
     if (route === "login" && req.method === "POST") return json(await login(db, req));
-    const { me, tokenHash } = await requireSession(db, req);
+    const { me, tokenHash, dashToken } = await requireSession(db, req);
     if (req.method === "GET") {
       if (route === "me") return json({ ok: true, me });
+      if (route === "agents") return json(await listAgents(supabaseStore(db), me));
       if (route === "boots") return json(await listBoots(db, me));
       if (route === "boot") return json(await bootDetail(db, me, url.searchParams.get("id")));
       if (route === "properties") return json(await listProperties(db, me));
@@ -76,6 +84,9 @@ Deno.serve(async (req) => {
       if (route === "emergency") return json(await emergency(db, me, body, req));
       if (route === "cancel") return json(await cancel(db, me, body));
       if (route === "setup-wifi") return json(await setupWifi(db, me, body));
+      if (route === "agent-add") return json(await addAgent(supabaseStore(db), teamCall(dashToken), me, body));
+      if (route === "agent-resend") return json(await resendAgent(supabaseStore(db), teamCall(dashToken), me, body));
+      if (route === "agent-remove") return json(await removeAgent(supabaseStore(db), teamCall(dashToken), me, body));
     }
     throw new HttpError(404, "not_found");
   } catch (e) {
@@ -142,9 +153,22 @@ async function dashboardAdmin(token: string): Promise<Me> {
   return me;
 }
 
-async function requireSession(db: SupabaseClient, req: Request): Promise<{ me: Me; tokenHash: string }> {
+/** The backend's team routes, called as the signed-in LotLogic admin (agents.ts). No dashboard session, no call. */
+function teamCall(dashToken: string): TeamCall {
+  return async (method, path, body) => {
+    if (!dashToken) throw new HttpError(403, "not_allowed", "Managing agents is for LotLogic admins.");
+    const r = await fetch(`${DASHBOARD_API}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${dashToken}`, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, data: await r.json().catch(() => null) };
+  };
+}
+
+async function requireSession(db: SupabaseClient, req: Request): Promise<{ me: Me; tokenHash: string; dashToken: string }> {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (looksLikeJwt(token)) return { me: await dashboardAdmin(token), tokenHash: "" };
+  if (looksLikeJwt(token)) return { me: await dashboardAdmin(token), tokenHash: "", dashToken: token };
   if (!/^[0-9a-f]{64}$/.test(token)) throw new HttpError(401, "signed_out", "Please sign in.");
   const tokenHash = await sha256Hex(token);
   const { data: s } = await db.from("boot_portal_sessions").select("member_id, partner_id, expires_at, revoked_at, last_seen_at")
@@ -158,7 +182,7 @@ async function requireSession(db: SupabaseClient, req: Request): Promise<{ me: M
   if (Date.now() - new Date(s.last_seen_at).getTime() > 60_000) {
     await db.from("boot_portal_sessions").update({ last_seen_at: new Date().toISOString() }).eq("token_hash", tokenHash);
   }
-  return { me: { member_id: m.id, partner_id: m.partner_id, role: m.role, name: m.name, email: m.email, company: p.company_name }, tokenHash };
+  return { me: { member_id: m.id, partner_id: m.partner_id, role: m.role, name: m.name, email: m.email, company: p.company_name }, tokenHash, dashToken: "" };
 }
 
 const canManage = (me: Me) => me.role === "admin" || me.role === "dispatcher";
@@ -247,6 +271,19 @@ async function signedRead(db: SupabaseClient, path: string | null | undefined) {
 async function listProperties(db: SupabaseClient, me: Me) {
   if (me.lotlogic) {
     const { data, error } = await db.from("properties").select("id, name, address").is("archived_at", null).order("name");
+    if (error) throw error;
+    return { ok: true, properties: data ?? [] };
+  }
+  if (isLotLogicAgent(me)) {
+    // LotLogic owns no property: a dispatcher works at any live one, a driver only at the ones assigned to them.
+    let q = db.from("properties").select("id, name, address").is("archived_at", null).order("name");
+    if (me.role === "driver") {
+      const { data: mine } = await db.from("partner_member_properties").select("property_id").eq("member_id", me.member_id);
+      const assigned = (mine ?? []).map((r) => r.property_id);
+      if (!assigned.length) return { ok: true, properties: [] };
+      q = q.in("id", assigned);
+    }
+    const { data, error } = await q;
     if (error) throw error;
     return { ok: true, properties: data ?? [] };
   }

@@ -366,3 +366,10 @@ The charter's hard lines override anything in this file. Durable facts, findings
 and open questions live in the brain (Supabase schema `brain`, the `/brain/*`
 API, the HQ tab) — not in this document and not in chat.
 <!-- END brain-include -->
+
+## Boot system rules (2026-11-16)
+- boot-portal, boot-pay and boot-report live in supabase/functions/ and deploy from CI on merge to main. Never deploy them by hand.
+- LotLogic owns its boots through the enforcement_partners row "LotLogic". Boot agents are partner_members of that company.
+- Fees are integer cents. Never hardcode a fee; read boot_fee_cents from the boot's partner.
+- The boot payments log starts 2026-11-15 (PAYMENTS_LOG_START); earlier payments were tests.
+- Tow-company and leasing-office screens never show fees or revenue.
