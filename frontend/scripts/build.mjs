@@ -72,6 +72,7 @@ const result = await build({
     path.join(ROOT, 'src/visit.js'),
     path.join(ROOT, 'src/resident.js'),
     path.join(ROOT, 'src/apt.js'),
+    path.join(ROOT, 'src/agent.js'),   // the Enforcement Agent screen (agent.html)
   ],
   outdir: DIST,
   entryNames: '[name]',
@@ -130,7 +131,7 @@ for (const entry of await readdir(ROOT, { withFileTypes: true })) {
 
 // ── 3. assert the deploy is not silently empty ─────────────────────────────
 for (const f of ['dashboard.html', 'index.html', 'visit.html', 'resident.html',
-                 'apt.html', 'dashboard.js', 'visit.js', 'resident.js', 'apt.js',
+                 'apt.html', 'agent.html', 'dashboard.js', 'visit.js', 'resident.js', 'apt.js', 'agent.js',
                  'error-reporting.js', 'vercel.json', 'styles/register.css',
                  'styles/brand.css']) {
   // vercel.json must reach dist/ for the rewrites to apply to the output dir.

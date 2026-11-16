@@ -13,6 +13,8 @@
     { "source": "/register/:path*", "destination": "/resident.html" },
     { "source": "/apt/:path*", "destination": "/apt.html" },
     { "source": "/set-password", "destination": "/set-password.html" },
+    { "source": "/agent", "destination": "/agent.html" },
+    { "source": "/agent/:path*", "destination": "/agent.html" },
     { "source": "/admin", "destination": "/admin.html" },
     { "source": "/join", "destination": "/dashboard.html" },
     { "source": "/join/:path*", "destination": "/dashboard.html" },
