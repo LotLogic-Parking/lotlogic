@@ -30,12 +30,13 @@
 // at any live property if a dispatcher: LotLogic owns no property, it boots at its customers'.
 // LotLogic admins (BOOT_ADMIN_EMAILS, default gabriel@ and victor@lotlogicparking.com) can call every route with
 // their main-dashboard session instead of a portal token: the backend's /auth/me says who it is (admin.ts). An admin
-// sees and acts on every partner's boots, as role admin.
+// sees and acts on every partner's boots, as role admin. A team member signed in to the main dashboard (a LotLogic
+// agent in the Enforcement tab) is the same member a portal /login gives, with the same scope.
 // Deploy with verify_jwt = false.
 import bcrypt from "npm:bcryptjs@2.4.3";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword, wifiSsid } from "../_shared/boot.ts";
-import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt } from "./admin.ts";
+import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt, memberFromAuthMe } from "./admin.ts";
 import { addAgent, isLotLogicAgent, listAgents, removeAgent, resendAgent, supabaseStore, type TeamCall } from "./agents.ts";
 import { joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
 
@@ -139,7 +140,8 @@ async function login(db: SupabaseClient, req: Request) {
   return { ok: true, token, expires_in_s: SESSION_H * 3600, me };
 }
 
-async function dashboardAdmin(token: string): Promise<Me> {
+/** A main-dashboard session: a LotLogic admin (every boot), or a team member (their company's, as /login gives). */
+async function dashboardSession(db: SupabaseClient, token: string): Promise<{ me: Me; dashToken: string }> {
   let r: Response;
   try {
     r = await fetch(`${DASHBOARD_API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
@@ -148,9 +150,22 @@ async function dashboardAdmin(token: string): Promise<Me> {
   }
   if (r.status === 401 || r.status === 403) throw new HttpError(401, "signed_out", "Please sign in again.");
   if (!r.ok) throw new HttpError(503, "auth_unavailable", "Couldn't check your sign-in. Try again.");
-  const me = adminFromAuthMe(await r.json().catch(() => null), ADMIN_EMAILS);
-  if (!me) throw new HttpError(403, "not_allowed", "Enforcement is limited to LotLogic admins.");
-  return me;
+  const body = await r.json().catch(() => null);
+  const adminMe = adminFromAuthMe(body, ADMIN_EMAILS);
+  if (adminMe) return { me: adminMe, dashToken: token };
+  const member = memberFromAuthMe(body);
+  if (!member) throw new HttpError(403, "not_allowed", "Enforcement is for LotLogic admins and agents.");
+  return { me: await memberMe(db, member.member_id, member.partner_id), dashToken: "" };
+}
+
+/** The signed-in team member, or 401 when they were removed or moved company; 403 when the company is off. */
+async function memberMe(db: SupabaseClient, memberId: string, partnerId: string): Promise<Me> {
+  const { data: m } = await db.from("partner_members").select("id, partner_id, role, name, email, removed_at")
+    .eq("id", memberId).maybeSingle();
+  if (!m || m.removed_at || m.partner_id !== partnerId) throw new HttpError(401, "signed_out", "Please sign in again.");
+  const { data: p } = await db.from("enforcement_partners").select("company_name, active").eq("id", m.partner_id).single();
+  if (!p?.active) throw new HttpError(403, "company_inactive", "Your company's account is not active.");
+  return { member_id: m.id, partner_id: m.partner_id, role: m.role, name: m.name, email: m.email, company: p.company_name };
 }
 
 /** The backend's team routes, called as the signed-in LotLogic admin (agents.ts). No dashboard session, no call. */
@@ -168,21 +183,17 @@ function teamCall(dashToken: string): TeamCall {
 
 async function requireSession(db: SupabaseClient, req: Request): Promise<{ me: Me; tokenHash: string; dashToken: string }> {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (looksLikeJwt(token)) return { me: await dashboardAdmin(token), tokenHash: "", dashToken: token };
+  if (looksLikeJwt(token)) return { ...(await dashboardSession(db, token)), tokenHash: "" };
   if (!/^[0-9a-f]{64}$/.test(token)) throw new HttpError(401, "signed_out", "Please sign in.");
   const tokenHash = await sha256Hex(token);
   const { data: s } = await db.from("boot_portal_sessions").select("member_id, partner_id, expires_at, revoked_at, last_seen_at")
     .eq("token_hash", tokenHash).maybeSingle();
   if (!s || s.revoked_at || new Date(s.expires_at) < new Date()) throw new HttpError(401, "signed_out", "Please sign in again.");
-  const { data: m } = await db.from("partner_members").select("id, partner_id, role, name, email, removed_at")
-    .eq("id", s.member_id).single();
-  if (!m || m.removed_at || m.partner_id !== s.partner_id) throw new HttpError(401, "signed_out", "Please sign in again.");
-  const { data: p } = await db.from("enforcement_partners").select("company_name, active").eq("id", m.partner_id).single();
-  if (!p?.active) throw new HttpError(403, "company_inactive", "Your company's account is not active.");
+  const me = await memberMe(db, s.member_id, s.partner_id);
   if (Date.now() - new Date(s.last_seen_at).getTime() > 60_000) {
     await db.from("boot_portal_sessions").update({ last_seen_at: new Date().toISOString() }).eq("token_hash", tokenHash);
   }
-  return { me: { member_id: m.id, partner_id: m.partner_id, role: m.role, name: m.name, email: m.email, company: p.company_name }, tokenHash, dashToken: "" };
+  return { me, tokenHash, dashToken: "" };
 }
 
 const canManage = (me: Me) => me.role === "admin" || me.role === "dispatcher";

@@ -27,6 +27,19 @@ export type AdminMe = {
   member_id: null; partner_id: null; role: "admin"; name: string; email: string; company: string; lotlogic: true;
 };
 
+/**
+ * The team member a backend /auth/me body describes: {member_id, partner_id}, or null. An agent signs in to
+ * the main dashboard with the same partner_members email and password the portal's /login takes, so their
+ * dashboard session reaches the portal as that member (Gabe, 2026-11-16: "merge the lotlogic agent into the
+ * enforcement tab"). A company's own pre-team login names no member and is refused.
+ */
+export function memberFromAuthMe(body: unknown): { member_id: string; partner_id: string } | null {
+  const b = (body ?? {}) as { type?: unknown; id?: unknown; member?: { id?: unknown } | null };
+  if (b.type !== "partner" || typeof b.id !== "string" || !b.id) return null;
+  const id = b.member && typeof b.member === "object" ? b.member.id : null;
+  return typeof id === "string" && id ? { member_id: id, partner_id: b.id } : null;
+}
+
 /** The admin a backend /auth/me body describes, or null when its email is not allowed. */
 export function adminFromAuthMe(body: unknown, allowed: string[]): AdminMe | null {
   const b = (body ?? {}) as { email?: unknown; name?: unknown; first_name?: unknown };

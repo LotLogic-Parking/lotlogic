@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { adminEmails, adminFromAuthMe, DEFAULT_ADMIN_EMAILS, looksLikeJwt } from "./admin.ts";
+import { adminEmails, adminFromAuthMe, DEFAULT_ADMIN_EMAILS, looksLikeJwt, memberFromAuthMe } from "./admin.ts";
 
 Deno.test("adminEmails: the env list, lower-cased; the default two when unset or junk", () => {
   assertEquals(adminEmails(" Gabriel@LotLogicParking.com , victor@lotlogicparking.com "), ["gabriel@lotlogicparking.com", "victor@lotlogicparking.com"]);
@@ -28,4 +28,18 @@ Deno.test("adminFromAuthMe: only the allowed emails, case-insensitive; everyone 
   assertEquals(adminFromAuthMe({ email: "manager@property.com" }, allowed), null);
   assertEquals(adminFromAuthMe(null, allowed), null);
   assertEquals(adminFromAuthMe({}, allowed), null);
+});
+
+Deno.test("memberFromAuthMe: a partner session that names its person; owners and pre-team company logins null", () => {
+  assertEquals(memberFromAuthMe({ type: "partner", id: "p-ll", company_name: "LotLogic", member: { id: "m-1", role: "driver" } }),
+    { member_id: "m-1", partner_id: "p-ll" });
+  // a company's own login from before the team spec names no member
+  assertEquals(memberFromAuthMe({ type: "partner", id: "p-ll", member: null }), null);
+  assertEquals(memberFromAuthMe({ type: "partner", id: "p-ll" }), null);
+  // an owner, even a platform admin, is never a member
+  assertEquals(memberFromAuthMe({ type: "owner", id: "o-1", is_platform_admin: true, member: { id: "m-1" } }), null);
+  assertEquals(memberFromAuthMe({ email: "manager@property.com" }), null);
+  assertEquals(memberFromAuthMe({ type: "partner", id: "", member: { id: "m-1" } }), null);
+  assertEquals(memberFromAuthMe({ type: "partner", id: "p-ll", member: { id: 7 } }), null);
+  assertEquals(memberFromAuthMe(null), null);
 });

@@ -1,11 +1,13 @@
-// The Enforcement Agent screen's rules, with no DOM and no network, so
-// `scripts/agentLogic.test.mjs` can cover them. Phase 1 talks only to the
+// The boot agent's rules, used by the dashboard's Enforcement tab
+// (pages/EnforcementPage.jsx: the boot page and the four-step placement), with
+// no DOM and no network, so `scripts/agentLogic.test.mjs` can cover them. They
+// came from Victor's /agent screen, which now redirects to /app. Phase 1 talks only to the
 // boot-portal edge function as it runs today (supabase/functions/boot-portal):
 // every rule here is a mirror of what that function enforces, used to decide
 // what to show. The server checks every one again and its message wins.
 //
-// Design: the "LotLogic Enforcement Agent (mockup)" artifact. Plain dark
-// style, sentence case, 12-hour times.
+// Design: the "LotLogic Enforcement Agent (mockup)" artifact. Sentence case,
+// 12-hour times.
 
 export const OPEN_DEPLOYMENT = ['locking', 'active', 'release_authorized'];
 export const IN_FLIGHT = ['queued', 'delivered'];          // boot_commands.status still on its way
