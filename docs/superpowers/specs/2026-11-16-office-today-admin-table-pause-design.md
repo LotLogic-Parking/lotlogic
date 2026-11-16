@@ -102,20 +102,31 @@ property, they lose their top-level tabs).
   older than 24 h) · *Starts <date>* (blue, before go-live) · *All good* (green). "Needs attention" =
   red or amber.
 - Selecting a row opens a side panel: address, units, tow partner, manager, go-live, registered
-  count, and three buttons — **Open property**, **See what the manager sees** (today's View-as),
+  count, and three buttons — **Open property**, **View as <tow partner>** (today's "View as
+  Partner", for that row's tow company; an office preview would be a new way to act as another
+  account, so it is out of scope),
   **Copy resident link** (`/apt/<qr_code_id>?role=resident`; disabled with "No link yet" when the
   property has no `qr_code_id`).
 
 **Backend:** `GET /admin/clients` gains `pending_registration_count`,
 `oldest_pending_registration_at`, `tows_this_week`, `boots_this_week`, `camera_last_read_at` (max
-over the property's cameras, null when none), `unreached_request_count`, `go_live_date` (null when
-unknown) and `active_pause` (`{ends_at, reason}` or null), all as correlated subqueries in the same
-style as `active_pass_count`.
+over the property's cameras, null when none), `unreached_request_count`, `go_live_date`, `units` and
+`active_pause` (`{ends_at, reason}` or null), all as correlated subqueries in the same style as
+`active_pass_count`. `properties` has no go-live or unit column: PR 1 adds nullable
+`go_live_date date` and `units int`, editable by platform admins only from the side panel. Pills and
+tiles that need them hide when they are null (The Volaire: go-live 2027-01-01, 93 units, from the
+signed agreement).
+
+**Counting "this week":** one tow or boot counts once. Count distinct enforcement actions from
+`alpr_violations.action_taken` (`tow`, `boot`) plus boots in `boot_deployments` and office tow
+requests resolved `towed` that have no `alpr_violations` row; never add the same vehicle and action
+twice.
 
 ## Part 3 · Enforcement pause
 
 **Decided by Gabe:** the property manager can stop enforcement for a time period; **maximum 72
-hours** per pause.
+hours** per pause. **Apartments only:** the API refuses a pause at a truck plaza (my call; truck
+plazas have other automatic TOW paths and no office).
 
 **Setting one (office, admin members only):** from Today → Pause enforcement. Presets: *Tonight*
 (today 6 PM → tomorrow 7 AM ET), *Next 24 hours*, *This weekend* (Fri 6 PM → Sun 11:59 PM ET, which
@@ -132,12 +143,20 @@ the end in words ("Enforcement resumes Sat Nov 21, 6:00 PM") before Save.
 - Platform admins can set, end or cancel any pause, and are bound by the same 72 h limit.
 
 **What stops during a pause:**
-- Every automatic path at that property: no `alpr_violations` created by the sweeps
-  (`cron-sessions-sweep`, `cron-no-reg-sweep`, `check-violations`), no dispatch from
-  `camera-snapshot` → `tow-dispatch-email` / `tow-dispatch-sms`, no boot dispatch.
+- Every automatic path at that property. At apartments these are (builder check, 2026-11-16):
+  `bootDispatch` and `overstayExpiry` in the sweeps, the pending-dispatch retry loop, and
+  `camera-snapshot`'s dispatch to `tow-dispatch-email` / `tow-dispatch-sms`. (`check-violations` only
+  expires passes and `cron-no-reg-sweep` only flags `no_registration_violations`; neither creates
+  `alpr_violations`.)
+- **LotLogic's own boots:** `boot-portal /lock` refuses at a paused property ("Enforcement is paused
+  here until …"), and the boot drivers (`BOOT_DRIVER_PHONES`) get the pause notices. This adds
+  `boot-portal` (deploys from CI on merge) to PR 2.
 - The curb check: `plate_verdict` returns a new verdict **`paused`** for the property —
   DO NOT TOW, "Enforcement paused by <property> until <time>" (+ reason). It ranks above every
-  other verdict except an office tow request placed during the pause.
+  other verdict except an office tow request placed during the pause. A company-wide check ("All
+  properties", Slack DM, a Truck) includes a `paused` entry for every paused property even when the
+  plate is on file nowhere, so a driver never reads ELIGIBLE TO TOW without seeing the pause (the
+  answer becomes the existing grouped card).
 
 **What keeps working:** registration, passes, holds, plate reads, visit tracking, and **tow
 requests the office places itself** during the pause (an explicit written request; it shows
@@ -175,6 +194,11 @@ Order: 1 → 2 → 3. Each is safe alone (a pause created before PR 2 ships is a
 curb by PR 1).
 
 ## Calls I made (Gabe to check)
+
+- Pauses are for apartments only; truck plazas are refused.
+- Boot agents and the boot portal honour pauses.
+- The side panel's preview button is "View as <tow partner>", not an office preview.
+- `go_live_date` and `units` become admin-edited columns.
 
 - Pauses need ≥ 24 h between them, ≤ 3 scheduled, start ≤ 30 days ahead.
 - Office-requested tows still go through during a pause.
