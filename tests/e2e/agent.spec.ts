@@ -1,14 +1,19 @@
 /**
- * The Enforcement Agent screen (frontend/agent.html, src/agent/*), Phase 1.
+ * The Enforcement tab for a LotLogic boot agent (frontend/src/pages/EnforcementPage.jsx).
  *
- * Self-contained: builds and serves THIS branch's frontend and answers every
- * boot-portal call with page.route, from a small fake of the deployed function
- * (supabase/functions/boot-portal/index.ts) — no backend, no boots. A command
- * the fake queues finishes about 4 s later, so the page's 5 s poll sees it on
- * its next look, as a real boot's check-in would.
+ * Gabe, 2026-11-16: "merge the lotlogic agent into the enforcement tab" and "we want them to be
+ * able to view the properties that they are scoped into". An agent signs in to /app with their
+ * LotLogic login; their nav is Enforcement and Account, the tab lists their boots and the
+ * properties they cover, and placing a boot is Victor's four steps from the old /agent screen
+ * (which now redirects to /app).
  *
- * Phone screenshots (390 px) of every screen and waiting state land in
- * tests/test-results/agent-screens/.
+ * Self-contained: builds and serves THIS branch's frontend, starts signed in (a stored dashboard
+ * session), answers the backend's /auth/me, and answers every boot-portal call from a small fake
+ * of the deployed function (supabase/functions/boot-portal/index.ts): no backend, no boots. A
+ * command the fake queues finishes about 4 s later, so the page's 5 s poll sees it on its next
+ * look, as a real boot's check-in would.
+ *
+ * Phone screenshots (390 px) land in tests/test-results/agent-screens/.
  */
 import path from 'node:path';
 import fs from 'node:fs';
@@ -18,9 +23,12 @@ import { buildAndServeFrontend } from '../fixtures/buildAndServeFrontend';
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
 const SHOTS = path.resolve(__dirname, '../test-results/agent-screens');
 const PORTAL = 'https://nzdkoouoaedbbccraoti.supabase.co/functions/v1/boot-portal';
+const API = 'https://lotlogic-backend-production.up.railway.app';
 const PHONE = { width: 390, height: 844 };
-const TOKEN = 'a'.repeat(64);
 const DONE_AFTER_MS = 4000;
+// A dashboard session token has the shape of a JWT; nothing here checks its signature.
+const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const JWT = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: 'm1' })}.sig`;
 
 let server: Awaited<ReturnType<typeof buildAndServeFrontend>>;
 test.beforeAll(async () => { server = await buildAndServeFrontend(FRONTEND_DIR); fs.mkdirSync(SHOTS, { recursive: true }); });
@@ -30,6 +38,7 @@ test.use({ viewport: PHONE });
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const IMG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><rect width="4" height="3" fill="#555"/></svg>');
 const ME = { member_id: 'm1', partner_id: 'll', role: 'driver', name: 'Dana Reyes', email: 'dana@example.com', company: 'LotLogic' };
+const ADMIN_ME = { member_id: null, partner_id: null, role: 'admin', name: 'Gabe', email: 'gabriel@lotlogicparking.com', company: 'LotLogic', lotlogic: true };
 const REASONS = { police_fire_ems: 'Police, fire or EMS ordered the car moved', medical: 'Medical emergency', other: 'Other' };
 
 type Cmd = { id: string; cmd: number; status: string; purpose: string; created_at: string; t: number; effect?: () => void };
@@ -52,7 +61,10 @@ function world() {
     { id: 'b6', label: 'Boot 06', qr_code: 'R9C3V6LE', state: 1, battery_pct: 64, last_report_at: iso(60e3), cmds: [],
       dep: { id: 'd6', status: 'unlocked', plate_text: 'TXL9034', property: 'Mayfield Memorial Apartments', unlocked_at: iso(1500e3), released_at: iso(1700e3) } },
   ];
-  const w = { boots, calls: [] as Array<{ route: string; body: any }>, expireNext: false, signedOut: false };
+  const w = {
+    boots, calls: [] as Array<{ route: string; body: any }>, expireNext: false, admin: false,
+    properties: [{ id: 'p1', name: 'Mayfield Memorial Apartments', address: '4912 Daybreak Dr, Charlotte, NC 28269' }] as Array<Record<string, string>>,
+  };
   const byId = (id: string) => boots.find((b) => b.id === id)!;
   const onCar = (b: Boot) => !!b.dep && ['locking', 'active', 'release_authorized'].includes(b.dep.status);
   const settle = (b: Boot) => {
@@ -77,19 +89,16 @@ function world() {
 
   function answer(route: string, method: string, body: any, q: URLSearchParams): { status: number; body: object } {
     w.calls.push({ route, body });
-    if (route === 'login') {
-      return body.password === 'right' ? ok({ token: TOKEN, expires_in_s: 43200, me: ME })
-        : no(401, 'bad_login', "That email and password don't match. Use your LotLogic login.");
-    }
-    if (w.signedOut) return no(401, 'signed_out', 'Please sign in again.');
-    if (route === 'logout') return ok({});
-    if (route === 'boots') { boots.forEach(settle); return ok({ me: ME, boots: boots.map(row) }); }
-    if (route === 'properties') return ok({ properties: [{ id: 'p1', name: 'Mayfield Memorial Apartments', address: '4912 Daybreak Dr, Charlotte, NC 28269' }] });
+    const me = w.admin ? ADMIN_ME : ME;
+    if (route === 'boots') { boots.forEach(settle); return ok({ me, boots: boots.map(row) }); }
+    if (route === 'properties') return ok({ properties: w.properties });
+    if (route === 'agents') return w.admin ? ok({ agents: [], properties: w.properties }) : no(403, 'not_allowed', 'Managing agents is for LotLogic admins.');
+    if (route === 'payments') return w.admin ? ok({ rows: [], square_ok: true, since: '2026-11-15T05:00:00Z' }) : no(403, 'not_allowed', 'Payments are for LotLogic admins.');
     const b = byId(String(body?.boot_id ?? q.get('id')));
     if (route === 'boot') {
       settle(b);
       return ok({
-        me: ME,
+        me,
         boot: { id: b.id, label: b.label, qr_code: b.qr_code, state: b.state, battery_pct: b.battery_pct, last_report_at: b.last_report_at, stored_at: b.stored_at ?? null, poll_s: 60 },
         deployment: b.dep, emergency_reasons: REASONS,
         commands: b.cmds.slice(0, 8).map(({ t, effect, ...c }) => c),
@@ -105,7 +114,8 @@ function world() {
       const id = queue(b, 2, 'place', () => { b.state = 0; b.dep!.status = 'active'; b.dep!.lock_confirmed_at = new Date().toISOString(); });
       return ok({ deployment_id: 'dnew', command_id: id, online: true, message: 'Signed. Lock sent.' });
     }
-    if (route === 'unlock' && body.waive) return no(403, 'dispatch_only', 'Only dispatch or an admin can waive the fee.');
+    if (route === 'unlock' && body.waive && !w.admin) return no(403, 'dispatch_only', 'Only dispatch or an admin can waive the fee.');
+    if (route === 'setup-wifi') return ok({ ssid: 'LotLogic-Boot-01', password: 'k7m2q9xa', url: 'http://192.168.4.1', message: 'Wi-Fi setup sent.' });
     if (route === 'cancel') { const c = pending(b); if (c) c.status = 'cancelled'; if (b.dep?.status === 'locking') b.dep.status = 'cancelled'; return ok({}); }
     if (route === 'emergency') { const id = queue(b, 1, 'emergency', () => { b.state = 1; }); return ok({ command_id: id, online: true, message: 'Emergency unlock sent and recorded. The boot opens on its next check-in.' }); }
     return no(404, 'not_found', 'Not found');
@@ -125,115 +135,146 @@ function world() {
   return { w, install, byId };
 }
 
+const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
+
+/** Signed in to /app: as LotLogic's agent Dana (a driver), or as Gabe (an admin). */
+async function signIn(page: Page, as: 'agent' | 'admin' = 'agent') {
+  const session = as === 'agent'
+    ? { _token: JWT, _role: 'partner', id: 'll', email: 'dana@example.com', member_id: 'm1', member_role: 'driver', member_name: 'Dana Reyes', company_name: 'LotLogic', business_name: 'LotLogic', _ts: Date.now() }
+    : { _token: JWT, _role: 'owner', id: 'o1', email: 'gabriel@lotlogicparking.com', name: 'Gabe', is_platform_admin: true, is_admin: true, email_verified: true, _ts: Date.now() };
+  const authMe = as === 'agent'
+    ? { type: 'partner', id: 'll', email: 'dana@example.com', company_name: 'LotLogic', display_name: 'LotLogic', is_admin: false, is_platform_admin: false, lots: [], properties: [],
+      member: { id: 'm1', name: 'Dana Reyes', role: 'driver', properties: [], admin_names: [] } }
+    : { type: 'owner', id: 'o1', email: 'gabriel@lotlogicparking.com', name: 'Gabe', is_admin: true, is_platform_admin: true, email_verified: true, lots: [], properties: [] };
+  await page.addInitScript(([s, tab]) => {
+    if (!sessionStorage.getItem('seeded')) {
+      localStorage.setItem('lotlogic_session', s); localStorage.setItem('lotlogic_tab', tab); sessionStorage.setItem('seeded', '1');
+    }
+  }, [JSON.stringify(session), as === 'agent' ? 'lots' : 'enforcement']);
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  // Nothing here talks to a real backend or a real Supabase; boot-portal is the fake above (routed after, so it wins).
+  await page.route((u) => u.href.startsWith(API) || /supabase\.co\/(rest|auth)\//.test(u.href), (r: Route) => {
+    const u = new URL(r.request().url());
+    if (u.href.startsWith(API) && u.pathname === '/auth/me') return r.fulfill(json(authMe));
+    return r.fulfill(json(u.pathname.includes('/rest/') ? [] : {}));
+  });
+  await page.goto(`${server.origin}/app`);
+  await expect(page.getByTestId('enforcement-page')).toBeVisible({ timeout: 30_000 });
+}
+
+const nav = (page: Page) => page.getByRole('tablist', { name: 'Main navigation' }).getByRole('tab');
+const row = (page: Page, label: string) => page.getByTestId('boot-row').filter({ hasText: label });
+async function openRow(page: Page, label: string) {
+  await row(page, label).locator('.enf-boot-head').click();
+  await expect(row(page, label).getByTestId('boot-detail')).toBeVisible();
+}
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 }
-
-async function signIn(page: Page) {
-  await page.goto(`${server.origin}/agent`);
-  await page.getByLabel('Email').fill('dana@example.com');
-  await page.getByLabel('Password').fill('right');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Boots', exact: true })).toBeVisible();
-}
-
 async function drawSignature(page: Page) {
-  // The sticky Back / Lock boot bar sits over the bottom of a phone screen: bring the pad to the middle, as a thumb would.
-  await page.locator('#sig').evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  const box = (await page.locator('#sig').boundingBox())!;
-  await page.mouse.move(box.x + 20, box.y + 90);
+  const pad = page.getByTestId('sig-pad');
+  await pad.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const box = (await pad.boundingBox())!;
+  await page.mouse.move(box.x + 20, box.y + 70);
   await page.mouse.down();
-  for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + 20 + i * 18, box.y + 90 + (i % 2 ? -25 : 20));
+  for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + 20 + i * 18, box.y + 70 + (i % 2 ? -25 : 20));
   await page.mouse.up();
 }
 
-test.describe('Enforcement Agent screen @desktop-only', () => {
-  test('sign in: a wrong password shows the server message; the right one opens Boots', async ({ page }) => {
+test.describe('Enforcement tab for a LotLogic agent @desktop-only', () => {
+  test('an agent lands on Enforcement: their boots and the properties they cover, nothing of the admins\'', async ({ page }) => {
     const { install } = world(); await install(page);
-    await page.goto(`${server.origin}/agent`);
-    await shot(page, '01-sign-in');
-    await page.getByLabel('Email').fill('dana@example.com');
-    await page.getByLabel('Password').fill('wrong');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByRole('alert')).toHaveText("That email and password don't match. Use your LotLogic login.");
-    await shot(page, '02-sign-in-error');
-    await page.getByLabel('Password').fill('right');
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await signIn(page);
+    await expect(nav(page)).toHaveText(['Enforcement', 'Account']);
     await expect(page.getByTestId('boot-row')).toHaveCount(6);
     await expect(page.getByTestId('boot-row').first()).toContainText('Boot 03');      // paid, releasing: first
-    await expect(page.getByTestId('boot-row').filter({ hasText: 'Boot 02' })).toContainText('On a car');
-    await expect(page.getByTestId('boot-row').filter({ hasText: 'Boot 04' })).toContainText('Fault');
-    await expect(page.getByTestId('boot-row').filter({ hasText: 'Boot 05' })).toContainText('Battery low');
-    await expect(page.getByText('checked in 2 min ago').first()).toBeVisible();
-    // Phase 1 hides Tasks, Map and History
-    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('button')).toHaveText(['Boots', 'Account']);
-    await shot(page, '03-boots');
+    await expect(page.getByLabel('Your boots')).toContainText('Free');
+    const props = page.getByTestId('enf-properties');
+    await expect(props).toContainText('Your properties');
+    await expect(props.getByTestId('enf-property')).toHaveCount(1);
+    await expect(props).toContainText('Mayfield Memorial Apartments');
+    await expect(props).toContainText('4912 Daybreak Dr, Charlotte, NC 28269');
+    await expect(props.getByRole('link', { name: 'Directions' })).toHaveAttribute('href', /google\.com\/maps\/search\/.*4912%20Daybreak%20Dr/);
+    await expect(page.getByTestId('enf-agents')).toHaveCount(0);
+    await expect(page.getByTestId('enf-payments')).toHaveCount(0);
+    await shot(page, '01-agent-boots');
+    await props.scrollIntoViewIfNeeded();
+    await shot(page, '02-agent-properties');
+  });
+
+  test('an agent with no property assigned is told who to ask', async ({ page }) => {
+    const { w, install } = world(); w.properties = []; await install(page);
+    await signIn(page);
+    await expect(page.getByTestId('enf-properties')).toContainText('No properties are assigned to you yet. Ask LotLogic to assign the properties you cover.');
   });
 
   test('boot page: each notice and the actions it offers', async ({ page }) => {
     const { install } = world(); await install(page); await signIn(page);
     const cases: Array<[string, string, string[], string]> = [
-      ['Boot 02', 'Waiting for payment', ['Release without payment', 'Emergency unlock'], '04-boot-waiting-for-payment'],
-      ['Boot 03', 'Paid $250.00 at', ['Emergency unlock'], '05-boot-paid-opening'],
-      ['Boot 06', 'Pick up this boot', ['Close for storage', 'Place on a car'], '06-boot-pick-up'],
-      ['Boot 04', 'Boot fault', ['Place on a car', 'Open boot'], '07-boot-fault'],
-      ['Boot 05', 'Battery too low (21%)', ['Place on a car', 'Open boot', 'Emergency unlock'], '08-boot-battery-low'],
-      ['Boot 01 bench', '', ['Place on a car', 'Open boot', 'Emergency unlock'], '09-boot-free'],
+      ['Boot 02', 'Waiting for payment', ['Release without payment', 'Emergency unlock'], '03-boot-waiting-for-payment'],
+      ['Boot 03', 'Paid $250.00 at', ['Emergency unlock'], '04-boot-paid-opening'],
+      ['Boot 06', 'Pick up this boot', ['Close for storage', 'Place on a car'], '05-boot-pick-up'],
+      ['Boot 04', 'Boot fault', ['Place on a car', 'Open boot'], '06-boot-fault'],
+      ['Boot 05', 'Battery too low (21%)', ['Place on a car', 'Open boot', 'Emergency unlock'], '07-boot-battery-low'],
+      ['Boot 01 bench', '', ['Place on a car', 'Open boot', 'Emergency unlock'], '08-boot-free'],
     ];
     for (const [label, notice, buttons, name] of cases) {
-      await page.getByTestId('boot-row').filter({ hasText: label }).click();
-      await expect(page.getByTestId('boot-page')).toContainText(label);
-      if (notice) await expect(page.getByTestId('boot-page')).toContainText(notice);
-      await expect(page.locator('.acts .btn')).toHaveText(buttons);
+      await openRow(page, label);
+      const d = row(page, label).getByTestId('boot-detail');
+      if (notice) await expect(d).toContainText(notice);
+      await expect(d.getByTestId('boot-actions').getByRole('button')).toHaveText(buttons);
       await shot(page, name);
-      await page.getByRole('button', { name: 'Boots' }).first().click();
     }
-    // the on-car record shows the photo and the signature
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 02' }).click();
-    await expect(page.getByAltText('Boot on the wheel')).toBeVisible();
-    await expect(page.getByAltText('Signature of Dana Reyes')).toBeVisible();
-    await expect(page.getByTestId('boot-page')).toContainText('KMD4821 NC');
+    // the on-car record shows the photo and the signature; no admin-only facts
+    await openRow(page, 'Boot 02');
+    const d = row(page, 'Boot 02').getByTestId('boot-detail');
+    await expect(d.getByAltText('Boot on KMD4821')).toBeVisible();
+    await expect(d.getByAltText('Signature of Dana Reyes')).toBeVisible();
+    await expect(d).not.toContainText('Recent commands');
+    await expect(d).not.toContainText('Signal');
     // a battery too low to lock: Place is greyed out
-    await page.getByRole('button', { name: 'Boots' }).first().click();
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 05' }).click();
-    await expect(page.getByRole('button', { name: 'Place on a car' })).toBeDisabled();
+    await openRow(page, 'Boot 05');
+    await expect(row(page, 'Boot 05').getByRole('button', { name: 'Place on a car' })).toBeDisabled();
   });
 
   test('open, then the waiting state until the boot checks in', async ({ page }) => {
     const { install } = world(); await install(page); await signIn(page);
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 01 bench' }).click();
-    await page.getByRole('button', { name: 'Open boot' }).click();
-    await expect(page.getByTestId('notice').first()).toContainText('Opening sent at');
-    await expect(page.locator('.acts .btn')).toHaveText(['Emergency unlock']);
-    await shot(page, '10-waiting-opening');
-    await expect(page.getByTestId('toast')).toHaveText('Opened.', { timeout: 15_000 });
-    await expect(page.locator('.acts .btn')).toHaveText(['Place on a car', 'Close for storage']);
-    await shot(page, '11-opened');
-    await page.getByRole('button', { name: 'Close for storage' }).click();
-    await expect(page.getByTestId('notice').first()).toContainText('Closing sent at');
-    await shot(page, '12-waiting-closing');
-    await expect(page.getByTestId('toast')).toHaveText('Closed for storage.', { timeout: 15_000 });
+    await openRow(page, 'Boot 01 bench');
+    const d = row(page, 'Boot 01 bench').getByTestId('boot-detail');
+    await d.getByRole('button', { name: 'Open boot' }).click();
+    await expect(d.getByTestId('notice').first()).toContainText('Opening sent at');
+    await expect(d.getByTestId('boot-actions').getByRole('button')).toHaveText(['Emergency unlock']);
+    await shot(page, '09-waiting-opening');
+    await expect(d.getByTestId('toast')).toHaveText('Opened.', { timeout: 15_000 });
+    await expect(d.getByTestId('boot-actions').getByRole('button')).toHaveText(['Place on a car', 'Close for storage']);
+    await shot(page, '10-opened');
+    await d.getByRole('button', { name: 'Close for storage' }).click();
+    await expect(d.getByTestId('notice').first()).toContainText('Closing sent at');
+    await expect(d.getByTestId('toast')).toHaveText('Closed for storage.', { timeout: 15_000 });
   });
 
   test('a command that expires says so', async ({ page }) => {
     const { w, install } = world(); await install(page); await signIn(page);
     w.expireNext = true;
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 01 bench' }).click();
-    await page.getByRole('button', { name: 'Open boot' }).click();
-    await expect(page.getByTestId('toast')).toContainText("didn't check in in time", { timeout: 15_000 });
-    await shot(page, '13-command-expired');
+    await openRow(page, 'Boot 01 bench');
+    const d = row(page, 'Boot 01 bench').getByTestId('boot-detail');
+    await d.getByRole('button', { name: 'Open boot' }).click();
+    await expect(d.getByTestId('toast')).toContainText("didn't check in in time", { timeout: 15_000 });
+    await shot(page, '11-command-expired');
   });
 
   test('place a boot: 4 steps, a refusal shown as the server wrote it, an edit clears the signature, then lock', async ({ page }) => {
     const { w, install } = world(); await install(page); await signIn(page);
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 01 bench' }).click();
-    await page.getByRole('button', { name: 'Place on a car' }).click();
+    await openRow(page, 'Boot 01 bench');
+    await row(page, 'Boot 01 bench').getByRole('button', { name: 'Place on a car' }).click();
+    const missing = page.getByTestId('place-missing');
 
-    // 1. Where
+    // 1. Where: only the properties this agent covers
     await expect(page.getByTestId('place-step-1')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
-    await expect(page.locator('[data-missing]')).toHaveText('Still needed: property');
-    await shot(page, '14-place-1-where');
+    await expect(missing).toHaveText('Still needed: property');
+    await expect(page.getByLabel('Property').locator('option')).toHaveText(['Select property', 'Mayfield Memorial Apartments']);
+    await shot(page, '12-place-1-where');
     await page.getByLabel('Property').selectOption('p1');
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -244,21 +285,21 @@ test.describe('Enforcement Agent screen @desktop-only', () => {
     await page.getByLabel('Model').fill('Altima');
     await page.getByLabel('Color').fill('Black');
     await page.getByLabel('Location on property').fill('Building C, row 2');
-    await shot(page, '15-place-2-vehicle');
+    await shot(page, '13-place-2-vehicle');
     await page.getByRole('button', { name: 'Continue' }).click();
 
     // 3. Boot: the boot is closed, so a photo alone is not enough
     await expect(page.getByTestId('place-step-3')).toBeVisible();
-    await expect(page.locator('[data-missing]')).toHaveText('Still needed: open the boot, photo of the boot');
-    await page.locator('input[data-shot]').setInputFiles({ name: 'boot.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    await expect(missing).toHaveText('Still needed: open the boot, photo of the boot');
+    await page.getByTestId('place-photo').setInputFiles({ name: 'boot.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
     await expect(page.getByText('Boot on wheel ✓')).toBeVisible();
-    await shot(page, '16-place-3-closed');
+    await shot(page, '14-place-3-closed');
     await page.getByRole('button', { name: 'Open Boot 01 bench' }).click();
     await expect(page.getByTestId('opening')).toBeVisible();
-    await shot(page, '17-place-3-opening');
+    await shot(page, '15-place-3-opening');
     await expect(page.getByText('Boot 01 bench is open')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-missing]')).toHaveText('');
-    await shot(page, '18-place-3-open');
+    await expect(missing).toHaveText('');
+    await shot(page, '16-place-3-open');
     await page.getByRole('button', { name: 'Continue' }).click();
 
     // 4. Sign
@@ -268,18 +309,18 @@ test.describe('Enforcement Agent screen @desktop-only', () => {
     await drawSignature(page);
     await expect(page.getByTestId('sig-state')).toHaveText('Signed');
     await expect(page.getByRole('button', { name: 'Lock boot' })).toBeEnabled();
-    await shot(page, '19-place-4-signed');
+    await shot(page, '17-place-4-signed');
 
     // an edit after signing clears the signature and asks again
     await page.getByLabel('Full name').fill('Dana M. Reyes');
     await expect(page.getByTestId('sig-state')).toHaveText('Not signed');
     await expect(page.getByTestId('sig-hint')).toHaveText('You changed the details, so please sign again');
     await expect(page.getByRole('button', { name: 'Lock boot' })).toBeDisabled();
-    await shot(page, '20-place-4-sign-again');
+    await shot(page, '18-place-4-sign-again');
     // going back to change the plate clears it too
     await drawSignature(page);
-    await page.getByRole('button', { name: 'Back' }).click();
-    await page.getByRole('button', { name: 'Back' }).click();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
     await page.getByLabel('Plate').fill('KMD4822');
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
@@ -291,14 +332,14 @@ test.describe('Enforcement Agent screen @desktop-only', () => {
     b1.state = 0;
     await page.getByRole('button', { name: 'Lock boot' }).click();
     await expect(page.getByTestId('place-error')).toContainText("The boot doesn't report open yet. Open it first, fit it on the wheel, then lock it.");
-    await shot(page, '21-place-refused');
+    await shot(page, '19-place-refused');
     b1.state = 1;
 
     // lock
     await page.getByRole('button', { name: 'Lock boot' }).click();
     await expect(page.getByTestId('place-locking')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancel lock' })).toBeVisible();
-    await shot(page, '22-place-locking');
+    await shot(page, '20-place-locking');
     const lock = w.calls.filter((c) => c.route === 'lock').at(-1)!;
     expect(lock.body).toMatchObject({
       boot_id: 'b1', plate_text: 'KMD4822', plate_state: 'NC', property_id: 'p1', photo_path: 'boot-photos/ll/b1/lock-1.jpg',
@@ -306,53 +347,52 @@ test.describe('Enforcement Agent screen @desktop-only', () => {
       vehicle_color: 'Black', notes: 'Location: Building C, row 2',
     });
     await expect(page.getByTestId('place-done')).toContainText('Boot 01 bench is on KMD4822 at Mayfield Memorial Apartments', { timeout: 15_000 });
-    await shot(page, '23-place-locked');
+    await shot(page, '21-place-locked');
     await page.getByRole('button', { name: 'Open Boot 01 bench' }).click();
-    await expect(page.getByTestId('boot-page')).toContainText('Waiting for payment');
+    await expect(row(page, 'Boot 01 bench').getByTestId('boot-detail')).toContainText('Waiting for payment');
   });
 
   test('release without payment: a driver sees the server refuse it', async ({ page }) => {
     const { install } = world(); await install(page); await signIn(page);
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 02' }).click();
-    await page.getByRole('button', { name: 'Release without payment' }).click();
-    await page.getByLabel('Why are you waiving the fee?').fill('Office asked, resident towed to wrong spot');
-    await page.getByRole('dialog').getByRole('button', { name: 'Release without payment' }).click();
-    await expect(page.getByTestId('sheet-error')).toHaveText('Only dispatch or an admin can waive the fee.');
-    await shot(page, '24-waive-refused');
+    await openRow(page, 'Boot 02');
+    const d = row(page, 'Boot 02').getByTestId('boot-detail');
+    await d.getByRole('button', { name: 'Release without payment' }).click();
+    await d.getByLabel('Why the fee is waived').fill('Office asked, resident towed to wrong spot');
+    await d.getByRole('button', { name: 'Waive and release' }).click();
+    await expect(d.getByTestId('waive-error')).toHaveText('Only dispatch or an admin can waive the fee.');
+    await shot(page, '22-waive-refused');
   });
 
   test('emergency unlock needs a reason and 20 characters', async ({ page }) => {
     const { w, install } = world(); await install(page); await signIn(page);
-    await page.getByTestId('boot-row').filter({ hasText: 'Boot 02' }).click();
-    await page.getByRole('button', { name: 'Emergency unlock' }).click();
-    const go = page.getByRole('button', { name: 'Unlock now' });
-    await expect(go).toBeDisabled();
-    await page.getByLabel('Medical emergency').check();
-    await page.getByLabel('What happened, and who asked?').fill('Too short');
-    await expect(go).toBeDisabled();
-    await page.getByLabel('What happened, and who asked?').fill('Driver collapsed; EMS asked us to free the car');
-    await expect(go).toBeEnabled();
-    await shot(page, '25-emergency');
-    await go.click();
-    await expect(page.getByTestId('notice').first()).toContainText('Unlocking sent at');
+    await openRow(page, 'Boot 02');
+    const d = row(page, 'Boot 02').getByTestId('boot-detail');
+    await d.getByRole('button', { name: 'Emergency unlock' }).click();
+    await d.getByLabel('Reason').selectOption('medical');
+    await d.getByLabel('What happened').fill('Too short');
+    await d.getByRole('button', { name: 'Unlock now' }).click();
+    await expect(d.getByRole('alert')).toContainText('at least 20 characters');
+    await d.getByLabel('What happened').fill('Driver collapsed; EMS asked us to free the car');
+    await shot(page, '23-emergency');
+    await d.getByRole('button', { name: 'Unlock now' }).click();
+    await expect(d.getByTestId('notice').first()).toContainText('Unlocking sent at');
     expect(w.calls.find((c) => c.route === 'emergency')?.body).toMatchObject({ boot_id: 'b2', reason: 'medical' });
   });
+});
 
-  test('account, sign out, and a 401 goes back to sign in', async ({ page }) => {
-    const { w, install } = world(); await install(page); await signIn(page);
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Account' }).click();
-    await expect(page.getByTestId('account')).toContainText('Dana Reyes');
-    await expect(page.getByTestId('account')).toContainText('LotLogic');
-    await expect(page.getByTestId('account')).toContainText('dana@example.com');
-    await shot(page, '26-account');
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('lotlogic_agent_session'))).toBeNull();
-
-    await signIn(page);
-    w.signedOut = true;
-    await page.getByTestId('boot-row').first().click();
-    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-    await expect(page.getByRole('alert')).toHaveText('Please sign in again.');
+test.describe('Enforcement tab for a LotLogic admin @desktop-only', () => {
+  test('an admin keeps the fleet, the agents and the payments, and the same four-step placement', async ({ page }) => {
+    const { w, install } = world(); w.admin = true; await install(page);
+    await signIn(page, 'admin');
+    await expect(page.getByLabel('Fleet')).toContainText('Online');
+    await expect(page.getByTestId('enf-agents')).toBeVisible();
+    await expect(page.getByTestId('enf-payments')).toBeVisible();
+    await expect(page.getByTestId('enf-properties')).toHaveCount(0);
+    await openRow(page, 'Boot 01 bench');
+    const d = row(page, 'Boot 01 bench').getByTestId('boot-detail');
+    await expect(d.getByTestId('boot-actions').getByRole('button')).toHaveText(['Place on a car', 'Open boot', 'Emergency unlock', 'Setup Wi-Fi']);
+    await d.getByRole('button', { name: 'Place on a car' }).click();
+    await expect(page.getByTestId('place-step-1')).toBeVisible();
+    await shot(page, '24-admin-place-1');
   });
 });
