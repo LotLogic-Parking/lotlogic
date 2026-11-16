@@ -1,31 +1,45 @@
-/* LotLogic marketing brand tokens — Task 16 (FE-12).
-   Was copy-pasted :root block in 18 HTML files; now a single shared source.
+/* LotLogic marketing brand tokens — one shared source for every marketing
+   page (index, services, pitch-*, privacy, terms, blog/*, visit/resident/apt).
 
-   Every token used as TEXT below is >= 4.5:1 (WCAG AA, normal text) on all
-   THREE paper grounds — --paper, --paper-2 AND --paper-3 — per Ruling S3-a.
-   --paper-3 is a real content ground, not just a hairline: services.html
-   `.block.solves`, pitch-tow.html `.compare.good` and brand-v2.html
-   `.aud-card.tow` all set it as a background with token-coloured text on top.
-   Task 15/16 only checked --paper and --paper-2, so every text token was
-   failing there; the values below were re-solved against all three.
+   2026-11: LotLogic blue + white. "Everything LotLogic is blue and white."
+   Same palette as the dashboard's --ll-* block (dashboard.html): blue
+   #2563EB is the one accent, pages are white with slate ink. The old cream
+   paper / amber / terracotta values are gone; the token NAMES are kept so
+   the 17 pages that use them re-colour without edits.
 
-   --terra and --amber-soft are FILLS behind --ink text, never text
-   themselves, so they are exempt (and unchanged). --ink-4 has zero
-   `var(--ink-4)` references anywhere in the repo — it is kept only so the
-   token set stays complete, and is held to the same bar in case it is ever
-   used. The live near-equivalent is dashboard.html's --ink-4-paper. */
+   Contrast rules (WCAG AA, normal text >= 4.5:1), checked against all THREE
+   grounds — --paper (#FFFFFF), --paper-2 (#F5F7FB) and --paper-3 (#E8EEF8),
+   because services.html, pitch-tow.html and brand-v2.html put token-coloured
+   text on --paper-3:
+     --ink        #0F172A  17.9 / 16.9 / 15.4
+     --ink-2      #334155  10.4 /  9.8 /  8.9
+     --ink-3/-4   #475569   7.6 /  7.1 /  6.5
+     --amber      #1D4ED8   6.7 /  6.3 /  5.7   (blue-as-text)
+     --terra-deep #1E40AF   8.7 /  8.2 /  7.5
+     --status-ok  #166534   7.1 /  6.7 /  6.1
+     --status-no  #B91C1C   6.5 /  6.1 /  5.6
+   --amber-soft and --terra are FILLS behind --ink text, never text:
+     --ink on --amber-soft #DBEAFE 15.3, on --terra #93C5FD 10.2.
+   --blue / --blue-deep are fills behind WHITE text (5.2 / 6.7). */
 :root {
-  --paper: #F2EAD8;
-  --paper-2: #EADFC7;
-  --paper-3: #DFD2B5;
-  --ink: #1F1B14;
-  --ink-2: #3D3528;
-  --ink-3: #625848;
-  --ink-4: #5F5746;
-  --amber: #874904;
-  --amber-soft: #FBBF24;
-  --terra: #C97A4A;
-  --terra-deep: #84461B;
-  --status-ok: #3A6039;
-  --status-no: #993A2C;
+  --paper: #FFFFFF;
+  --paper-2: #F5F7FB;
+  --paper-3: #E8EEF8;
+  --line: #E2E8F0;
+  --ink: #0F172A;
+  --ink-2: #334155;
+  --ink-3: #475569;
+  --ink-4: #475569;
+  --amber: #1D4ED8;
+  --amber-soft: #DBEAFE;
+  --terra: #93C5FD;
+  --terra-deep: #1E40AF;
+  --status-ok: #166534;
+  --status-no: #B91C1C;
+
+  --blue: #2563EB;
+  --blue-deep: #1D4ED8;
+  --navy: #0B1220;
+  --navy-card: #111A2E;
+  --blue-ink-dark: #60A5FA;
 }
