@@ -78,3 +78,6 @@ verify_jwt = false
 
 [functions.boot-portal]
 verify_jwt = false
+
+[functions.admin-ops]
+verify_jwt = false
