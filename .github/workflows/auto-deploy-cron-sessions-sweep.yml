@@ -16,6 +16,7 @@ on:
     branches: [main]
     paths:
       - 'supabase/functions/cron-sessions-sweep/**'
+      - 'supabase/functions/_shared/pause.ts'
   workflow_dispatch:
 
 jobs:
