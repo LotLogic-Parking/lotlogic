@@ -8,6 +8,18 @@ Continuous end-to-end coverage for the dashboard, access control, and accessibil
 - `e2e/dashboard-smoke.spec.ts` — golden-path login, navigation, logout, offline resilience. Catches UX regressions.
 - `a11y/axe.spec.ts` — axe-core sweep of public + logged-in pages. Fails on `serious`/`critical`; `minor`/`moderate` are reported but non-blocking.
 
+## Signing in: once per run
+
+The backend throttles `POST /auth/login` (10 per email + IP and 30 per IP, per
+15 minutes). The global setup (`fixtures/portalGlobalSetup.ts`) therefore signs
+each `TEST_*` account in **once** and caches the session in `tests/.auth/`
+(gitignored, wiped every run; `fixtures/sessionCache.ts`). `loginAs` opens the
+dashboard with that session already in `localStorage`, the same path as a
+refresh; `apiLogin` and the `*Token` fixtures return the cached token. Only
+tests about the sign-in form itself use `loginViaForm`, which posts the real
+form. A run's failed sign-in is cached as its error, so every test for that
+account fails with the real reason instead of retrying into the throttle.
+
 ## Running locally
 
 ```bash
