@@ -418,9 +418,10 @@ export function App() {
     if (agentMode) return [{ id: 'enforcement', label: 'Enforcement' }, { id: 'account', label: 'Account' }];
     const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
     const account = base.filter(t => t.id === 'account');
-    // One property: the tab opens it, so "Properties" (a list of one) reads "Home".
+    // One property: the tab opens it on Today (spec 2026-11-16 Part 1), so
+    // "Properties" (a list of one) reads "Today".
     const rest = base.filter(t => t.id !== 'account')
-      .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Home' } : t));
+      .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Today' } : t));
     return [...rest, ...navExtras, ...account];
   })();
   // Overview has no nav button (it is reached from the cards) but is a real

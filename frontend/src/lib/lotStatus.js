@@ -258,7 +258,7 @@ export function withActivityChips(chips, { isPartner = false, classic = false } 
  * Sections that stand alone on the page: when one of these is the chip, no
  * other surface renders beside it (and none of them sits under "All").
  */
-export const SOLO_SECTION_IDS = Object.freeze(['passes', 'requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
+export const SOLO_SECTION_IDS = Object.freeze(['today', 'passes', 'requests', LOT_STATUS_CHIP.id, ...ACTIVITY_CHIPS.map(c => c.id)]);
 
 /**
  * What a row tap opens. A hold goes to the Requests section (the request

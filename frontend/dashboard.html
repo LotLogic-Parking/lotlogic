@@ -3688,6 +3688,223 @@
     @media (max-width: 480px) { .ls-blue .ls-event--event { padding-left: 14px; } }
     .ls-blue .ls-event-when { color: var(--ll-text-2); }
     .ls-blue .ls-timeline-title { color: var(--ll-text-2); }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Office › Today (ot-): the leasing office's home screen
+       (spec 2026-11-16 Part 1, src/pages/office/OfficeToday.jsx).
+       - Theme tokens only (--bg-*, --border*, --text-*, --accent*,
+         --on-accent, --red): light and dark come for free.
+       - Blue is the one accent: "Waiting for you" above zero is the blue
+         wash, not amber. Red and green only as small tags or text.
+       - Small grey text: --text-muted only on a card; on the page or on
+         --bg-inset use --text-secondary.
+       - Two breakpoints: 1024 px (tiles in a row) and 640 px (rows stack).
+       - Flat surfaces with a 1 px hairline, like .pq-row and .ls-tile.
+       ══════════════════════════════════════════════════════════════════ */
+/* ── Shared pieces ── */
+    /* A text link that is a 44 px target. */
+    .ot-link {
+      display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px;
+      background: none; border: 0; border-radius: 8px; color: var(--accent-text);
+      font-family: inherit; font-size: 13px; font-weight: 800; line-height: 1.2;
+      text-decoration: none; white-space: nowrap; cursor: pointer;
+    }
+    .ot-link:hover { text-decoration: underline; }
+    /* A value that failed to load: an em dash in grey, never 0. */
+    .ot-none { color: var(--text-secondary); font-weight: 500; }
+    /* Skeleton bars. Each has the box of the text it stands in for, so
+       nothing moves when the data lands. Reuses the dashboard's shimmer
+       keyframes; the two greys are visible on a card in both themes. */
+    .ot-skel {
+      display: block; border-radius: 6px;
+      background: linear-gradient(90deg, var(--border) 25%, var(--border-subtle) 50%, var(--border) 75%);
+      background-size: 200% 100%; animation: shimmer 1.5s ease infinite;
+    }
+    @media (prefers-reduced-motion: reduce) { .ot-skel { animation: none; } }
+
+    /* ── Office › Today ─────────────────────────────────────────────── */
+    /* The property header card: name, "Towing by …", the Today | Vehicles
+       switch. Same box as today's inline-styled header (card, 16 px, 12 px
+       radius, 16 px under it). Shown on Today and on Vehicles. */
+    .ot-head {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+      padding: 16px; margin-bottom: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-head-id { flex: 1 1 200px; min-width: 0; }
+    .ot-head-name {
+      font-size: 18px; font-weight: 800; line-height: 1.25; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ot-head-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    /* "More" on Vehicles: a quiet button the height of the switch beside it. */
+    .ot-more { min-width: 88px; background: var(--bg-card); font-size: 14px; }
+    @media (max-width: 640px) { .ot-more { min-width: 72px; padding-inline: 12px; font-size: 13px; } }
+    .ot-more[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-text); }
+    /* Today takes the Passes screen's width (.page-content:has(.ls-passes)),
+       so the header and its switch do not move between Today and Vehicles. */
+    @media (min-width: 1024px) { .page-content:has(.ot) { max-width: 1200px; } }
+    @media (max-width: 640px) { .ot-head-tools { flex: 1 1 100%; flex-wrap: nowrap; } }
+    .ot-head-sub {
+      margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* The switch is .pq-segments + .pq-segment. The pressed half is the brand
+       blue, the selected state .ls--blue gives the segments on Vehicles. */
+    .ot-switch { flex: 0 0 auto; }
+    .ot-switch .pq-segment { min-width: 104px; }
+    .ot-switch .pq-segment[aria-pressed="true"] {
+      background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: none;
+    }
+    .ot-switch .pq-segment[aria-pressed="true"]:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+    @media (max-width: 640px) {
+      .ot-switch { flex: 1 1 100%; }
+      .ot-switch .pq-segment { flex: 1 1 0; min-width: 0; }
+    }
+
+    /* The page under the header: a column with one 16 px gap. The pause
+       banner (Part 3) becomes the first child; nothing else moves. */
+    .ot { display: flex; flex-direction: column; gap: 16px; }
+
+    /* Three tiles: label, number, one line under it. */
+    .ot-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .ot-tile {
+      display: flex; flex-direction: column; min-width: 0; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-tile-l {
+      font-size: 11px; font-weight: 700; line-height: 1.35; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-secondary);
+    }
+    .ot-tile-n {
+      margin: 6px 0 2px; font-size: 34px; font-weight: 800; line-height: 1.1; letter-spacing: -.02em;
+      color: var(--text-primary); font-variant-numeric: tabular-nums;
+    }
+    /* The line under the number keeps its 18 px even when it is empty. */
+    .ot-tile-s { min-height: 18px; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
+    /* "Waiting for you" above zero: the blue wash and its hairline, blue ink
+       on the label and the number. There is no amber in this brand. */
+    .ot-tile.is-waiting {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent-line);
+    }
+    .ot-tile.is-waiting .ot-tile-l, .ot-tile.is-waiting .ot-tile-n { color: var(--accent-text); }
+    .ot-tile.is-waiting .ot-tile-s { color: var(--text-primary); font-weight: 600; }
+    .ot-tile .ot-skel--n { width: 56px; height: 37px; margin: 6px 0 2px; }
+    .ot-tile .ot-skel--s { width: 132px; height: 12px; margin: 3px 0; }
+    @media (max-width: 1023px) {
+      /* One tile per row: the words on the left, the number on the right. */
+      .ot-tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .ot-tile {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; align-content: center;
+        column-gap: 12px; row-gap: 2px; min-height: 68px; padding: 12px 16px;
+      }
+      .ot-tile-l { grid-column: 1; grid-row: 1; }
+      .ot-tile-s { grid-column: 1; grid-row: 2; }
+      .ot-tile-n { grid-column: 2; grid-row: 1 / span 2; margin: 0; font-size: 30px; text-align: right; }
+      /* No line under the number: the label centres against the number. */
+      .ot-tile-s:empty { display: none; }
+      .ot-tile:has(> .ot-tile-s:empty) .ot-tile-l { grid-row: 1 / span 2; }
+      .ot-tile .ot-skel--n { grid-column: 2; grid-row: 1 / span 2; width: 44px; height: 33px; margin: 0; }
+      .ot-tile .ot-skel--s { grid-column: 1; grid-row: 2; }
+    }
+
+    /* A card with a sentence-case title: the registrations to approve. */
+    .ot-card { min-width: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .ot-card-head { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .ot-card-title { font-size: 16px; font-weight: 800; line-height: 1.35; color: var(--text-primary); }
+    .ot-empty { padding: 18px 16px; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+    /* The queue component (.pq) breaks out of a 640 px column on a laptop.
+       On Today it sits in the page's own column. */
+    .pq.ot-pq { margin-inline: 0; gap: 0; }
+
+    .ot-regs { list-style: none; }
+    .ot-reg { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-height: 72px; padding: 12px 16px; }
+    .ot-reg + .ot-reg { border-top: 1px solid var(--border-subtle); }
+    /* The thumbnail is a button (it opens the documents): a 56 x 44 target
+       around the 56 x 42 .pq-thumb. */
+    .ot-reg-doc {
+      flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 44px;
+      background: none; border: 0; border-radius: 6px; cursor: zoom-in;
+    }
+    .ot-reg-main { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .ot-reg-who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .ot-reg-name {
+      min-width: 0; font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ot-reg-unit { flex: 0 0 auto; font-size: 13px; font-weight: 700; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }
+    .ot-reg-car {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0;
+      font-size: 13px; line-height: 1.4; color: var(--text-secondary);
+    }
+    .ot-reg-car > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+    .ot-reg-when { color: var(--text-muted); white-space: nowrap; }
+    .ot-reg-acts { flex: 0 0 auto; display: flex; gap: 8px; }
+    .ot-reg-acts .pq-btn { min-width: 88px; }
+    .ot-reg-acts .pq-btn--primary { min-width: 104px; }
+    .ot-reg-error { flex: 1 1 100%; font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--red); }
+    .ot-reg .ot-skel--thumb { flex: 0 0 56px; width: 56px; height: 42px; }
+    .ot-reg .ot-skel--name { width: 160px; max-width: 60%; height: 14px; margin: 3px 0; }
+    .ot-reg .ot-skel--car { width: 260px; max-width: 90%; height: 12px; margin: 3px 0; }
+    @media (max-width: 640px) {
+      /* Phone: photo top-left; the car on its own line, then the plate and
+         the time; the two buttons under the row, Approve twice as wide. */
+      .ot-reg { align-items: flex-start; }
+      .ot-reg-main { flex-basis: 0; }
+      .ot-reg-car > span:first-child { flex: 1 1 100%; }
+      .ot-reg-acts { flex: 1 1 100%; }
+      .ot-reg-acts .pq-btn { flex: 1 1 0; min-width: 0; }
+      .ot-reg-acts .pq-btn--primary { flex-grow: 2; }
+    }
+
+    /* Actions: white buttons on the page, on the tiles' own three columns.
+       A fourth one (Pause enforcement, Part 3) joins the same grid. */
+    .ot-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .ot-action { min-height: 52px; background: var(--bg-card); }
+    .ot-action[aria-expanded="true"] {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent); color: var(--accent-text);
+    }
+    @media (max-width: 640px) {
+      .ot-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .ot-actions > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    }
+
+    /* The plate box under the actions, and its one result line. */
+    .ot-check {
+      display: flex; flex-direction: column; gap: 12px; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-check .pq-label { margin-bottom: -6px; }
+    /* The input and its button are one row of equal height. */
+    .ot-check-form { display: flex; align-items: stretch; gap: 8px; }
+    .ot-check-form .req-plate-input { flex: 1 1 auto; min-width: 0; max-width: 320px; }
+    .ot-check-form .pq-btn { flex: 0 0 auto; min-width: 96px; }
+    .ot-check-result {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px; padding: 10px 12px;
+      background: var(--bg-inset); border: 1px solid var(--border); border-radius: 10px;
+      font-size: 14px; line-height: 1.4; color: var(--text-primary);
+    }
+    .ot-check-detail { min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+    /* "2 open requests · See all": one row, the whole row is the button. */
+    .ot-reqline {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; min-height: 52px; padding: 12px 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      color: var(--text-primary); font-family: inherit; font-size: 14px; font-weight: 700; line-height: 1.3;
+      text-align: left; cursor: pointer;
+    }
+    .ot-reqline:hover { border-color: var(--text-faint); }
+    .ot-reqline-n { font-variant-numeric: tabular-nums; }
+    .ot-reqline-go { flex: 0 0 auto; font-size: 13px; font-weight: 800; color: var(--accent-text); white-space: nowrap; }
+    /* The plate check's one-line hints, and "Request a tow" at the end of a
+       "Not registered" result. */
+    .ot-check-hint { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text-secondary); }
+    .ot-check-hint.is-error { color: var(--red); }
+    .ot-check-act { margin-left: auto; min-height: 32px; }
+
   </style>
 </head>
 <body>

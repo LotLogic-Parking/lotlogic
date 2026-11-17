@@ -225,6 +225,13 @@ export const getPresence = (propertyId) =>
   get(`/apartment/passes/presence${query({ property_id: propertyId })}`);
 
 
+/**
+ * GET /apartment/properties/{id}/summary → `{tows_this_week, boots_this_week,
+ * pending_registration_count, go_live_date}` — the office's Today tiles.
+ * "This week" is Monday 00:00 in Charlotte to now; a tow or boot counts once.
+ */
+export const getPropertySummary = (propertyId) => get(`/apartment/properties/${seg(propertyId)}/summary`);
+
 /** GET /apartment/passes/metrics?property_id=&days= → `{source, registrations, traffic}` (days 1..90). */
 export const getPassMetrics = (propertyId, days) =>
   get(`/apartment/passes/metrics${query({ property_id: propertyId, days })}`);
@@ -301,7 +308,7 @@ export const requestsApi = {
   inviteMember, updateMember, removeMember, approveMember, declineMember,
   joinProperty, resendJoinRequest, createApartmentProperty, updateApartmentProperty,
   archiveApartmentProperty, listPartnerProperties, verifyPartnerProperty,
-  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
+  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPropertySummary, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
   deleteSlackIdentity, setSlackFeedChannel, getRequestAction, postRequestAction,
   listTeam, inviteTeammate, patchTeammate, removeTeammate, resendTeammate, assignProperties,
 };

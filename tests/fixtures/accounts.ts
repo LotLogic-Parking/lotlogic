@@ -54,7 +54,7 @@ export async function loginAs(page: Page, account: TestAccount): Promise<string>
 
   // The post-login shell is the bottom tab bar, rendered as role="tab", not
   // role="button". Which tabs it holds, and what the first one is called
-  // ("Lots", "Properties", "Home"), depends on the role and the account's
+  // ("Lots", "Properties", "Today"), depends on the role and the account's
   // properties (`navTabsFor` in frontend/src/lib/features.js, plus App.jsx's
   // relabel), so this anchors on Account: the one tab every signed-in role
   // has, under a label nothing rewrites.

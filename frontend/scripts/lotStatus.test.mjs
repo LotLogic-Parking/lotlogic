@@ -176,7 +176,7 @@ test('withActivityChips: never twice, and lands last when Lot status is absent',
 });
 
 test('the activity sections stand alone, like Requests and Lot status (never under All)', () => {
-  assert.deepEqual([...SOLO_SECTION_IDS], ['passes', 'requests', 'lotstatus', 'live', 'traffic']);
+  assert.deepEqual([...SOLO_SECTION_IDS], ['today', 'passes', 'requests', 'lotstatus', 'live', 'traffic']);
 });
 
 test('timeline: camera sessions read "Seen entering" / "Seen leaving" (build plan B5)', () => {

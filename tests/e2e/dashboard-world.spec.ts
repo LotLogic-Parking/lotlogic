@@ -6,8 +6,8 @@
  * and an answer for every request the page makes. This spec proves the fixture against the screens
  * as they are now, so a later spec that fails is failing on its own change:
  *
- *   office         one property, no camera (The Volaire): /app opens the property on Passes
- *   officeCameras  one property with a camera (Mayfield Memorial): Passes with cars on the property
+ *   office         one property, no camera (The Volaire): /app opens the property on Today; Vehicles is Passes
+ *   officeCameras  one property with a camera (Mayfield Memorial): Vehicles lists the cars on the property
  *   officeTwo      two properties: the list, and a deep link into one property's Requests
  *   classic        Stevensons keeps the classic property page
  *   admin          the Lots list, then Admin > Today (Victor's panel): boots, cameras, needs
@@ -38,6 +38,10 @@ test.afterAll(async () => { await server.close(); });
 test.use(WORLD_USE);
 
 const nav = (page: Page) => page.getByRole('tablist', { name: 'Main navigation' }).getByRole('tab');
+/** The office opens on Today (tests/e2e/office-today.spec.ts); its Passes screen is behind the header's Vehicles switch. */
+async function toVehicles(page: Page) {
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Vehicles', exact: true }).click({ timeout: 30_000 });
+}
 
 /** The page asked for nothing the world does not answer, and logged no error (bar the refusals a test provokes on purpose). */
 function expectClean(world: World, allow: Array<RegExp | string> = []) {
@@ -59,13 +63,15 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
     test.describe(`${viewport.width} px`, () => {
       test.use({ viewport });
 
-      test('office: one property opens straight on Passes', async ({ page }) => {
+      test('office: one property opens on Today; Vehicles is the Passes screen', async ({ page }) => {
         const world = await enter(page, server.origin, 'office');
+        await expect(page.getByTestId('office-today')).toBeVisible({ timeout: 30_000 });
+        await expect(nav(page)).toHaveText(['Today', 'Account']);
+        await toVehicles(page);
         const passes = page.getByTestId('passes-tab');
-        await expect(passes).toBeVisible({ timeout: 30_000 });
-        await expect(nav(page)).toHaveText(['Home', 'Account']);
+        await expect(passes).toBeVisible();
         await expect(passes.getByRole('heading', { name: `Passes · ${PROPERTIES.volaire.name}` })).toBeVisible();
-        await expect(page.getByText(PROPERTIES.volaire.address)).toBeVisible();
+        await expect(page.getByText('Towing by NMLD Towing')).toBeVisible();
         await expect(page.getByTestId('passes-asof')).toContainText('2:30 PM');        // the world's clock, in Charlotte
         // No camera at The Volaire: the screen says so instead of listing cars.
         await expect(passes).toContainText('Once LotLogic installs a camera here');
@@ -79,10 +85,11 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
 
       test('officeCameras: Passes lists the cars on the property', async ({ page }) => {
         const world = await enter(page, server.origin, 'officeCameras');
+        await toVehicles(page);
         const residents = page.getByTestId('passes-residents');
         const visitors = page.getByTestId('passes-visitors');
         await expect(residents).toBeVisible({ timeout: 30_000 });
-        await expect(nav(page)).toHaveText(['Home', 'Account']);
+        await expect(nav(page)).toHaveText(['Today', 'Account']);
         await expect(page.getByTestId('passes-tab').getByRole('heading', { name: `Passes · ${PROPERTIES.mayfield.name}` })).toBeVisible();
         await expect(residents.getByRole('listitem')).toHaveCount(4);
         await expect(residents).toContainText('Keisha Monroe');
@@ -249,7 +256,7 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
 
     test('a request nothing answers is recorded and never reaches the network; the office is refused the admin\'s routes', async ({ page }) => {
       const world = await enter(page, server.origin, 'office');
-      await expect(page.getByTestId('passes-tab')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('office-today')).toBeVisible({ timeout: 30_000 });
       expect((await api(page, 'GET', '/admin/clients')).status).toBe(403);
       expect((await api(page, 'PATCH', `/admin/properties/${PROPERTIES.volaire.id}`, { units: 5 })).status).toBe(403);
       expect((await api(page, 'GET', `/apartment/properties/${PROPERTIES.mayfield.id}/summary`)).status).toBe(404);     // another office's property
@@ -262,15 +269,15 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
 
     test('office: the theme switches in place and survives a reload, as the app stores it', async ({ page }) => {
       const world = await enter(page, server.origin, 'office');
-      await expect(page.getByTestId('passes-tab')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('office-today')).toBeVisible({ timeout: 30_000 });
       expect(await currentTheme(page)).toBe('light');
       // The office has no switch in its header (it is a row on Account): the fixture sets the same React state.
       expect(await setTheme(page, 'dark')).toBe('state');
       expect(await page.evaluate(() => localStorage.getItem('lotlogic_theme'))).toBe('dark');
       await expect(page.locator('.app')).not.toHaveClass(/theme-light/);
-      await expect(page.getByTestId('passes-tab')).toBeVisible();                       // still on the screen being captured
+      await expect(page.getByTestId('office-today')).toBeVisible();                       // still on the screen being captured
       await page.reload();
-      await expect(page.getByTestId('passes-tab')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('office-today')).toBeVisible({ timeout: 30_000 });
       expect(await currentTheme(page)).toBe('dark');
       await nav(page).filter({ hasText: 'Account' }).click();
       await expect(page.getByRole('switch', { name: /Dark mode/ })).toHaveAttribute('aria-checked', 'true');
