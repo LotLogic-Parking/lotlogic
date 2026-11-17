@@ -1,5 +1,5 @@
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { pausesFromRows, type PauseRead } from "../_shared/pause.ts";
+import { excludePaused, pausesFromRows, type PauseRead } from "../_shared/pause.ts";
 import {
   bootDispatch, bootMessage, bootRegistrations, bootStandDowns, findCoveringPass, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
 } from "./boot_dispatch.ts";
@@ -230,4 +230,21 @@ Deno.test("findCoveringPass: a live pass or approved resident plate at the prope
   assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [passes[0]], resident_plates: [] }), "p1", "ABC1234", NOW), null);
   assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "approved", active: true }] }), "p1", "ABC1234", NOW), { kind: "resident", id: "r1" });
   assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "pending", active: true }] }), "p1", "ABC1234", NOW), null);
+});
+
+Deno.test("pending-dispatch candidates (index.ts query shape): a paused property's held rows never fill the 50-row window, and come back after the pause", async () => {
+  const v = (id: string, property_id: string) => ({ id, property_id, dispatched_at: null, status: "pending", dispatch_attempts: 0, created_at: "2026-11-11T18:00:00Z" });
+  const violations = [...Array.from({ length: 60 }, (_, i) => v(`held${i}`, "p1")), v("due", "p2")];
+  const candidates = async (at: Date) => {
+    const db = fakeDb({ alpr_violations: violations });
+    const q = db.from("alpr_violations").select("id, property_id").is("dispatched_at", null).neq("status", "dispatch_failed").neq("status", "dismissed")
+      .lt("dispatch_attempts", 3).lt("created_at", "2026-11-11T20:00:00Z");
+    const { data } = await excludePaused(q, pausedAt(at, [PAUSE_P1]), "properties.property_type").limit(50);
+    return (data as Row[]).map(r => r.id as string);
+  };
+  assertEquals(await candidates(new Date("2026-11-11T20:30:00Z")), ["due"]);
+  const after = await candidates(new Date("2026-11-11T21:00:00Z"));
+  assertEquals(after.length, 50);
+  assertEquals(after[0], "held0");
+  assertEquals(violations.every(r => r.dispatch_attempts === 0 && r.status === "pending"), true); // nothing burned while held
 });

@@ -17,14 +17,26 @@
 //
 // This function is idempotent: running it twice in the same second is
 // harmless because each transition's SELECT filters by current state.
+//
+// Enforcement pause (spec 2026-11-16 Part 3): the pause table is read once
+// per tick, before any step. It is a filter on three enforcement steps only:
+// bootDispatch, overstayExpiry and dispatchPendingViolations leave a paused
+// property's rows exactly as they are, and the first tick after the pause
+// ends handles them under the normal rules (enforce right away, nothing sent
+// twice). graceExpiry keeps a paused apartment's grace visits so they are
+// still there to enforce. Stand-downs, registrations, closes and the exit
+// sweep run unchanged: they tell drivers NOT to act. The order is unchanged.
+// If the pause read fails, see the comment at readPauses below.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "@supabase/supabase-js";
 import { findStaleGroups, flushGroup } from "../camera-snapshot/weak_plate_reads.ts";
 import { handleSystemPaused, heartbeat, redactError } from "./heartbeat.ts";
 import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision } from "./grace_policy.ts";
-import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
+import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, findCoveringPass, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
 import { EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT, EXIT_SWEEP_MIN_SCORE_DEFAULT, sweepStrayApartmentExits } from "./exit_sweep.ts";
+import { leftSignal } from "./dispatch_guard.ts";
+import { excludePaused, readPauses, type PauseRead } from "../_shared/pause.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -83,27 +95,43 @@ Deno.serve(async (_req: Request) => {
   const started = Date.now();
   if (SYSTEM_PAUSED) return await handleSystemPaused(db);
   try {
+    // One pause read for the whole tick, at one instant. A failed read is
+    // never "not paused" (that would tow at a property the manager paused,
+    // which cannot be undone) and never aborts the tick (stand-downs and
+    // closes must still run). It holds apartment enforcement for this one
+    // tick: nothing is dropped, the held rows go out on the next tick, truck
+    // plazas (where no pause can exist) keep going, and the heartbeat records
+    // the failure so a lasting one is seen. readPauses retries once first.
+    const tickAt = new Date();
+    const pauses = await readPauses(db, tickAt, { recentHours: APARTMENT_GRACE_STALE_HOURS });
+    if (!pauses.ok) console.error(`pause_lookup_failed err=${pauses.error} holding apartment enforcement this tick`);
+    else if (pauses.missing) console.warn("pause_table_missing: enforcement_pauses not found; treating as no pauses");
+    else if (pauses.active.size > 0) console.log(`enforcement_paused properties=${[...pauses.active.keys()].join(",")}`);
+
     const promoted = await registrationTransition();
     const bootRegistered = await bootRegistrations(bootDeps());
-    const boot = await bootDispatch(bootDeps());
-    const grace = await graceExpiry();
-    const overstayExpired = await overstayExpiry();
+    const boot = await bootDispatch({ ...bootDeps(), now: tickAt, pauses });
+    const grace = await graceExpiry(pauses);
+    const overstayExpired = await overstayExpiry(pauses);
     const passOverstay = await sweepUnexitedPassesForOverstay();
     const weakReads = await sweepWeakPlateReads();
     const exitSweep = await sweepStrayApartmentExits({ db, lookbackMinutes: EXIT_SWEEP_LOOKBACK_MINUTES, minScore: EXIT_SWEEP_MIN_SCORE });
     // Combined per-tick fan-out budget shared by dispatch + stand-downs so the
     // two loops can't, together, burst the platform rate limiter (audit C1).
     const fanoutBudget = { remaining: DISPATCH_FANOUT_MAX_PER_TICK };
-    const dispatch = await dispatchPendingViolations(fanoutBudget);
+    const dispatch = await dispatchPendingViolations(fanoutBudget, pauses);
     const standDowns = await sweepPendingStandDowns(fanoutBudget);
     const bootStandDown = await bootStandDowns(bootDeps());
     const closedRegistered = await closeRegistered();
     const closedResident = await closeResident();
     const closedExpired = await closeExpired();
 
-    await heartbeat(db, true, null);
+    await heartbeat(db, pauses.ok, pauses.ok ? null : redactError(`pause_lookup_failed: ${pauses.error}`));
     return json(200, {
       ok: true,
+      // Per-property enforcement pause; distinct from the SYSTEM_PAUSED kill switch's `paused`.
+      enforcement_paused_properties: pauses.ok ? pauses.active.size : null,
+      pause_lookup_failed: !pauses.ok,
       promoted,
       boot_dispatched: boot.dispatched,
       boot_dispatch_failed: boot.failed,
@@ -179,14 +207,14 @@ async function registrationTransition(): Promise<number> {
 // thrown away — closed_clean, NO violation. The driver had their chance
 // to scan the QR; we discard the data and never act on them. Used to
 // fire a violation in the old apartment-style model; that branch is gone.
-async function graceExpiry(): Promise<{ thrown_away: number }> {
+async function graceExpiry(pauses: PauseRead): Promise<{ thrown_away: number }> {
   const cutoff = new Date(Date.now() - GRACE_EXPIRY_MINUTES * 60 * 1000).toISOString();
   // Plaza visits are thrown away at the expiry minute; an apartment visit
   // stays open for the office (grace_policy.ts), so the property type rides
   // along and the decision is per row.
   const { data: sessions, error } = await db
     .from("plate_sessions")
-    .select("id, last_detected_at, entered_at, properties(property_type)")
+    .select("id, property_id, last_detected_at, entered_at, properties(property_type)")
     .eq("state", "grace")
     .is("exited_at", null)
     .lt("entered_at", cutoff);
@@ -196,8 +224,12 @@ async function graceExpiry(): Promise<{ thrown_away: number }> {
   let thrownAway = 0;
   const now = new Date();
   const nowIso = now.toISOString();
-  for (const s of sessions as Array<{ id: string; last_detected_at: string | null; entered_at: string; properties?: { property_type?: string | null } | { property_type?: string | null }[] | null }>) {
+  for (const s of sessions as Array<{ id: string; property_id: string; last_detected_at: string | null; entered_at: string; properties?: { property_type?: string | null } | { property_type?: string | null }[] | null }>) {
     const prop = Array.isArray(s.properties) ? s.properties[0] : s.properties;
+    // Enforcement pause: a paused apartment's grace visits stay open (all
+    // apartments' when the pause state is unknown this tick), so the first
+    // tick after the pause can still boot-dispatch them.
+    if (prop?.property_type === "apartment" && (!pauses.ok || pauses.active.has(s.property_id))) continue;
     const decision = graceDecision({
       propertyType: prop?.property_type ?? null,
       enteredAt: s.entered_at,
@@ -205,6 +237,7 @@ async function graceExpiry(): Promise<{ thrown_away: number }> {
       now,
       expiryMinutes: GRACE_EXPIRY_MINUTES,
       staleHours: APARTMENT_GRACE_STALE_HOURS,
+      seenFloor: pauses.ok ? pauses.recentlyEnded.get(s.property_id) ?? null : null,
     });
     if (decision === "keep") continue;
     // exited_at = last_detected_at when we have one, else entered_at —
@@ -227,13 +260,29 @@ async function graceExpiry(): Promise<{ thrown_away: number }> {
 // cover entrances/exits — there's no interior coverage that could confuse
 // a "still on lot" signal — so an exit hint is a hard "they left, no
 // violation". closeRegistered will close the session clean on its next pass.
-async function overstayExpiry(): Promise<number> {
-  const { data: sessions, error } = await db
-    .from("plate_sessions")
-    .select("id, property_id, plate_text, entry_plate_event_id, visitor_pass_id, exit_hinted_at")
-    .eq("state", "registered")
-    .is("exited_at", null);
+//
+// Enforcement pause: a paused property's sessions are left out of the query
+// and stay `registered`; the first tick after the pause fires them. Before
+// firing, a session whose plate is now covered by another live pass or an
+// approved resident plate is re-pointed at it instead: people renew while
+// enforcement is paused, and the session still points at the old pass
+// (contrarian P1-6; the curb check already says DO NOT TOW for them).
+async function overstayExpiry(pauses: PauseRead): Promise<number> {
+  const sel = "id, property_id, plate_text, normalized_plate, entry_plate_event_id, visitor_pass_id, exit_hinted_at";
+  // An unknown pause state needs the property type to hold apartments only (excludePaused).
+  const select: string = pauses.ok ? sel : `${sel}, properties!inner(property_type)`;
+  const { data, error } = await excludePaused(
+    db
+      .from("plate_sessions")
+      .select(select)
+      .eq("state", "registered")
+      .is("exited_at", null),
+    pauses, "properties.property_type");
   if (error) throw error;
+  const sessions = data as unknown as Array<{
+    id: string; property_id: string; plate_text: string; normalized_plate: string | null;
+    entry_plate_event_id: string; visitor_pass_id: string | null; exit_hinted_at: string | null;
+  }> | null;
   if (!sessions || sessions.length === 0) return 0;
 
   let n = 0;
@@ -257,6 +306,20 @@ async function overstayExpiry(): Promise<number> {
     if (pErr) throw pErr;
     if (!pass?.valid_until) continue;
     if (new Date(pass.valid_until).getTime() >= graceCutoffMs) continue;
+
+    const plate = s.normalized_plate || String(s.plate_text ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const cover = await findCoveringPass(db, s.property_id, plate, new Date());
+    if (cover) {
+      const repoint = await db.from("plate_sessions")
+        .update(cover.kind === "pass"
+          ? { visitor_pass_id: cover.id, updated_at: new Date().toISOString() }
+          : { state: "resident", resident_plate_id: cover.id, updated_at: new Date().toISOString() })
+        .eq("id", s.id)
+        .eq("state", "registered");
+      if (repoint.error) console.warn(`overstay_repoint failed session=${s.id}: ${repoint.error.message}`);
+      else console.log(`overstay_skip session=${s.id} reason=covered_by_${cover.kind} id=${cover.id}`);
+      continue;
+    }
 
     await createViolationAndDispatch(s.property_id, s.plate_text, s.entry_plate_event_id, s.id, "registered", "overstay");
     n++;
@@ -651,7 +714,7 @@ function isRateLimit(status: number, errMsg: string): boolean {
   return /rate.?limit/i.test(errMsg) || /retry.?after/i.test(errMsg);
 }
 
-async function dispatchPendingViolations(budget: { remaining: number }): Promise<{ dispatched: number; left_before_tow: number; rate_limited: number }> {
+async function dispatchPendingViolations(budget: { remaining: number }, pauses: PauseRead): Promise<{ dispatched: number; left_before_tow: number; rate_limited: number }> {
   const cutoff = new Date(Date.now() - DISPATCH_HOLD_MINUTES * 60 * 1000).toISOString();
   // Queue signal is dispatched_at IS NULL — NOT sms_sent_at IS NULL (audit C1).
   // failDispatch used to stamp a sentinel sms_sent_at on cap-hit, so a
@@ -660,16 +723,30 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
   // genuinely un-dispatched iff dispatched_at IS NULL (tow-dispatch-email only
   // stamps dispatched_at on a real send claim). We still exclude already-failed
   // rows via the status filter so the operator-review queue isn't re-attempted.
-  const { data: pending, error } = await db
-    .from("alpr_violations")
-    .select("id, session_id, violation_type, created_at, dispatch_attempts")
-    .is("dispatched_at", null)
-    .neq("status", "dispatch_failed")
-    .neq("status", "dismissed")
-    .lt("dispatch_attempts", MAX_DISPATCH_ATTEMPTS)
-    .lt("created_at", cutoff)
+  //
+  // Enforcement pause: a paused property's rows are filtered out here, in
+  // SQL before the limit (50 held rows at one paused property must not block
+  // every other property's dispatch for 72 h). They stay pending and
+  // untouched (no dispatch_attempts burned) and go out on the first tick
+  // after the pause ends if the car is still there.
+  const sel = "id, session_id, property_id, violation_type, created_at, dispatch_attempts, left_before_tow_at";
+  const select: string = pauses.ok ? sel : `${sel}, properties!inner(property_type)`;
+  const { data, error } = await excludePaused(
+    db
+      .from("alpr_violations")
+      .select(select)
+      .is("dispatched_at", null)
+      .neq("status", "dispatch_failed")
+      .neq("status", "dismissed")
+      .lt("dispatch_attempts", MAX_DISPATCH_ATTEMPTS)
+      .lt("created_at", cutoff),
+    pauses, "properties.property_type")
     .limit(50);
   if (error) throw error;
+  const pending = data as unknown as Array<{
+    id: string; session_id: string | null; property_id: string; violation_type: string; created_at: string;
+    dispatch_attempts: number | null; left_before_tow_at: string | null;
+  }> | null;
   if (!pending || pending.length === 0) return { dispatched: 0, left_before_tow: 0, rate_limited: 0 };
 
   let dispatched = 0;
@@ -687,15 +764,20 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
     //       DISPATCH_HOLD window. Per the truck-plaza pass lifecycle
     //       memory: "if we see him leave after we send a dispatch, we
     //       cancel it" — same applies BEFORE dispatch sends.)
+    //   3. the session was closed by an exit (plate_sessions.exited_at) or the
+    //      violation was stamped left_before_tow_at by an apartment exit
+    //      (dispatch_guard.ts; matters most after an enforcement pause).
     let sessionExitHinted: string | null = null;
+    let sessionExitedAt: string | null = null;
     if (v.session_id) {
       const { data: sess, error: sErr } = await db
         .from("plate_sessions")
-        .select("exit_hinted_at")
+        .select("exit_hinted_at, exited_at")
         .eq("id", v.session_id)
         .maybeSingle();
       if (sErr) { console.warn("dispatchPending session fetch failed:", sErr.message); continue; }
       sessionExitHinted = sess?.exit_hinted_at ?? null;
+      sessionExitedAt = sess?.exited_at ?? null;
     }
     let passExitedAt: string | null = null;
     if (!sessionExitHinted) {
@@ -707,8 +789,9 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
       passExitedAt = linkedPass?.exited_at ?? null;
     }
 
-    const exitSignal = sessionExitHinted ?? passExitedAt;
-    if (exitSignal) {
+    const left = leftSignal({ sessionExitHintedAt: sessionExitHinted, passExitedAt, sessionExitedAt, violationLeftAt: v.left_before_tow_at ?? null });
+    if (left) {
+      const exitSignal = left.at;
       // Truck was seen heading out during the post-violation hold —
       // they left before Frank would have rolled. Suppress the dispatch
       // and stamp the audit flag. NO email fires here (dispatch never
@@ -717,7 +800,7 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
       const upd = await db
         .from("alpr_violations")
         .update({
-          left_before_tow_at: new Date().toISOString(),
+          left_before_tow_at: v.left_before_tow_at ?? new Date().toISOString(),
           sms_sent_at: new Date().toISOString(), // legacy sentinel; status='dismissed' is the real queue exclusion now
           status: "dismissed",
           action_taken: "no_tow",
@@ -732,7 +815,7 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
         .is("dispatched_at", null);
       if (upd.error) console.warn(`auto-no-tow update failed for ${v.id}: ${upd.error.message}`);
       else {
-        console.log(`auto_no_tow violation=${v.id} session=${v.session_id ?? "null"} signal=${sessionExitHinted ? "session_exit" : "pass_exited"} at=${exitSignal}`);
+        console.log(`auto_no_tow violation=${v.id} session=${v.session_id ?? "null"} signal=${left.signal} at=${exitSignal}`);
         leftBeforeTow++;
       }
       continue;
