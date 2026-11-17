@@ -228,7 +228,7 @@ export function PlateLookupPage({ user, plate: deepPlate = null, property: deepP
       if (scope === ALL_SCOPE) {
         const out = await apiFetch(`/partner/lookup?plate=${encodeURIComponent(pl)}`);
         if (req !== lookupReqRef.current) return;
-        const resolved = resolveAllScopeResult(out, rememberedPropertyId);
+        const resolved = resolveAllScopeResult(out, rememberedPropertyId, properties?.find(p => p.id === rememberedPropertyId)?.name);
         const rendered = { verdict: resolved.verdict, detail: { ...resolved.detail, plate: pl }, scope: out?.scope };
         setResult(rendered);
         vibrateIfDoNotTow(rendered, 'all');

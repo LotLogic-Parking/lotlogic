@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine } from '../src/lib/verdicts.js';
+import { fmtPauseTime } from '../src/lib/pause.js';
 
 const BANNED = /\b(resident|visitor|permanent|temporary|guest|driver)s?\b/i;
 
@@ -348,14 +349,22 @@ const PAUSED_DETAIL = {
   underlying: { verdict: 'not_registered', detail: { plate: 'ABC1234' } },
 };
 
+const UNTIL = fmtPauseTime(PAUSED_DETAIL.ends_at);
+
 test('paused -> DO NOT TOW — PAUSED, the go tone (so the phone buzzes), who paused it and until when', () => {
   const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
   assert.equal(p.signal, 'DO NOT TOW — PAUSED');
   assert.equal(p.tone, 'go');
   assert.ok(p.glyph);
-  assert.equal(p.reason, 'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM ET · Pool party');
+  // The end in the words every pause surface uses (the banner, the Requests line: fmtPauseTime, so
+  // "Sat 6:00 PM" within the week and "Sat Nov 21, 6:00 PM" further out), never " ET" on one screen only.
+  assert.equal(p.reason, `Enforcement paused by The Volaire until ${UNTIL} · Pool party`);
+  assert.doesNotMatch(p.reason, / ET\b/);
   assert.equal(verdictPresentation('paused', { ...PAUSED_DETAIL, reason: null }, 'property').reason,
-    'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM ET');
+    `Enforcement paused by The Volaire until ${UNTIL}`);
+  // No ISO end: the server's own words, without " ET".
+  assert.equal(verdictPresentation('paused', { ...PAUSED_DETAIL, ends_at: undefined, reason: null }, 'property').reason,
+    'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM');
 });
 
 test('paused: what the answer would be after the pause is a quiet second line', () => {
@@ -378,15 +387,31 @@ test('grouped: a paused property\'s line says DO NOT TOW — PAUSED and until wh
     { property_id: 'a', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL },
     { property_id: 'b', property_name: 'Mayfield', verdict: 'not_registered', detail: {} },
   ] }, 'all');
-  assert.equal(p.lines[0], 'At The Volaire: DO NOT TOW — PAUSED until Sat Nov 21, 6:00 PM ET');
+  assert.equal(p.lines[0], `At The Volaire: DO NOT TOW — PAUSED until ${UNTIL}`);
 });
 
-test('resolveAllScopeResult: a paused answer is never turned into "on file elsewhere"', () => {
+test('resolveAllScopeResult: a pause at the remembered property (or with none remembered) is that lot\'s DO NOT TOW — PAUSED', () => {
   const out = { verdict: 'paused', matches: [{ property_id: 'v', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL }] };
-  assert.deepEqual(resolveAllScopeResult(out, 'mayfield'), { verdict: 'paused', detail: PAUSED_DETAIL });
+  assert.deepEqual(resolveAllScopeResult(out, 'v', 'The Volaire'), { verdict: 'paused', detail: PAUSED_DETAIL });
+  assert.deepEqual(resolveAllScopeResult(out, ''), { verdict: 'paused', detail: PAUSED_DETAIL });
+});
+
+test('resolveAllScopeResult: a pause at ANOTHER property is never this lot\'s DO NOT TOW — the grouped card, with this lot\'s own line', () => {
+  // The Volaire is paused; the driver's lot is Mayfield; the plate is on file nowhere.
+  const out = { verdict: 'paused', matches: [{ property_id: 'v', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL }] };
+  const r = resolveAllScopeResult(out, 'mayfield', 'Mayfield');
+  assert.equal(r.verdict, 'grouped');
+  assert.deepEqual(r.detail.matches.map(m => [m.property_id, m.verdict]), [['v', 'paused'], ['mayfield', 'not_registered']]);
+  const pres = verdictPresentation(r.verdict, r.detail, 'all');
+  assert.notEqual(pres.tone, 'go');                                          // no buzz, no green DO NOT TOW
+  assert.deepEqual(pres.lines, [`At The Volaire: DO NOT TOW — PAUSED until ${UNTIL}`, 'At Mayfield: no parking pass or hold']);
+  // Never "on file elsewhere" either: the pause line must stay in sight.
+  assert.notEqual(r.verdict, 'on_file_elsewhere');
   // Two paused properties: one line each, not one property's card for both.
   const two = { verdict: 'paused', matches: [out.matches[0], { property_id: 'f', property_name: 'Fort Mill', verdict: 'paused', detail: { ...PAUSED_DETAIL, property_name: 'Fort Mill' } }] };
-  assert.equal(resolveAllScopeResult(two, 'mayfield').verdict, 'grouped');
+  assert.equal(resolveAllScopeResult(two, 'mayfield', 'Mayfield').verdict, 'grouped');
+  assert.equal(resolveAllScopeResult(two, 'mayfield', 'Mayfield').detail.matches.length, 3);
+  assert.equal(resolveAllScopeResult(two, 'v', 'The Volaire').detail.matches.length, 2);
 });
 
 test('paused copy uses no banned word', () => {

@@ -13,6 +13,15 @@
 // opening rule — so nothing here ever renders a cross-property match as a
 // green DO NOT TOW; that's why `on_file_elsewhere` and `grouped` exist.
 
+import { fmtPauseTime } from './pause.js';
+
+// A pause's end the way every other pause surface says it ("Wed 6:00 PM",
+// the date only when it is a week or more away), from the ISO `ends_at`;
+// the server's `ends_local` (with " ET") only when there is no `ends_at`.
+function pauseUntil(d) {
+  return fmtPauseTime(d?.ends_at) || String(d?.ends_local || '').replace(/ ET$/, '');
+}
+
 const UNKNOWN = Object.freeze({
   signal: "Can't read this answer — check in LotLogic",
   glyph: '?',
@@ -49,7 +58,10 @@ function groupedLine(match) {
     case 'pending': return 'pending approval';
     case 'expired_guest': return 'parking pass expired';
     case 'tow_requested': return `TOW REQUESTED${d.ref ? ' ' + d.ref : ''}`;
-    case 'paused': return `DO NOT TOW — PAUSED${d.ends_local ? ' until ' + d.ends_local : ''}`;
+    case 'paused': { const until = pauseUntil(d); return `DO NOT TOW — PAUSED${until ? ' until ' + until : ''}`; }
+    // Only ever the remembered property's own line beside a pause elsewhere
+    // (resolveAllScopeResult): the plate is on file at none of the matches.
+    case 'not_registered': return 'no parking pass or hold';
     default: return "can't read this answer";
   }
 }
@@ -108,7 +120,8 @@ export function verdictPresentation(verdict, detail, scope, companyName) {
     case 'paused': {
       // Spec Part 3: the office stopped enforcement for a while. DO NOT TOW,
       // in the go tone every DO NOT TOW uses (the Lookup page's short buzz).
-      let reason = `Enforcement paused by ${d.property_name || 'the property'}${d.ends_local ? ` until ${d.ends_local}` : ''}`;
+      const until = pauseUntil(d);
+      let reason = `Enforcement paused by ${d.property_name || 'the property'}${until ? ` until ${until}` : ''}`;
       const why = String(d.reason || '').trim();
       if (why) reason += ` · ${why}`;
       const after = afterPause(d.underlying);
@@ -172,19 +185,30 @@ export function verdictPresentation(verdict, detail, scope, companyName) {
 // match among them. The `on_file_elsewhere` override only ever applies to
 // the single-match (or all-agree) case, where there's exactly one verdict
 // to compare against the remembered property in the first place.
-export function resolveAllScopeResult(result, rememberedPropertyId) {
+export function resolveAllScopeResult(result, rememberedPropertyId, rememberedPropertyName = '') {
   const matches = Array.isArray(result?.matches) ? result.matches : [];
   if (matches.length === 0) return { verdict: 'not_registered', detail: {} };
 
   if (result?.verdict === 'grouped') return { verdict: 'grouped', detail: { matches } };
 
   // Every match paused (contract C: a paused property is listed even when the
-  // plate is on file nowhere). The pause is the answer wherever the driver
-  // stands, so it is never turned into "on file elsewhere"; two paused
-  // properties are one line each.
+  // plate is on file nowhere). A single DO NOT TOW — PAUSED only when the
+  // pause is at the driver's own lot (the remembered property), or there is
+  // no own lot to speak for. A pause at another lot is never this lot's
+  // verdict (spec §5.5) and never "on file elsewhere" either: it becomes the
+  // grouped card (spec Part 3), the paused lot's line and, when the remembered
+  // property is not among the matches, its own line (on file there it would
+  // have been a match, so it is "no parking pass or hold"). One property's
+  // pause then never reads DO NOT TOW at every other lot, and the driver at
+  // the paused one still sees it.
   if (result?.verdict === 'paused') {
-    if (matches.length > 1) return { verdict: 'grouped', detail: { matches } };
-    return { verdict: 'paused', detail: matches[0]?.detail || {} };
+    const own = rememberedPropertyId ? matches.find(m => m.property_id === rememberedPropertyId) : null;
+    if (matches.length === 1 && (!rememberedPropertyId || own)) return { verdict: 'paused', detail: matches[0]?.detail || {} };
+    const lines = own || !rememberedPropertyId ? matches : [
+      ...matches,
+      { property_id: rememberedPropertyId, property_name: rememberedPropertyName || 'your property', verdict: 'not_registered', detail: {} },
+    ];
+    return { verdict: 'grouped', detail: { matches: lines } };
   }
 
   if (rememberedPropertyId && !matches.some(m => m.property_id === rememberedPropertyId)) {
