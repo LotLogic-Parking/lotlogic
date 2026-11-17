@@ -213,3 +213,27 @@ Deno.test("pending-dispatch candidates (index.ts query shape): a paused property
   assertEquals(after[0], "held0");
   assertEquals(violations.every(r => r.dispatch_attempts === 0 && r.status === "pending"), true); // nothing burned while held
 });
+
+Deno.test("boot text after a pause: a car from another day shows the day, and the pause that held it is named", () => {
+  // In Fri Nov 13, 7:00 PM ET; texted Mon Nov 16, 7:01 AM ET when the pause ended at 7:00 AM.
+  const b = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-14T00:00:00Z",
+    minutesHere: 3601, violationId: "3f2a9c1e-8b7d-4e6f-9a0b-1c2d3e4f5a6b", pauseEndedAt: "2026-11-16T12:00:00Z" });
+  assertMatch(b, /In since Fri 7:00 PM \(3601m\)\. No parking pass\.\nEnforcement was paused here until 7:00 AM\. It may have left unseen\.\n/);
+  assertMatch(b, /Do not boot before Fri 7:15 PM\./);
+  // Same-day texts are unchanged.
+  const today = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-11T20:12:00Z", minutesHere: 11, violationId: "x" });
+  assertMatch(today, /In since 3:12 PM \(11m\)\. No parking pass\.\nDo not boot before 3:27 PM\./);
+});
+
+Deno.test("bootDispatch after a pause: the text says the pause held it; a car that came after the pause does not", async () => {
+  const s = (id: string, entered_at: string) => ({ id, property_id: "p1", normalized_plate: id.toUpperCase(), plate_text: id.toUpperCase(), entered_at, entry_plate_event_id: "e", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT });
+  const sessions = [s("held1", "2026-11-11T19:00:00Z"), s("new1", "2026-11-11T21:01:00Z")];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const at = new Date("2026-11-11T21:12:00Z");
+  await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]),
+    send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(sent.length, 2);
+  assertMatch(sent[0], /Plate HELD1\n.*\nEnforcement was paused here until 4:00 PM\./);
+  assertEquals(/paused/.test(sent[1]), false);
+});

@@ -37,7 +37,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sameVehicle } from "../camera-snapshot/plate_identity.ts";
-import { excludePaused, type PauseRead } from "../_shared/pause.ts";
+import { excludePaused, heldThroughPause, type PauseRead } from "../_shared/pause.ts";
 
 export const GRACE_DISPATCH_MINUTES_DEFAULT = 10;
 export const SIGN_WINDOW_MINUTES = 15;
@@ -90,6 +90,18 @@ function clockET(iso: string | null | undefined): string {
   }
 }
 
+const dayET = (t: Date) => t.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+
+/** "7:00 PM" when `iso` falls on the same Eastern day as `now`, else "Fri 7:00 PM" (a car held by a pause can be days old). */
+function clockETFrom(iso: string | null | undefined, now: Date): string {
+  if (!iso) return "?";
+  const t = new Date(iso);
+  if (!Number.isFinite(t.getTime())) return "?";
+  if (dayET(t) === dayET(now)) return clockET(iso);
+  const day = t.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" });
+  return `${day} ${clockET(iso)}`;
+}
+
 /** When the posted window ends: entered_at + 15 min. The driver may not boot before it. */
 export function bootAllowedAfter(enteredAtIso: string): string {
   return new Date(new Date(enteredAtIso).getTime() + SIGN_WINDOW_MINUTES * 60_000).toISOString();
@@ -102,17 +114,21 @@ export type BootContext = {
   enteredAt: string;
   minutesHere: number;
   violationId: string;
+  /** Set when an enforcement pause held this dispatch: the pause's end. */
+  pauseEndedAt?: string | null;
 };
 
 /** The dispatch text. Short, every line a fact the driver acts on. */
 export function bootMessage(c: BootContext): string {
   const id = shortId(c.violationId);
+  const now = new Date(new Date(c.enteredAt).getTime() + c.minutesHere * 60_000);
   return [
     `[BOOT] ${c.propertyName}`,
     `Plate ${c.plate}`,
-    `In since ${clockET(c.enteredAt)} (${c.minutesHere}m). No parking pass.`,
+    `In since ${clockETFrom(c.enteredAt, now)} (${c.minutesHere}m). No parking pass.`,
+    ...(c.pauseEndedAt ? [`Enforcement was paused here until ${clockETFrom(c.pauseEndedAt, now)}. It may have left unseen.`] : []),
     ...(c.address ? [c.address] : []),
-    `Do not boot before ${clockET(bootAllowedAfter(c.enteredAt))}. Check it is still there and still unregistered.`,
+    `Do not boot before ${clockETFrom(bootAllowedAfter(c.enteredAt), now)}. Check it is still there and still unregistered.`,
     `Reply DONE-${id} when booted, GONE-${id} if it left.`,
   ].join("\n");
 }
@@ -262,9 +278,12 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
 
     const { data: ev } = await db.from("plate_events").select("image_url").eq("id", s.entry_plate_event_id).maybeSingle();
     const photo = (ev as { image_url?: string | null } | null)?.image_url ?? null;
+    // Held by a pause: its dispatch minute fell before the pause ended.
+    const dueAt = new Date(new Date(s.entered_at).getTime() + minutes * 60_000).toISOString();
+    const pauseEndedAt = deps.pauses ? heldThroughPause(deps.pauses, s.property_id, dueAt) : null;
     const body = bootMessage({
       propertyName: prop.name || "Property", address: prop.address ?? null, plate: s.plate_text,
-      enteredAt: s.entered_at, minutesHere, violationId,
+      enteredAt: s.entered_at, minutesHere, violationId, pauseEndedAt,
     });
     const r = await sendToAll(deps, body, photo ? [photo] : []);
     if (r.sent > 0) {
