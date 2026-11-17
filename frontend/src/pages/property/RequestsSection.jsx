@@ -102,7 +102,7 @@ export function RequestsSection({
 
   const propertyId = property?.id || null;
   // The property's own tow company: NMLD at The Volaire, N Style at its lots.
-  const partner = towPartnerName(property);
+  const partner = towPartnerName(property, user);
   const isViewer = role === 'viewer';
   const canAct = role === 'admin' || role === 'manager';
   // §8.3 scopes `POST …/{id}/fulfill` to "partner / Slack", and §6.5's

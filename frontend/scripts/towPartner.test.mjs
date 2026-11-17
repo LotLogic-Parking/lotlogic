@@ -14,3 +14,10 @@ test('no name: "your tow company", never another company\'s name', () => {
   }
   assert.equal(capitalized(TOW_PARTNER_FALLBACK), 'Your tow company');
 });
+
+test("a tow company's own session reads its own name, not the fallback", () => {
+  const partnerShape = { id: 'p1', name: 'The Volaire', role: 'partner' };
+  assert.equal(towPartnerName(partnerShape, { _role: 'partner', company_name: 'NMLD Towing LLC' }), 'NMLD Towing');
+  assert.equal(towPartnerName({ partner_name: 'NMLD Towing' }, { _role: 'owner', company_name: 'Friedlam' }), 'NMLD Towing');
+  assert.equal(towPartnerName(partnerShape, { _role: 'partner' }), TOW_PARTNER_FALLBACK);
+});

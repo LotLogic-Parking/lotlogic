@@ -21,7 +21,10 @@ export function displayPartnerName(name) {
  * or "your tow company" when the property carries no name.
  * @param {{partner_name?: string|null, tow_company_name?: string|null}|null|undefined} property
  */
-export function towPartnerName(property) {
+export function towPartnerName(property, user = null) {
+  // A tow company's own session (or "View as Partner") reads about itself: its
+  // /auth/me properties carry no partner_name, but the session knows its name.
+  if (user?._role === 'partner') return displayPartnerName(user.company_name) || TOW_PARTNER_FALLBACK;
   return displayPartnerName(property?.partner_name || property?.tow_company_name) || TOW_PARTNER_FALLBACK;
 }
 

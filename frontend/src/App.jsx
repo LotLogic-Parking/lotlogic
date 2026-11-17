@@ -497,7 +497,7 @@ export function App() {
     const outcome = parseSlackRedirect(window.location.search);
     if (!outcome) return;
     if (outcome === 'connected') {
-      addToast("Connected to N Style Towing's Slack. Now invite @LotLogic to the channel your crew uses.", 'success');
+      addToast("Connected to your Slack. Now invite @LotLogic to the channel your crew uses.", 'success');
     } else {
       addToast("Slack didn't connect — try again from Account.", 'error');
     }
