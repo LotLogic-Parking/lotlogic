@@ -155,6 +155,26 @@ serve(async (req) => {
     }));
     return json({ ok: true, skipped: "violation_dismissed" });
   }
+  // An apartment exit stamps left_before_tow_at without dismissing the row.
+  // A violation held by an enforcement pause can sit pending for up to 72 h,
+  // so its car may well be gone: dispatching would be followed by a
+  // stand-down, two messages for nothing. Same closing as the pass branch.
+  if (violation.left_before_tow_at) {
+    console.log(JSON.stringify({
+      skipped_dispatch: true, reason: "left_before_tow", violation_id: violationId,
+    }));
+    const nowIso = new Date().toISOString();
+    await supabase.from("alpr_violations").update({
+      status: "dismissed",
+      action_taken: "no_tow",
+      action_channel: "auto_left_before_tow",
+      action_at: nowIso,
+      resolved_at: nowIso,
+      sms_sent_at: nowIso,
+      left_before_tow_email_sent_at: nowIso,
+    }).eq("id", violationId).is("sms_sent_at", null).is("dispatched_at", null);
+    return json({ ok: true, skipped: "left_before_tow" }, 200);
+  }
   {
     const { data: linkedPass } = await supabase
       .from("visitor_passes")
