@@ -25,9 +25,6 @@ import {
 import {
   seedResidentApartment, openResidentFlow, toFirstVehicle, vehicleAndDocumentsToReview, fillVehicle, upload, photo, seedApartmentGroup,
 } from '../fixtures/aptFlow';
-import http from 'node:http';
-import fs from 'node:fs';
-import type { AddressInfo } from 'node:net';
 
 const BLOCKING = new Set(['serious', 'critical']);
 
@@ -467,36 +464,23 @@ baseTest.describe('accessibility — isolated mounts @a11y', () => {
  */
 test.describe('upsell chips @a11y', () => {
   // `frontend/dashboard.html` is the committed source; `dashboard.js` is an
-  // esbuild output that only exists under `dist/` (`npm run build` in
-  // `frontend/`) — so this harness serves the built directory, not the
-  // frontend root.
-  const FRONTEND_DIR = path.resolve(__dirname, '../../frontend/dist');
+  // esbuild output. This used to serve a prebuilt `frontend/dist/`, which
+  // only the jobs with a "Build frontend" step had: in "e2e + a11y" it was
+  // missing, dashboard.html 404'd and the test hooks never appeared. Like
+  // the other self-serving specs it now builds its own private copy
+  // (fixtures/buildAndServeFrontend.ts), so it runs the same in every job.
+  const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
   const PROPERTY_ID = '33333333-3333-4333-8333-333333333333';
-  let server: http.Server;
+  let server: BuiltFrontendServer;
   let origin: string;
 
   test.beforeAll(async () => {
-    server = http.createServer((req, res) => {
-      const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-      const file = path.join(FRONTEND_DIR, pathname.replace(/^\/+/, ''));
-      if (!file.startsWith(FRONTEND_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('not found');
-        return;
-      }
-      const type = file.endsWith('.html') ? 'text/html; charset=utf-8'
-        : file.endsWith('.js') ? 'text/javascript; charset=utf-8'
-        : file.endsWith('.css') ? 'text/css; charset=utf-8'
-        : 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type });
-      fs.createReadStream(file).pipe(res);
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    server = await buildAndServeFrontend(FRONTEND_DIR);
+    origin = server.origin;
   });
 
   test.afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server?.close();
   });
 
   // Run the whole scan under BOTH themes. `App.jsx` wraps its root in

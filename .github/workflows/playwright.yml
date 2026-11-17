@@ -390,8 +390,9 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # The a11y sweep's `upsell chips @a11y` block serves frontend/dist,
-      # so it must exist before `npm run test:a11y` (same as the e2e job).
+      # A build check before the suite. The specs no longer need this dist/:
+      # every self-serving one, the a11y sweep's `upsell chips @a11y` block
+      # included, builds a private copy (fixtures/buildAndServeFrontend.ts).
       - name: Build frontend
         working-directory: frontend
         run: npm run build
