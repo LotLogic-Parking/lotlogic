@@ -92,7 +92,7 @@ function PlateCheck({ property, presence, holds, canRequest, onTow }) {
         {state.status === 'done' && state.verdict && (
           <div className="ot-check-result" data-testid="plate-result">
             <Tag tone={state.verdict.tone}>{state.verdict.word}</Tag>
-            <span className="pq-plate">{state.plate}</span>
+            <span className="pq-plate">{state.found?.row?.plate_text || state.found?.hold?.plate || state.plate}</span>
             <span className="ot-check-detail">{state.verdict.detail}</span>
             {state.found?.verdict === 'not_registered' && canRequest && (
               <button type="button" className="ot-link ot-check-act" onClick={() => onTow(state.plate)}>Request a tow</button>
