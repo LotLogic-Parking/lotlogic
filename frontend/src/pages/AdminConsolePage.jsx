@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../lib/api.js';
+import { TodayPanel } from './TodayPanel.jsx';
 
 // ── Platform-admin console (folded in from admin.html) ────────────
 // Cross-tenant client overview, one-transaction onboarding, and feedback
@@ -237,17 +238,21 @@ function AdminFeedbackTab() {
 }
 
 export function AdminConsolePage({ user }) {
-  const [sub, setSub] = useState('clients');
+  // Today (the owners' home) opens first. It lives only here, inside Admin, so
+  // only platform admins ever see it, and never in View-as.
+  const [sub, setSub] = useState('today');
   const tabBtn = (id, label) => (
     <button onClick={() => setSub(id)} style={{ background: sub === id ? 'var(--bg-card)' : 'transparent', color: sub === id ? 'var(--text-primary)' : 'var(--text-faint)', border: '1px solid ' + (sub === id ? 'var(--border)' : 'transparent'), borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{label}</button>
   );
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto' }}>
+    <div style={{ maxWidth: sub === 'today' ? 1200 : 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+        {tabBtn('today', 'Today')}
         {tabBtn('clients', 'Clients')}
         {tabBtn('onboard', 'Onboard')}
         {tabBtn('feedback', 'Feedback')}
       </div>
+      {sub === 'today' && <TodayPanel />}
       {sub === 'clients' && <AdminClientsTab />}
       {sub === 'onboard' && <AdminOnboardTab />}
       {sub === 'feedback' && <AdminFeedbackTab />}
