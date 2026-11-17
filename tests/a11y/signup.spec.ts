@@ -477,8 +477,30 @@ test.describe('public signup @a11y', () => {
     await chip.click();
     await expect(chip).toHaveAttribute('aria-checked', 'true');
     await expect(chip).toContainText('✓');
-    const bg = await chip.evaluate(el => getComputedStyle(el).backgroundColor);
-    expect(bg).toBe('rgb(251, 191, 36)');
+    // The fill is whatever `--accent` resolves to where the chip sits, not a
+    // palette literal: the accent was amber (#FBBF24) when this was written
+    // and is LotLogic blue (--ll-blue #2563EB) since the retheme (#271), and
+    // the next retheme should not need this test edited. A probe in the
+    // chip's own context resolves the tokens to rgb() the way the chip's
+    // computed style reports them. The ink is checked too: --on-accent on
+    // the --accent fill is the pair the contrast comment in dashboard.html
+    // vouches for.
+    const { bg, ink, accent, onAccent } = await chip.evaluate(el => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--accent)';
+      probe.style.color = 'var(--on-accent)';
+      el.parentElement!.appendChild(probe);
+      const p = getComputedStyle(probe);
+      const resolved = { accent: p.backgroundColor, onAccent: p.color };
+      probe.remove();
+      const s = getComputedStyle(el);
+      return { bg: s.backgroundColor, ink: s.color, ...resolved };
+    });
+    // Guard against the token going missing: an unset var() would resolve
+    // the probe to transparent and make the comparison vacuous.
+    expect(accent, '--accent must resolve to an opaque colour').not.toBe('rgba(0, 0, 0, 0)');
+    expect(bg, 'the selected chip is filled with --accent').toBe(accent);
+    expect(ink, 'the selected chip is inked with --on-accent').toBe(onAccent);
   });
 });
 
