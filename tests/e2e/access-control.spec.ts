@@ -18,13 +18,19 @@ test.describe('property access control @access', () => {
   test('owner A sees only their own lots in the dashboard', async ({ page }) => {
     await loginAs(page, accounts.ownerA());
 
-    // Navigate to the registration-based "Lots" tab — it's a role="tab", not a
-    // role="button", and it reads from the RLS-scoped Supabase `properties`
-    // table (separate from the legacy backend `lots` table the seed script
-    // writes to). The seed account's one lot lives only in the legacy table,
-    // so this owner has zero rows in `properties` and the tab's honest,
-    // correct rendering is the empty state — not a bug to work around.
-    await page.getByRole('tab', { name: /^lots$/i }).click();
+    // Navigate to the registration-based home tab (id `lots`) — it's a
+    // role="tab", not a role="button", and it reads from the RLS-scoped
+    // Supabase `properties` table (separate from the legacy backend `lots`
+    // table the seed script writes to). Its label depends on the account:
+    // "Lots" for an owner with the full nav, "Properties" for a property
+    // manager (features.js OWNER_PORTAL_ONLY_TABS, 2026-11-11 "Managers see
+    // only their property"), "Home" when the manager has exactly one
+    // property (App.jsx). A badge suffixes the accessible name (", N
+    // pending"), hence `\b` rather than `$`. The seed account's one lot lives
+    // only in the legacy table, so this owner has zero rows in `properties`
+    // and the tab's honest, correct rendering is the empty state — not a bug
+    // to work around.
+    await page.getByRole('tab', { name: /^(lots|properties|home)\b/i }).first().click();
 
     // Whether this account ever gains rows in `properties` or not, the one
     // guarantee that must always hold: nothing on screen ever identifies
