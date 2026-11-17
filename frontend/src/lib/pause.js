@@ -368,12 +368,16 @@ export function openBeforeText(count) {
     : `${n} open tow requests and tow notices from before will still go ahead.`;
 }
 
-/** Why a towable car is listed on the Lot status tab during a pause (contract C `towable[].pause_note`). */
+/**
+ * Why a towable car is listed on the Lot status tab during a pause (contract C `towable[].pause_note`).
+ * `flagged_before_pause` does not say whether the camera flag went out as a tow email or as a boot
+ * text to LotLogic's drivers, so its line names both.
+ */
 export function lotPauseNote(note) {
   switch (note) {
     case 'placed_before_pause': return PLACED_BEFORE;
     case 'during_pause': return DURING_PAUSE;
-    case 'flagged_before_pause': return 'Tow notice sent before the pause — still stands';
+    case 'flagged_before_pause': return 'Tow notice or boot text sent before the pause — still stands';
     default: return '';
   }
 }

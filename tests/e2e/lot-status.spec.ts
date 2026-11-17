@@ -179,7 +179,7 @@ test.describe('Lot status tab @lot-status', () => {
     await mountTab(page);
     await expect(page.getByTestId('ls-pause')).toHaveText('Enforcement paused until Fri 6:00 PM — requests placed before the pause still stand · Pool party');
     await expect(page.locator('.ls-row', { hasText: abc.plate }).getByTestId('ls-pause-note')).toHaveText('Placed before the pause — still stands');
-    await expect(page.locator('.ls-row', { hasText: def.plate }).getByTestId('ls-pause-note')).toHaveText('Tow notice sent before the pause — still stands');
+    await expect(page.locator('.ls-row', { hasText: def.plate }).getByTestId('ls-pause-note')).toHaveText('Tow notice or boot text sent before the pause — still stands');
     await expect(page.locator('body')).not.toContainText(/wait until the pause/i);
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/pause-screens', `pause-lot-status-${test.info().project.name}.png`), fullPage: true });
   });

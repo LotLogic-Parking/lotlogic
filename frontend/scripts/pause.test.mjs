@@ -363,7 +363,9 @@ test('lotStatusPause: a tow request the office placed during the pause is listed
 test('lotPauseNote: why a towable car is listed during a pause', () => {
   assert.equal(lotPauseNote('placed_before_pause'), 'Placed before the pause — still stands');
   assert.equal(lotPauseNote('during_pause'), 'Requested by the office during the pause');
-  assert.equal(lotPauseNote('flagged_before_pause'), 'Tow notice sent before the pause — still stands');
+  // The lot status's pause_note does not say whether the camera flag was a tow email or a boot
+  // text to LotLogic's drivers (contract C: action_channel boot_sms), so the line names both.
+  assert.equal(lotPauseNote('flagged_before_pause'), 'Tow notice or boot text sent before the pause — still stands');
   assert.equal(lotPauseNote(null), '');
   assert.equal(lotPauseNote('something_new'), '');
 });
