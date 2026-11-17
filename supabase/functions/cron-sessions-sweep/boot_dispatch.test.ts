@@ -237,3 +237,36 @@ Deno.test("bootDispatch after a pause: the text says the pause held it; a car th
   assertMatch(sent[0], /Plate HELD1\n.*\nHeld by an enforcement pause that ended at 4:00 PM\./);
   assertEquals(/pause/.test(sent[1]), false);
 });
+
+// ── a boot dispatch texted before the pause (Gabe, 2026-11-17) ─────────────
+// It goes ahead during the pause: never held, never texted again, and its
+// stand-downs (the car registered or left, or no reply) still go out.
+
+Deno.test("boot texted before the pause: never texted again during or after it; its stand-downs still run during it", async () => {
+  // Texted 5:50 PM ET-equivalent, before the pause started at 18:00 UTC; p1 is paused 18:00 -> 21:00.
+  const dispatchedAt = "2026-11-11T17:50:00Z";
+  const sessions = [
+    { id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T17:30:00Z", entry_plate_event_id: "e1", state: "expired", exited_at: null, exit_hinted_at: null, violation_id: "v1", properties: APT },
+    { id: "s2", property_id: "p1", normalized_plate: "XYZ789", plate_text: "XYZ789", entered_at: "2026-11-11T17:31:00Z", entry_plate_event_id: "e2", state: "expired", exited_at: "2026-11-11T19:10:00Z", exit_hinted_at: null, violation_id: "v2", properties: APT },
+  ];
+  const bootV = (id: string, s: typeof sessions[number]) => ({ id, session_id: s.id, property_id: "p1", plate_text: s.plate_text, status: "dispatched", action_channel: "boot_sms", left_before_tow_email_sent_at: null, left_before_tow_at: null, dispatched_at: dispatchedAt, plate_sessions: s, properties: { name: "Mayfield", address: null } });
+  const violations = [bootV("v1", sessions[0]), bootV("v2", sessions[1])];
+  const passes = [{ id: "pass1", property_id: "p1", plate_text: "ABC1234", valid_from: "2026-11-11T19:00:00Z", valid_until: "2026-11-12T19:00:00Z", cancelled_at: null, status: "active" }];
+  const tables = { plate_sessions: sessions, alpr_violations: violations as Row[], plate_events: [] as Row[], visitor_passes: passes, resident_plates: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const send = async (_to: string, body: string) => { sent.push(body); return { ok: true, status: 201 }; };
+  const during = new Date("2026-11-11T19:30:00Z");
+  const deps = (at: Date) => ({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]), send });
+  // During the pause: nothing re-dispatched; the car that registered and the car that left are stood down.
+  assertEquals(await bootDispatch(deps(during)), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(await bootRegistrations(deps(during)), 1);
+  assertEquals(await bootStandDowns(deps(during)), { stood_down: 1, stale: 0 });
+  assertEquals(sent.length, 2);
+  assertMatch(sent[0], /\[STAND DOWN\] Mayfield\nPlate ABC1234 registered a parking pass/);
+  assertMatch(sent[1], /\[STAND DOWN\] Mayfield\nPlate XYZ789 was seen leaving/);
+  // After the pause: still never texted again.
+  const after = new Date("2026-11-11T21:01:00Z");
+  assertEquals(await bootDispatch(deps(after)), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sent.length, 2);
+  assertEquals(violations.length, 2);
+});

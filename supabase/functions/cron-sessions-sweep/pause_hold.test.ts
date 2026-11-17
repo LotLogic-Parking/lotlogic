@@ -150,3 +150,35 @@ Deno.test("coverCloseHealth: a failed dismiss of a covered car fails the heartbe
   assertEquals(coverCloseHealth(0), null);
   assertEquals(coverCloseHealth(2), "covered_close_failed: 2 held violations with a parking pass could not be closed; retrying next tick");
 });
+
+// ── already in motion before the pause (Gabe, 2026-11-17) ──────────────────
+// A pause holds only what was not yet sent. A camera flag whose tow notice went
+// out before starts_at goes ahead during the pause: the sweep never holds it,
+// never re-checks it at the pause end, and never sends it again.
+
+Deno.test("sent before the pause: a tow notice dispatched before starts_at is never picked during or after the pause (never held, re-held or re-sent)", async () => {
+  const sent = { ...violation("v1", "p1", "s1", "2026-11-11T17:40:00Z"), dispatched_at: "2026-11-11T17:50:00Z", status: "dispatched", dispatch_attempts: 1 };
+  const held = violation("v2", "p1", "s2", "2026-11-11T19:00:00Z");
+  const violations = [sent, held];
+  const sessions = [
+    { id: "s1", property_id: "p1", state: "expired", exit_hinted_at: null, exited_at: null, normalized_plate: "ABC1234", plate_text: "ABC1234" },
+    { id: "s2", property_id: "p1", state: "expired", exit_hinted_at: null, exited_at: null, normalized_plate: "XYZ789", plate_text: "XYZ789" },
+  ];
+  // The car with the notice already out even renews during the pause: still nothing to do here (the stand-down path owns it).
+  const passes = [{ id: "new1", property_id: "p1", plate_text: "ABC1234", back_plate: null, valid_from: "2026-11-11T19:30:00Z", valid_until: "2026-11-12T19:30:00Z", cancelled_at: null, status: "active" }];
+  const tables = () => ({ alpr_violations: violations, plate_sessions: sessions, visitor_passes: passes, resident_plates: [] as Row[], enforcement_pauses: [PAUSE as Row] });
+  assertEquals((await pendingAt(fakeDb(tables()), DURING)).rows, []);
+  const after = await pendingAt(fakeDb(tables()), AFTER);
+  assertEquals(after.rows.map(r => r.id), ["v2"]); // only the row the pause held
+  // The sent row is exactly as it was: no attempt burned, not dismissed, not re-pointed.
+  assertEquals([sent.status, sent.dispatched_at, sent.dispatch_attempts], ["dispatched", "2026-11-11T17:50:00Z", 1]);
+  assertEquals(sessions[0].state, "expired");
+});
+
+Deno.test("sent before the pause: an overstay already fired (session claimed) is never an overstay candidate again, during or after", async () => {
+  const fired = { ...regSession("s1", "p1", "ABC1234", "old1"), state: "expired" };
+  const waiting = regSession("s2", "p1", "XYZ789", "old2");
+  const ids = async (at: Date) => (await overstayCandidates(fakeDb({ plate_sessions: [fired, waiting] }), readAt(at))).map(s => s.id);
+  assertEquals(await ids(DURING), []);
+  assertEquals(await ids(AFTER), ["s2"]);
+});
