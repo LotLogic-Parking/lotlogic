@@ -1,8 +1,10 @@
 // ── Enforcement pause: the pure half ──────────────────────────
 //
 // Spec 2026-11-16 Part 3, plan Task 11. An office admin stops enforcement at
-// their property for a while: no tow, no boot, nothing sent. Decided by Gabe:
-// at most 72 hours a pause, and when it ends enforcement resumes right away
+// their property for a while: no new tow, no new boot, nothing new sent.
+// What was already in motion before the pause started (an office tow request,
+// a tow notice or boot text already sent) still goes ahead (Gabe 2026-11-17).
+// Decided by Gabe: at most 72 hours a pause, and when it ends enforcement resumes right away
 // (no fresh grace). The server (lotlogic-backend routers/enforcement_pauses.py)
 // enforces every rule; this module only says them first, in the office's
 // words, and draws the presets. `scripts/pause.test.mjs` covers it.
@@ -335,20 +337,45 @@ export function pauseBanner(pauses, now = Date.now()) {
 
 /**
  * The line under a tow request in a paused property's group, so the card
- * never reads as an order the pause has taken back, or the other way round.
- * It says what the curb check says (backend contract C): a request the office
- * placed during the pause still stands; one placed before it reads DO NOT
- * TOW — PAUSED until the pause ends. '' for anything but a tow request, or
- * with no running pause.
+ * never reads as an order the pause has taken back. Gabe 2026-11-17 (binding):
+ * a pause holds only NEW enforcement, so every open tow request stands, and
+ * the curb check (backend contract C) answers TOW REQUESTED for it: one placed
+ * during the pause, and one placed before it, which was already in motion.
+ * '' for anything but a tow request, or with no running pause.
  */
+export const PLACED_BEFORE = 'Placed before the pause — still stands';
+export const DURING_PAUSE = 'Requested by the office during the pause';
+
 export function towPauseNote(item, pause) {
   if (item?.kind !== 'tow' || !pause || pause.status !== 'active') return '';
   const made = ms(item.created_at);
   const start = ms(pause.starts_at);
   if (!Number.isFinite(made) || !Number.isFinite(start)) return '';
-  return made >= start
-    ? 'Requested by the office during a pause'
-    : 'Placed before the pause. Wait until the pause ends to tow.';
+  return made >= start ? DURING_PAUSE : PLACED_BEFORE;
+}
+
+/**
+ * The pause sheet's line before Save (contract C `open_before_pause_count`
+ * on GET …/pauses): open office tow requests, and camera tow notices or boot
+ * texts already sent, at the property now. They were in motion before the
+ * pause, so they still go ahead through it. '' when there are none.
+ */
+export function openBeforeText(count) {
+  const n = Number(count);
+  if (!Number.isInteger(n) || n <= 0) return '';
+  return n === 1
+    ? '1 open tow request or tow notice from before will still go ahead.'
+    : `${n} open tow requests and tow notices from before will still go ahead.`;
+}
+
+/** Why a towable car is listed on the Lot status tab during a pause (contract C `towable[].pause_note`). */
+export function lotPauseNote(note) {
+  switch (note) {
+    case 'placed_before_pause': return PLACED_BEFORE;
+    case 'during_pause': return DURING_PAUSE;
+    case 'flagged_before_pause': return 'Tow notice sent before the pause — still stands';
+    default: return '';
+  }
 }
 
 /**
@@ -431,11 +458,21 @@ export function isSamePause(conflict, body) {
 
 /**
  * The line at the top of the Lot status tab, and in place of the towable
- * list, while the property is paused: `{title, reason}` or null.
+ * list, while the property is paused: `{title, reason}` or null. While the
+ * pause is on, `towable` lists only the cars something was already in motion
+ * for (contract C), each with its `pause_note`.
  */
 export function lotStatusPause(pause, now = Date.now()) {
   if (!pause) return null;
   const until = fmtPauseTime(pause.ends_at, now) || String(pause.ends_local || '').replace(/ ET$/, '');
+  // Something already in motion before the pause still goes ahead (Gabe
+  // 2026-11-17), and is then listed as towable: not a blanket DO NOT TOW.
+  if (Number(pause.open_before_pause_count) > 0) {
+    return {
+      title: `Enforcement paused${until ? ` until ${until}` : ''} — requests placed before the pause still stand`,
+      reason: cleanReason(pause.reason),
+    };
+  }
   return {
     title: until ? `DO NOT TOW — enforcement paused until ${until}` : 'DO NOT TOW — enforcement paused',
     reason: cleanReason(pause.reason),

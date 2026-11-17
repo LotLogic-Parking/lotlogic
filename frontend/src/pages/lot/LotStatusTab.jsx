@@ -3,7 +3,7 @@ import { getLotStatus } from '../../lib/requestsApi.js';
 import { fmtPassRemaining } from '../../lib/time.js';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { Tag } from '../permits/parts.jsx';
-import { lotStatusPause } from '../../lib/pause.js';
+import { lotPauseNote, lotStatusPause } from '../../lib/pause.js';
 import { PauseIcon } from '../office/PauseBanners.jsx';
 import { NoBreakTimes } from '../../ui/NoBreakTimes.jsx';
 import {
@@ -58,6 +58,8 @@ function LotRow({ list, row, asOf, onOpen }) {
       <>
         <span className="ls-when ls-when--stop">{formatExpired(row.hours_expired)}</span>
         <span className="ls-sub">{lastCheckLine(row.last_check, asOf)}</span>
+        {/* During a pause only what was already in motion is listed, and says so (contract C `pause_note`). */}
+        {lotPauseNote(row.pause_note) && <span className="ls-sub ls-pause-note" data-testid="ls-pause-note">{lotPauseNote(row.pause_note)}</span>}
       </>
     );
     tags = <Tag tone={row.kind === 'long_term' ? 'info' : 'neutral'}>{passKindLabel(row.kind)}</Tag>;
@@ -145,9 +147,10 @@ export function LotStatusTab({ propertyId, propertyName = '', onOpenRow = () => 
   const list = data && Array.isArray(data[segment]) ? data[segment] : [];
   const shown = useMemo(() => filterByPlate(list, q), [list, q]);
   const name = data?.property?.name || propertyName;
-  // Enforcement paused now (backend contract C: `pause`, and `towable` is
-  // empty): said at the top and in place of the towable list, so an empty
-  // list never reads as "nothing to tow" or missing data.
+  // Enforcement paused now (backend contract C: `pause`): said at the top and
+  // in place of an empty towable list, so it never reads as "nothing to tow"
+  // or missing data. While it is on, `towable` lists only the cars something
+  // was already in motion for before the pause (Gabe 2026-11-17).
   const pause = lotStatusPause(data?.pause, asOf ? Date.parse(asOf) : Date.now());
 
   const exportCsv = useCallback(() => {

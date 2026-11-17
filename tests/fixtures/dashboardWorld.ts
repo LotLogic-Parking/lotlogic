@@ -230,6 +230,8 @@ export interface World {
    * worked out at `now`, as the server does. Empty unless a spec adds one (`pauseRow`) or the page sets one.
    */
   pauses: Row[];
+  /** Camera flags whose tow notice or boot text already went out and are still open, by property id (`open_before_pause_count`). */
+  flagsSent: Record<string, number>;
   /** Answer something differently in one spec: checked before the built-in routes, first match wins. */
   overrides: Override[];
   /** Every request to the backend, Supabase or an edge function, in order. */
@@ -677,7 +679,7 @@ export function createWorld(who: Who, opts: { now?: Date } = {}): World {
     ],
     rpc: { count_on_cooldown: () => 2, latest_vehicle_frame: () => null },
     ops: buildOpsInput(now, residents, guests, requests, presence), boots,
-    pauses: [], overrides: [], calls: [], unhandled: [], consoleErrors: [], inflight: 0, lastRequestAt: 0,
+    pauses: [], flagsSent: {}, overrides: [], calls: [], unhandled: [], consoleErrors: [], inflight: 0, lastRequestAt: 0,
   };
 }
 
@@ -719,6 +721,16 @@ const livePauses = (world: World, ids: Set<string>) => world.pauses
   .filter((r) => ids.has(r.property_id) && ['active', 'scheduled'].includes(pauseStatus(r, world.now)))
   .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
   .map((r) => pauseJson(world, r));
+/**
+ * `open_before_pause_count` (contract C, Gabe 2026-11-17): the property's open office tow requests (not expired)
+ * plus the camera flags whose tow notice or boot text already went out (`world.flagsSent`). These still go
+ * ahead through a pause set now.
+ */
+function openBeforePauseCount(world: World, propertyId: string): number {
+  const requests = world.requests.filter((r) => r.property_id === propertyId && r.kind === 'tow' && r.status === 'active'
+    && (!r.expires_at || new Date(r.expires_at).getTime() > world.now.getTime())).length;
+  return requests + (world.flagsSent[propertyId] ?? 0);
+}
 /** The properties this account may set, end or cancel a pause at: office admins, or a platform admin anywhere. */
 function pauseAdminScope(world: World, id: string): PropertySeed | undefined {
   if (world.authMe.is_platform_admin) return propertyById(world, id);
@@ -971,7 +983,7 @@ const API_ROUTES: ApiRoute[] = [
   }],
   ['GET', /^\/apartment\/properties\/([^/]+)\/pauses$/, 'pauses.list', ({ world, m }) => {
     const p = world.authMe.is_platform_admin ? propertyById(world, m[1]) : inScope(world, m[1]);
-    return p ? ok({ pauses: livePauses(world, new Set([p.id])) }) : detail(404, 'Property not found');
+    return p ? ok({ pauses: livePauses(world, new Set([p.id])), open_before_pause_count: openBeforePauseCount(world, p.id) }) : detail(404, 'Property not found');
   }],
   ['POST', /^\/apartment\/properties\/([^/]+)\/pauses$/, 'pauses.create', ({ world, m, body }) => {
     const p = pauseAdminScope(world, m[1]);

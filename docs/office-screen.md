@@ -119,7 +119,7 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
 (no fresh grace). The pure half is `src/lib/pause.js`; the sheet is
 `src/pages/office/PauseSheet.jsx`.
 
-- **The sheet** (Today → Pause enforcement): first line "No tows or boots at <property>
+- **The sheet** (Today → Pause enforcement): first line "No new tows or boots at <property>
   while it is paused. A pause can be at most 72 hours." Then **When**: *Tonight* (6 PM to
   7 AM; after 6 PM or before 7 AM, now to 7 AM), *Next 24 hours* (from now), *This
   weekend* (Fri 6 PM to Sun 11:59 PM; during the weekend from now; gone from Sunday
@@ -136,7 +136,9 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
   the pauses are read again and Save stays off until the window changes. A retry whose
   pause turns out to exist (the first answer was lost) closes onto its banner with
   "That pause is already set." The box's tag says *Paused* for a window that starts now
-  and *Scheduled* for a later one.
+  and *Scheduled* for a later one. When something at the property is already in motion
+  (`open_before_pause_count` on the pauses read), the box adds "2 open tow requests and
+  tow notices from before will still go ahead." before Save. The banners do not change.
 - A start of "now" is sent as `starts_at: null`, so the server's clock decides it.
 - **End now** and **Cancel** ask once ("End the pause now?" / "Cancel this pause?")
   with what happens next, then post `…/end` or `…/cancel`.
@@ -153,15 +155,29 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
   **Pause enforcement** button, so a platform admin sets, ends and cancels pauses there
   (the pill steps aside in the panel head and the opened card, so the time is said
   once). The tow company's Requests tab shows the pause at the top of that property's
-  list, even with no open request, and under each open tow request there whether it
-  stands: "Requested by the office during a pause", or "Placed before the pause. Wait
-  until the pause ends to tow." (what the curb check says). Lookup answers
-  **DO NOT TOW — PAUSED** ("Enforcement paused by <property> until <time> · <reason>",
-  then "After the pause: …"), and an office tow request placed during a pause reads
-  "Requested by the office during a pause". A company-wide check from another lot
-  never reads DO NOT TOW for that lot: it is the grouped card, the paused property's
-  line and the driver's own lot's line. The Lot status tab leads with "DO NOT TOW —
-  enforcement paused until …" (and says it in place of the empty towable list).
+  list, even with no open request, and under each open tow request there that it
+  stands: "Requested by the office during the pause", or "Placed before the pause —
+  still stands" (what the curb check says). Lookup answers **DO NOT TOW — PAUSED**
+  ("Enforcement paused by <property> until <time> · <reason>", then "After the pause:
+  …") for everything not already in motion; an office tow request reads its normal
+  TOW REQUESTED card ("Requested by the office during the pause", or the usual card
+  plus "Placed before the pause — still stands"), and a camera flag whose tow notice
+  or boot text went out before the pause reads its normal ELIGIBLE TO TOW card plus
+  "Tow notice sent before the pause (<time>) — still stands". A company-wide check
+  from another lot never reads DO NOT TOW for that lot: it is the grouped card, the
+  paused property's line and the driver's own lot's line. The Lot status tab leads
+  with "DO NOT TOW — enforcement paused until …" (and says it in place of the empty
+  towable list); when something was in motion before the pause it reads "Enforcement
+  paused until … — requests placed before the pause still stand" and lists only those
+  cars, each with its note.
+- **What a pause holds (Gabe, 2026-11-17, binding).** A pause holds only *new*
+  enforcement. Anything already in motion before the pause's start still goes ahead
+  during it: an office tow request placed before the pause (one placed during it goes
+  ahead too), a camera flag whose tow notice went out before the pause, and a boot
+  dispatch already texted to a driver. At the curb those read their normal tow or boot
+  answer with a short note that they were placed or sent before the pause, never "DO
+  NOT TOW — paused", and no screen tells anyone to wait for the pause to end. Everything
+  not yet sent waits, and goes out once, the moment the pause ends.
 
 ## Changes on 2026-11-17 (enforcement pause), and why
 
@@ -173,6 +189,15 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
 | 4 | End now and Cancel ask once before posting. | Ending a pause makes every car without a parking pass towable at once and tells the tow company. |
 | 5 | Only an admin of the property sees Pause, End now and Cancel on Today; platform admins have them in the Properties panel. | The backend allows only office admins and platform admins; a button that always fails is clutter, and a platform admin never sees Today. |
 | 6 | The admin table's status column is 200 px (was 176 px) and the tow partner column 114 px (was 132 px). | "Paused until Wed 6:00 PM" was cut off; the property names keep their room. |
+
+## Changes on 2026-11-17 (a pause holds only new enforcement), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | A tow request placed before a pause reads "Placed before the pause — still stands" on the tow company's Requests tab and under its normal TOW REQUESTED card in Lookup (was "Wait until the pause ends to tow"); one placed during it reads "Requested by the office during the pause". | Gabe's decision: what was in motion before the pause still goes ahead. |
+| 2 | A camera flag whose tow notice or boot text went out before the pause keeps its normal Lookup card, with "Tow notice (Boot text) sent before the pause (<time>) — still stands"; grouped lines gain "· placed before the pause" and the like. | The same decision, for what the cameras had already sent. |
+| 3 | The pause sheet's first line says "No new tows or boots", and the box says how many open tow requests and tow notices from before will still go ahead. | The office should know, before Save, that a pause does not call back what is already out. |
+| 4 | The Lot status tab's pause line and towable list follow `open_before_pause_count` and each car's `pause_note`. | During a pause the list holds only the cars already in motion; a blanket DO NOT TOW above them would contradict the list. |
 
 ## Changes on 2026-11-17 (review of the pause screens), and why
 

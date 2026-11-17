@@ -20,7 +20,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { buildAndServeFrontend } from '../fixtures/buildAndServeFrontend';
 import {
   API_ORIGIN, DESKTOP, PHONE, PROPERTIES, WORLD_USE,
-  createWorld, enter, etLocal, pauseJson, pauseRow, problems, settle, shoot, type World,
+  OPEN_REQUESTS, createWorld, enter, etLocal, makeRequest, pauseJson, pauseRow, problems, settle, shoot, type World,
 } from '../fixtures/dashboardWorld';
 
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
@@ -63,13 +63,18 @@ test.describe('Enforcement pause @desktop-only', () => {
       test.use({ viewport });
 
       test('the sheet: three quick windows and a custom one, the 72-hour limit, and the window in words before saving', async ({ page }) => {
-        const world = await enter(page, server.origin, 'office');
+        // Already in motion at The Volaire: its open tow request, and one camera tow notice already sent.
+        const world = createWorld('office');
+        world.flagsSent[V.id] = 1;
+        await enter(page, server.origin, world);
         await expect(today(page)).toBeVisible({ timeout: 30_000 });
         await expect(page.getByTestId('pause-banners')).toHaveCount(0);                    // nothing paused
         await page.getByRole('button', { name: 'Pause enforcement' }).click();
         const s = sheet(page);
         await expect(s).toBeVisible();
-        await expect(s).toContainText('A pause can be at most 72 hours.');
+        // Gabe 2026-11-17: a pause holds only NEW enforcement.
+        await expect(s).toContainText('No new tows or boots at The Volaire while it is paused. A pause can be at most 72 hours.');
+        await expect(s.getByTestId('ps-open-before')).toHaveCount(0);                     // said with the window, before Save
         await expect(s.getByRole('radio')).toHaveCount(4);
         await expect(s.locator('.ps-option-label')).toHaveText(['Tonight', 'Next 24 hours', 'This weekend', 'Pick a time']);
         await expect(s.locator('.ps-option-hint').first()).toHaveText('6:00 PM – 7:00 AM');
@@ -83,6 +88,8 @@ test.describe('Enforcement pause @desktop-only', () => {
         await expect(s.locator('.ps-summary-len')).toHaveText('54 hours');
         await expect(s).toContainText('Enforcement resumes Sun Nov 22, 11:59 PM, right away. No grace period.');
         await expect(s).toContainText('We will tell NMLD Towing');
+        // What was already in motion before the pause still goes ahead (contract C `open_before_pause_count`).
+        await expect(s.getByTestId('ps-open-before')).toHaveText('2 open tow requests and tow notices from before will still go ahead.');
         await expect(s.getByRole('button', { name: 'Pause enforcement' })).toBeEnabled();
         await shots(page, 'pause-sheet', world, false);
 
@@ -146,11 +153,25 @@ test.describe('Enforcement pause @desktop-only', () => {
       test('the tow company: the pause at the top of the property\'s Requests, and Lookup says DO NOT TOW — PAUSED', async ({ page }) => {
         const world = withPauses('admin', ACTIVE);
         const plate = 'ZZZ9999';
+        const before = 'ZZZ8888';
+        // A tow request The Volaire's office placed at 8:30 AM, before the pause began at 9:00 AM: it still stands.
+        world.requests.push(makeRequest(world.now, {
+          id: '00000000-0000-4000-8005-000000000099', ref: 'T-2044', property: V, kind: 'tow', plate: before,
+          created_at: '2026-11-16T13:30:00.000Z', note: 'In the fire lane', make: 'Nissan', model: 'Altima', color: 'black',
+        }));
+        const pauseNote = { pause_id: world.pauses[0].id, property_name: V.name, starts_at: '2026-11-16T14:00:00+00:00', ends_at: '2026-11-18T23:00:00+00:00', ends_local: etLocal(ACTIVE.ends_at), reason: 'Pool party' };
         world.overrides.push(
           // The All-properties probe: the route exists.
           { method: 'GET', url: `${API_ORIGIN}/partner/lookup?`, respond: () => ({ verdict: 'not_registered', matches: [] }) },
           {
-            method: 'GET', url: `${API_ORIGIN}/apartment/passes/lookup?`, respond: () => ({
+            method: 'GET', url: `${API_ORIGIN}/apartment/passes/lookup?`, respond: ({ url }) => (url.searchParams.get('plate') === before ? {
+              // Contract C: an open office tow request placed before the pause reads its normal tow answer, with a note.
+              verdict: 'tow_requested',
+              detail: {
+                plate: before, property_name: V.name, ref: 'T-2044', note: 'In the fire lane', created_at: '2026-11-16T13:30:00+00:00',
+                placed_before_pause: true, pause: pauseNote,
+              },
+            } : {
               verdict: 'paused',
               detail: {
                 pause_id: world.pauses[0].id, property_name: V.name, starts_at: '2026-11-16T14:00:00+00:00', ends_at: '2026-11-18T23:00:00+00:00',
@@ -180,9 +201,14 @@ test.describe('Enforcement pause @desktop-only', () => {
         const line = page.getByTestId('partner-pause-active');
         await expect(line).toBeVisible({ timeout: 30_000 });
         await expect(line).toHaveText('Enforcement paused until Wed 6:00 PM · Pool party');
-        // The open tow request under it says whether it stands: the office placed it during the pause.
+        // Each open tow request under it says it stands (Gabe 2026-11-17): one placed during the pause,
+        // and one placed before it, which was already in motion. Never "wait until the pause ends".
         const volaire = page.locator('section').filter({ has: line });
-        await expect(volaire.getByTestId('partner-pause-note')).toHaveText(/Requested by the office during a pause/);
+        const notes = volaire.getByTestId('partner-pause-note');
+        await expect(notes).toHaveCount(2);
+        await expect(volaire.locator('li').filter({ hasText: 'T-2044' }).getByTestId('partner-pause-note')).toHaveText(/Placed before the pause — still stands/);
+        await expect(volaire.locator('li').filter({ hasText: OPEN_REQUESTS.tow.ref }).getByTestId('partner-pause-note')).toHaveText(/Requested by the office during the pause/);
+        await expect(page.locator('body')).not.toContainText(/wait until the pause/i);
         await shots(page, 'pause-partner-requests', world);
 
         await navTab('Lookup').click();
@@ -197,6 +223,16 @@ test.describe('Enforcement pause @desktop-only', () => {
         await expect(page.getByText('No exact match — closest registered plates')).toBeVisible();
         await expect(page.getByRole('button', { name: 'Check plate ZZZ9989' })).toBeVisible();
         await shots(page, 'pause-lookup', world);
+
+        // The request placed before the pause: its normal TOW REQUESTED card, plus one line, never PAUSED.
+        await page.locator('#lookup-plate').fill(before);
+        await page.getByRole('button', { name: 'Check', exact: true }).click();
+        const tow = page.getByRole('status').filter({ hasText: 'TOW REQUESTED' });
+        await expect(tow).toBeVisible();
+        await expect(tow).toContainText('Requested by The Volaire office');
+        await expect(page.getByTestId('lookup-pause-stands')).toHaveText('Placed before the pause — still stands');
+        await expect(page.getByText('DO NOT TOW — PAUSED')).toHaveCount(0);
+        await shots(page, 'pause-lookup-stands', world);
 
 
         await expectNoMoney(page);

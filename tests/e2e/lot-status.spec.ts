@@ -158,6 +158,32 @@ test.describe('Lot status tab @lot-status', () => {
     await expect(page.getByText('Nothing ending in the next 4 hours.')).toBeVisible();
   });
 
+  test('a pause with nothing in motion: DO NOT TOW at the top and in place of the empty towable list', async ({ page }) => {
+    const pause = { id: 'p1', starts_at: '2026-10-15T22:00:00Z', ends_at: '2026-10-16T22:00:00Z', ends_local: 'Fri Oct 16, 6:00 PM ET', reason: 'Pool party', open_before_pause_count: 0 };
+    const paused = { ...lotStatusFixture(), pause, towable: [], counts: { ...lotStatusFixture().counts, towable: 0 } };
+    await serveLotStatus(page, { status: paused });
+    await mountTab(page);
+    await expect(page.getByTestId('ls-pause')).toHaveText('DO NOT TOW — enforcement paused until Fri 6:00 PM · Pool party');
+    await expect(page.locator('.pq-empty-title')).toHaveText('DO NOT TOW — enforcement paused until Fri 6:00 PM');
+  });
+
+  test('a pause with requests placed before it: they still stand, listed with their note (Gabe 2026-11-17)', async ({ page }) => {
+    const pause = { id: 'p1', starts_at: '2026-10-15T22:00:00Z', ends_at: '2026-10-16T22:00:00Z', ends_local: 'Fri Oct 16, 6:00 PM ET', reason: 'Pool party', open_before_pause_count: 2 };
+    const [, abc, def] = lotStatusFixture().towable;
+    const paused = {
+      ...lotStatusFixture(), pause,
+      towable: [{ ...abc, pause_note: 'placed_before_pause' }, { ...def, pause_note: 'flagged_before_pause' }],
+      counts: { ...lotStatusFixture().counts, towable: 2 },
+    };
+    await serveLotStatus(page, { status: paused });
+    await mountTab(page);
+    await expect(page.getByTestId('ls-pause')).toHaveText('Enforcement paused until Fri 6:00 PM — requests placed before the pause still stand · Pool party');
+    await expect(page.locator('.ls-row', { hasText: abc.plate }).getByTestId('ls-pause-note')).toHaveText('Placed before the pause — still stands');
+    await expect(page.locator('.ls-row', { hasText: def.plate }).getByTestId('ls-pause-note')).toHaveText('Tow notice sent before the pause — still stands');
+    await expect(page.locator('body')).not.toContainText(/wait until the pause/i);
+    await page.screenshot({ path: path.resolve(__dirname, '../test-results/pause-screens', `pause-lot-status-${test.info().project.name}.png`), fullPage: true });
+  });
+
   test('a capped list says how many more there are', async ({ page }) => {
     const big = lotStatusFixture();
     big.counts.registered_long_term = 60;

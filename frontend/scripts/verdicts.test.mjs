@@ -378,8 +378,53 @@ test('paused: what the answer would be after the pause is a quiet second line', 
 test('tow_requested during a pause says the office asked for it during the pause', () => {
   const p = verdictPresentation('tow_requested', { property_name: 'The Volaire', ref: 'T-2052', during_pause: true }, 'property');
   assert.equal(p.signal, 'TOW REQUESTED');
-  assert.match(p.reason, /^Requested by the office during a pause/);
+  assert.match(p.reason, /^Requested by the office during the pause/);
   assert.match(p.reason, /T-2052/);
+  assert.equal(p.stands, undefined);
+});
+
+// Gabe 2026-11-17: a pause holds only NEW enforcement. What was already in motion before it
+// reads its normal answer at the curb, with one short line, never DO NOT TOW — PAUSED.
+const PAUSE_NOTE = { pause_id: 'p1', property_name: 'The Volaire', starts_at: '2026-11-20T23:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00', ends_local: 'Sat Nov 21, 6:00 PM ET', reason: 'Pool party' };
+
+test('tow_requested placed before a pause: the normal tow card, plus "Placed before the pause — still stands"', () => {
+  const p = verdictPresentation('tow_requested', { property_name: 'The Volaire', ref: 'T-2052', placed_before_pause: true, pause: PAUSE_NOTE }, 'property');
+  assert.equal(p.signal, 'TOW REQUESTED');
+  assert.equal(p.tone, 'stop');
+  assert.match(p.reason, /^Requested by The Volaire office/);
+  assert.equal(p.stands, 'Placed before the pause — still stands');
+  assert.doesNotMatch(JSON.stringify(p), /wait until|PAUSED/i);
+});
+
+test('a camera flag whose tow notice (or boot text) went out before the pause: the normal answer, plus a line', () => {
+  const flag = { violation_id: 'v1', kind: 'tow', sent_at: '2026-10-08T13:00:00+00:00', sent_local: 'Thu Oct 8, 9:00 AM ET' };
+  const nr = verdictPresentation('not_registered', { property_name: 'The Volaire', flagged_before_pause: true, camera_flag: flag, pause: PAUSE_NOTE }, 'property');
+  assert.equal(nr.signal, 'ELIGIBLE TO TOW');
+  assert.equal(nr.stands, 'Tow notice sent before the pause (Thu Oct 8, 9:00 AM) — still stands');
+  const boot = verdictPresentation('expired_guest', { property_name: 'The Volaire', hours_ago: 3, flagged_before_pause: true, camera_flag: { ...flag, kind: 'boot' }, pause: PAUSE_NOTE }, 'property');
+  assert.equal(boot.signal, 'ELIGIBLE TO TOW');
+  assert.equal(boot.stands, 'Boot text sent before the pause (Thu Oct 8, 9:00 AM) — still stands');
+  // No send time: still said, without one.
+  const bare = verdictPresentation('not_registered', { flagged_before_pause: true, camera_flag: { kind: 'tow' } }, 'property');
+  assert.equal(bare.stands, 'Tow notice sent before the pause — still stands');
+  // A tow request placed before the pause on a flagged plate: the request's line.
+  const both = verdictPresentation('tow_requested', { ref: 'T-1', placed_before_pause: true, flagged_before_pause: true, camera_flag: flag }, 'property');
+  assert.equal(both.stands, 'Placed before the pause — still stands');
+  // Nothing in motion: no line.
+  assert.equal(verdictPresentation('not_registered', {}, 'property').stands, undefined);
+});
+
+test('grouped: an answer that stands through a pause says so on its line', () => {
+  const p = verdictPresentation('grouped', { matches: [
+    { property_id: 'a', property_name: 'The Volaire', verdict: 'tow_requested', detail: { ref: 'T-1', placed_before_pause: true } },
+    { property_id: 'b', property_name: 'Mayfield', verdict: 'not_registered', detail: { flagged_before_pause: true, camera_flag: { kind: 'tow' } } },
+    { property_id: 'c', property_name: 'Fort Mill', verdict: 'tow_requested', detail: { ref: 'T-2', during_pause: true } },
+  ] }, 'all');
+  assert.deepEqual(p.lines, [
+    'At The Volaire: TOW REQUESTED T-1 · placed before the pause',
+    'At Mayfield: no parking pass or hold · tow notice sent before the pause',
+    'At Fort Mill: TOW REQUESTED T-2 · requested during the pause',
+  ]);
 });
 
 test('grouped: a paused property\'s line says DO NOT TOW — PAUSED and until when', () => {

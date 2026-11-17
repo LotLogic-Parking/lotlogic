@@ -43,6 +43,33 @@ function hoursAgo(iso) {
   return Math.max(0, Math.round((Date.now() - d.getTime()) / 3600000));
 }
 
+// Gabe 2026-11-17 (backend contract C): a pause holds only NEW enforcement.
+// An office tow request, or a camera flag whose tow notice or boot text went
+// out before the pause, still goes ahead: the curb check answers it as usual,
+// with `placed_before_pause` / `during_pause` / `flagged_before_pause`. These
+// say so in one short line under the normal card (`stands`), or at the end of
+// a grouped line, never as DO NOT TOW — PAUSED.
+function flagSent(d) {
+  const kind = d?.camera_flag?.kind === 'boot' ? 'Boot text' : 'Tow notice';
+  const when = String(d?.camera_flag?.sent_local || '').replace(/ ET$/, '');
+  return `${kind} sent before the pause${when ? ` (${when})` : ''}`;
+}
+function standsLine(d) {
+  if (d?.placed_before_pause) return 'Placed before the pause — still stands';
+  if (d?.flagged_before_pause) return `${flagSent(d)} — still stands`;
+  return '';
+}
+function groupedStands(d) {
+  if (d?.placed_before_pause) return ' · placed before the pause';
+  if (d?.during_pause) return ' · requested during the pause';
+  if (d?.flagged_before_pause) return ` · ${d?.camera_flag?.kind === 'boot' ? 'boot text' : 'tow notice'} sent before the pause`;
+  return '';
+}
+const withStands = (pres, d) => {
+  const stands = standsLine(d);
+  return stands ? { ...pres, stands } : pres;
+};
+
 // Short per-property descriptor for a grouped card's lines[] — signal words
 // stay for the urgent verdicts (hold / hold_unconfirmed / tow_requested) so
 // a scanning eye still catches TOW REQUESTED; the quiet ones read as plain
@@ -56,12 +83,12 @@ function groupedLine(match) {
     case 'resident':
     case 'guest': return 'parking pass';
     case 'pending': return 'pending approval';
-    case 'expired_guest': return 'parking pass expired';
-    case 'tow_requested': return `TOW REQUESTED${d.ref ? ' ' + d.ref : ''}`;
+    case 'expired_guest': return `parking pass expired${groupedStands(d)}`;
+    case 'tow_requested': return `TOW REQUESTED${d.ref ? ' ' + d.ref : ''}${groupedStands(d)}`;
     case 'paused': { const until = pauseUntil(d); return `DO NOT TOW — PAUSED${until ? ' until ' + until : ''}`; }
     // Only ever the remembered property's own line beside a pause elsewhere
     // (resolveAllScopeResult): the plate is on file at none of the matches.
-    case 'not_registered': return 'no parking pass or hold';
+    case 'not_registered': return `no parking pass or hold${groupedStands(d)}`;
     default: return "can't read this answer";
   }
 }
@@ -115,7 +142,7 @@ export function verdictPresentation(verdict, detail, scope, companyName) {
       let reason = 'Parking pass expired';
       if (ago != null) reason += ` ${ago}h ago`;
       reason += ` · ${d.property_name || 'the property'}`;
-      return { signal: 'ELIGIBLE TO TOW', glyph: '!', tone: 'amber', reason };
+      return withStands({ signal: 'ELIGIBLE TO TOW', glyph: '!', tone: 'amber', reason }, d);
     }
     case 'paused': {
       // Spec Part 3: the office stopped enforcement for a while. DO NOT TOW,
@@ -129,19 +156,19 @@ export function verdictPresentation(verdict, detail, scope, companyName) {
     }
     case 'tow_requested': {
       const when = d.placed_at || d.created_at;
-      // An office tow request placed during a pause is the one answer a pause
-      // does not cover (contract C, `during_pause`).
-      const who = d.during_pause ? 'Requested by the office during a pause' : `Requested by ${d.property_name || 'the property'} office`;
+      // A pause never covers an office tow request (contract C): one placed
+      // during it says so; one placed before it adds the `stands` line.
+      const who = d.during_pause ? 'Requested by the office during the pause' : `Requested by ${d.property_name || 'the property'} office`;
       const bits = [`${who}${when ? ' ' + fmtClock(when) : ''}`];
       if (d.note) bits.push(`"${d.note}"`);
       if (d.ref) bits.push(d.ref);
-      return { signal: 'TOW REQUESTED', glyph: '🚨', tone: 'stop', reason: bits.join(' · ') };
+      return withStands({ signal: 'TOW REQUESTED', glyph: '🚨', tone: 'stop', reason: bits.join(' · ') }, d);
     }
     case 'not_registered': {
       const reason = scope === 'all'
         ? `No parking pass or hold at any ${company ? `${company} ` : ''}property`
         : `No parking pass or hold at ${d.property_name || 'this property'}`;
-      return { signal: 'ELIGIBLE TO TOW', glyph: '✗', tone: 'stop', reason };
+      return withStands({ signal: 'ELIGIBLE TO TOW', glyph: '✗', tone: 'stop', reason }, d);
     }
     case 'hold_unconfirmed': {
       const bits = [`Hold ${d.ref || ''} by ${d.property_name || 'the property'} (not yet confirmed by ${company || 'your company'})`];

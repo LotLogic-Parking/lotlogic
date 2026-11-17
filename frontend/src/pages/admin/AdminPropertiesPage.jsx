@@ -149,6 +149,7 @@ function useAdminPauses(row, onChanged) {
   const apartment = offer !== null;
   const [pauses, setPauses] = useState(null);
   const [sheet, setSheet] = useState(null);   // null | {kind: 'new'} | {kind: 'stop', banner}
+  const [openBefore, setOpenBefore] = useState(0);
   const [note, setNote] = useState('');
   const req = useRef(0);
   const anchor = useRef(null);
@@ -160,11 +161,14 @@ function useAdminPauses(row, onChanged) {
     const mine = ++req.current;
     try {
       const out = await listPauses(row.id);
-      if (mine === req.current) setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+      if (mine === req.current) {
+        setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+        setOpenBefore(Number.isInteger(out?.open_before_pause_count) ? out.open_before_pause_count : 0);
+      }
     } catch { /* keep what was shown */ }
   }, [row.id, apartment]);
   useEffect(() => {
-    setPauses(null); setSheet(null); setNote(''); load();
+    setPauses(null); setOpenBefore(0); setSheet(null); setNote(''); load();
     const id = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
     const onVis = () => { if (!document.hidden) load(); };
     document.addEventListener('visibilitychange', onVis);
@@ -190,7 +194,7 @@ function useAdminPauses(row, onChanged) {
           onAct={pauses ? (banner) => setSheet({ kind: 'stop', banner }) : null} />
         {note && <p className="ap-hint" role="status">{note}</p>}
         {sheet?.kind === 'new' && overlay(
-          <PauseSheet property={row} pauses={pauses} onClose={() => setSheet(null)} onSaved={done} onRefresh={load} />,
+          <PauseSheet property={row} pauses={pauses} openBefore={openBefore} onClose={() => setSheet(null)} onSaved={done} onRefresh={load} />,
         )}
         {sheet?.kind === 'stop' && overlay(
           <PauseStopSheet property={row} banner={sheet.banner} onClose={() => setSheet(null)} onDone={done} />,

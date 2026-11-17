@@ -83,6 +83,8 @@ function PlateLookupVerdict({ out, scope, propertyName, companyName, history, ty
           {pres.reason && <div style={{ fontSize: 14, marginTop: 10, lineHeight: 1.45, opacity: .92 }}>{pres.reason}</div>}
           {/* A paused property: what the answer will be once enforcement resumes, quietly (spec Part 3). */}
           {pres.after && <div data-testid="lookup-after-pause" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.45, opacity: .8 }}>{pres.after}</div>}
+          {/* Already in motion before the pause (Gabe 2026-11-17): the normal card stands, and says why (contract C). */}
+          {pres.stands && <div data-testid="lookup-pause-stands" style={{ fontSize: 13, fontWeight: 700, marginTop: 6, lineHeight: 1.45 }}>{pres.stands}</div>}
           {out.verdict === 'on_file_elsewhere' && pres.propertyId && (
             <button onClick={() => onSwitchProperty && onSwitchProperty(pres.propertyId)}
               style={{ marginTop: 10, background: 'none', border: '1px solid currentColor', color: 'inherit', borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>

@@ -7,7 +7,7 @@ import { cancelPause, createPause, endPause } from '../../lib/requestsApi.js';
 import { towPartnerName } from '../../lib/towPartner.js';
 import {
   GAP_HOURS, MAX_HOURS, REASON_MAX, clashText, clashingPause, cleanReason, customWindow, isSamePause, pauseApiError, pauseBody,
-  pauseErrorText, pausePresets, pauseSummary, quarterFloor, toInputValue, validatePause,
+  openBeforeText, pauseErrorText, pausePresets, pauseSummary, quarterFloor, toInputValue, validatePause,
 } from '../../lib/pause.js';
 
 // ── Pause enforcement: the sheet, and End now / Cancel ────────
@@ -45,10 +45,13 @@ function nextHour(now) {
 
 /**
  * `pauses` are the property's pauses as last read (for the gap rule);
- * `onRefresh` re-reads them after a refusal or a lost answer, so the banner
- * behind the sheet shows what is true; `onSaved(pause, note)` closes it.
+ * `openBefore` is that read's `open_before_pause_count` (contract C): what
+ * was already in motion and still goes ahead through a pause (Gabe
+ * 2026-11-17); `onRefresh` re-reads them after a refusal or a lost answer, so
+ * the banner behind the sheet shows what is true; `onSaved(pause, note)`
+ * closes it.
  */
-export function PauseSheet({ property, pauses = null, onClose, onSaved, onRefresh }) {
+export function PauseSheet({ property, pauses = null, openBefore = 0, onClose, onSaved, onRefresh }) {
   const now = useNowTick();
   const [choice, setChoice] = useState('');
   const [start, setStart] = useState(() => toInputValue(nextHour(Date.now())));
@@ -127,7 +130,7 @@ export function PauseSheet({ property, pauses = null, onClose, onSaved, onRefres
     <Sheet title="Pause enforcement" onClose={close}>
       <form className="ps" onSubmit={submit} noValidate>
         <p className="pq-sheet-copy ps-lead">
-          No tows or boots at {property?.name || 'this property'} while it is paused. A pause can be at most {MAX_HOURS} hours
+          No new tows or boots at {property?.name || 'this property'} while it is paused. A pause can be at most {MAX_HOURS} hours
           {live.length ? `, and pauses need a full day (${GAP_HOURS} hours) between them.` : '.'}
         </p>
 
@@ -178,6 +181,7 @@ export function PauseSheet({ property, pauses = null, onClose, onSaved, onRefres
                 <span className="ps-summary-len">{summary.length}</span>
               </div>
               <p className="ps-summary-line"><strong><NoBreakTimes text={summary.resumes} /></strong>, right away. No grace period.</p>
+              {openBeforeText(openBefore) && <p className="ps-summary-line" data-testid="ps-open-before">{openBeforeText(openBefore)}</p>}
               <p className="ps-summary-line ps-summary-quiet">We will tell {partner} now, and again if you end it early.</p>
             </>
           ) : problem ? (

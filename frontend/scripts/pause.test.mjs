@@ -8,6 +8,7 @@ import {
   MAX_HOURS, REASON_MAX, etWallToMs, fromInputValue, toInputValue, pausePresets, validatePause, cleanReason,
   pauseBody, pauseErrorText, pauseSummary, pauseBanner, pauseBanners, pauseLine, fmtPauseTime, durationText, withPauses,
   towPauseNote, clashingPause, clashText, isSamePause, lotStatusPause, customWindow, quarterFloor, fmtFull,
+  openBeforeText, lotPauseNote,
 } from '../src/lib/pause.js';
 
 const HOUR = 3600_000;
@@ -230,6 +231,9 @@ test('no word for the pass but "parking pass", and no money', () => {
     towPauseNote({ kind: 'tow', created_at: '2026-11-20T17:00:00Z' }, ACTIVE),
     clashText(SCHEDULED), clashText(ACTIVE),
     lotStatusPause(ACTIVE, FRI_2PM).title,
+    lotStatusPause({ ...ACTIVE, open_before_pause_count: 2 }, FRI_2PM).title,
+    openBeforeText(1), openBeforeText(2),
+    lotPauseNote('placed_before_pause'), lotPauseNote('during_pause'), lotPauseNote('flagged_before_pause'),
   ];
   for (const t of texts) assert.doesNotMatch(t, BANNED, t);
 });
@@ -261,9 +265,11 @@ test('withPauses: a tow request in a paused property\'s group says whether it st
   const groups = [{ propertyId: 'v', propertyName: 'The Volaire', propertyVerified: true, count: 3, items }];
   const [g] = withPauses(groups, [ACTIVE], FRI_2PM);
   assert.deepEqual(g.notes, {
-    during: 'Requested by the office during a pause',
-    before: 'Placed before the pause. Wait until the pause ends to tow.',
+    during: 'Requested by the office during the pause',
+    // Gabe 2026-11-17: a pause holds only new enforcement. A request placed before it still goes ahead.
+    before: 'Placed before the pause — still stands',
   });
+  for (const t of Object.values(g.notes)) assert.doesNotMatch(t, /wait until/i, t);
   // Only a running pause: a scheduled one changes nothing yet.
   assert.deepEqual(withPauses(groups, [SCHEDULED], FRI_2PM)[0].notes, {});
   assert.deepEqual(withPauses(groups, null, FRI_2PM)[0].notes, {});
@@ -334,6 +340,27 @@ test('lotStatusPause: the Lot status tab\'s DO NOT TOW line', () => {
   assert.deepEqual(lotStatusPause(pause, FRI_2PM), { title: 'DO NOT TOW — enforcement paused until Sat 6:00 PM', reason: 'Pool party' });
   assert.equal(lotStatusPause({ ...pause, ends_at: null, reason: null }, FRI_2PM).title, 'DO NOT TOW — enforcement paused until Sat Nov 21, 6:00 PM');
   assert.equal(lotStatusPause(null, FRI_2PM), null);
+  // Something was already in motion before the pause (contract C `open_before_pause_count`): that still goes ahead.
+  assert.deepEqual(lotStatusPause({ ...pause, open_before_pause_count: 2 }, FRI_2PM),
+    { title: 'Enforcement paused until Sat 6:00 PM — requests placed before the pause still stand', reason: 'Pool party' });
+  assert.equal(lotStatusPause({ ...pause, open_before_pause_count: 0 }, FRI_2PM).title, 'DO NOT TOW — enforcement paused until Sat 6:00 PM');
+});
+
+test('lotPauseNote: why a towable car is listed during a pause', () => {
+  assert.equal(lotPauseNote('placed_before_pause'), 'Placed before the pause — still stands');
+  assert.equal(lotPauseNote('during_pause'), 'Requested by the office during the pause');
+  assert.equal(lotPauseNote('flagged_before_pause'), 'Tow notice sent before the pause — still stands');
+  assert.equal(lotPauseNote(null), '');
+  assert.equal(lotPauseNote('something_new'), '');
+});
+
+test('openBeforeText: the pause sheet says what already in motion still goes ahead', () => {
+  assert.equal(openBeforeText(0), '');
+  assert.equal(openBeforeText(null), '');
+  assert.equal(openBeforeText(undefined), '');
+  assert.equal(openBeforeText(-1), '');
+  assert.equal(openBeforeText(1), '1 open tow request or tow notice from before will still go ahead.');
+  assert.equal(openBeforeText(2), '2 open tow requests and tow notices from before will still go ahead.');
 });
 
 test('fmtFull: the date, always', () => {

@@ -136,6 +136,8 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
   const [pauses, setPauses] = useState(null);
   // null | {kind: 'new'} | {kind: 'stop', banner}
   const [pauseSheet, setPauseSheet] = useState(null);
+  // Open tow requests and sent tow notices that a pause set now would not hold (contract C).
+  const [openBefore, setOpenBefore] = useState(0);
   const [pauseNote, setPauseNote] = useState('');
   // The pause sheets render into the app root, as ApartmentPermits' do: the
   // page wrappers keep an entrance-animation transform, which would anchor a
@@ -171,11 +173,15 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
     const req = ++pausesReq.current;
     try {
       const out = await listPauses(propertyId);
-      if (req === pausesReq.current) setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+      if (req === pausesReq.current) {
+        setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+        setOpenBefore(Number.isInteger(out?.open_before_pause_count) ? out.open_before_pause_count : 0);
+      }
     } catch { /* keep the last answer */ }
   }, [propertyId]);
   useEffect(() => {
     setPauses(null);
+    setOpenBefore(0);
     loadPauses();
     const id = setInterval(() => { if (visible()) loadPauses(); }, REFRESH_MS);
     return () => clearInterval(id);
@@ -243,7 +249,7 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
       )}
 
       {pauseSheet?.kind === 'new' && overlay(
-        <PauseSheet property={property} pauses={pauses} onClose={() => setPauseSheet(null)} onSaved={onPauseDone} onRefresh={loadPauses} />,
+        <PauseSheet property={property} pauses={pauses} openBefore={openBefore} onClose={() => setPauseSheet(null)} onSaved={onPauseDone} onRefresh={loadPauses} />,
       )}
       {pauseSheet?.kind === 'stop' && overlay(
         <PauseStopSheet property={property} banner={pauseSheet.banner} onClose={() => setPauseSheet(null)} onDone={onPauseDone} />,
