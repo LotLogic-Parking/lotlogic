@@ -219,6 +219,12 @@ export interface World {
   ops: Omit<OpsInput, 'now'>;
   /** The boot-portal fake's boots, agents and properties (reads only). */
   boots: { me: Row; boots: Row[]; properties: Row[]; agents: Row[]; admin: boolean };
+  /**
+   * `enforcement_pauses` rows (backend contract C): `{id, property_id, starts_at, ends_at (planned), reason,
+   * created_at, created_by_name, ended_early_at, ended_by_name, cancelled_at, cancelled_by_name}`. Status is
+   * worked out at `now`, as the server does. Empty unless a spec adds one (`pauseRow`) or the page sets one.
+   */
+  pauses: Row[];
   /** Answer something differently in one spec: checked before the built-in routes, first match wins. */
   overrides: Override[];
   /** Every request to the backend, Supabase or an edge function, in order. */
@@ -666,8 +672,54 @@ export function createWorld(who: Who, opts: { now?: Date } = {}): World {
     ],
     rpc: { count_on_cooldown: () => 2, latest_vehicle_frame: () => null },
     ops: buildOpsInput(now, residents, guests, requests, presence), boots,
-    overrides: [], calls: [], unhandled: [], consoleErrors: [], inflight: 0, lastRequestAt: 0,
+    pauses: [], overrides: [], calls: [], unhandled: [], consoleErrors: [], inflight: 0, lastRequestAt: 0,
   };
+}
+
+// ── Enforcement pauses (lotlogic-backend services/enforcement_pause.py, contract C) ──
+const ET_LOCAL = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+/** `"Sat Nov 21, 6:00 PM ET"`, the `*_local` strings' format (`%a %b D, H:MM AM/PM ET`). */
+export function etLocal(iso: string): string {
+  const p = Object.fromEntries(ET_LOCAL.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.month} ${p.day}, ${p.hour}:${p.minute} ${p.dayPeriod} ET`;
+}
+const pyIso = (iso: string) => new Date(iso).toISOString().replace(/\.000Z$/, '+00:00').replace(/Z$/, '+00:00');
+const effectiveEnd = (r: Row) => r.ended_early_at ?? r.ends_at;
+function pauseStatus(r: Row, now: Date): 'scheduled' | 'active' | 'ended' | 'cancelled' {
+  if (r.cancelled_at) return 'cancelled';
+  if (Date.parse(effectiveEnd(r)) <= now.getTime()) return 'ended';
+  return Date.parse(r.starts_at) > now.getTime() ? 'scheduled' : 'active';
+}
+/** `ep.pause_json`. */
+export function pauseJson(world: World, r: Row): Row {
+  const p = propertyById(world, r.property_id);
+  return {
+    id: r.id, property_id: r.property_id, property_name: p?.name ?? null, status: pauseStatus(r, world.now),
+    starts_at: pyIso(r.starts_at), ends_at: pyIso(effectiveEnd(r)), planned_ends_at: pyIso(r.ends_at),
+    starts_local: etLocal(r.starts_at), ends_local: etLocal(effectiveEnd(r)), reason: r.reason ?? null,
+    created_at: pyIso(r.created_at), created_by_name: r.created_by_name ?? null,
+    ended_early_at: r.ended_early_at ? pyIso(r.ended_early_at) : null, ended_by_name: r.ended_by_name ?? null,
+    cancelled_at: r.cancelled_at ? pyIso(r.cancelled_at) : null, cancelled_by_name: r.cancelled_by_name ?? null,
+  };
+}
+/** A pause row for a spec to put in `world.pauses`. */
+export function pauseRow(o: { property: PropertySeed; starts_at: string; ends_at: string; reason?: string | null; n?: number; created_at?: string }): Row {
+  return {
+    id: uid(11, o.n ?? 1), property_id: o.property.id, starts_at: o.starts_at, ends_at: o.ends_at, reason: o.reason ?? null,
+    created_at: o.created_at ?? new Date(NOW.getTime() - DAY).toISOString(), created_by_name: OWNERS[o.property.owner].contact_name,
+    ended_early_at: null, ended_by_name: null, cancelled_at: null, cancelled_by_name: null,
+  };
+}
+const livePauses = (world: World, ids: Set<string>) => world.pauses
+  .filter((r) => ids.has(r.property_id) && ['active', 'scheduled'].includes(pauseStatus(r, world.now)))
+  .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  .map((r) => pauseJson(world, r));
+/** The properties this account may set, end or cancel a pause at: office admins, or a platform admin anywhere. */
+function pauseAdminScope(world: World, id: string): PropertySeed | undefined {
+  if (world.authMe.is_platform_admin) return propertyById(world, id);
+  const mine = inScope(world, id);
+  const role = (world.authMe.properties ?? []).find((x: Row) => x.id === id)?.role;
+  return mine && role === 'admin' ? mine : undefined;
 }
 
 /** The boot-portal fake's rows: the same five boots admin-ops reports on (supabase/functions/boot-portal). */
@@ -733,8 +785,15 @@ export function clientRows(world: World): Row[] {
       owner_name: owner.business_name || owner.contact_name,
       pending_registration_count: pending.length, oldest_pending_registration_at: oldest,
       tows_this_week: p.week.tows, unreached_request_count: world.unreached[p.id] ?? 0, boots_this_week: p.week.boots,
+      // Only a pause covering the property now (contract C).
+      active_pause: activePauseFor(world, p.id),
     };
   });
+}
+
+function activePauseFor(world: World, propertyId: string): Row | null {
+  const r = world.pauses.find((x) => x.property_id === propertyId && pauseStatus(x, world.now) === 'active');
+  return r ? { id: r.id, ends_at: pyIso(effectiveEnd(r)), ends_local: etLocal(effectiveEnd(r)), reason: r.reason ?? null } : null;
 }
 
 /** `GET /apartment/properties/{id}/summary`. */
@@ -898,6 +957,66 @@ const API_ROUTES: ApiRoute[] = [
     if (!r || !inScope(world, r.property_id)) return detail(404, 'not_found');
     const actor = { type: r.created_by.type, display: r.created_by.name };
     return ok({ request: r, events: [{ event: 'created', at: r.created_at, actor }], deliveries: r.sent_at ? [{ channel: 'email', status: 'sent', sent_at: r.sent_at }] : [] });
+  }],
+
+  // ── enforcement pauses (routers/enforcement_pauses.py, contract C) ──
+  ['GET', /^\/apartment\/pauses$/, 'pauses.all', ({ world }) => {
+    const ids = new Set((world.authMe.is_platform_admin ? world.allProperties : world.properties).map((p) => p.id));
+    return ok({ pauses: livePauses(world, ids) });
+  }],
+  ['GET', /^\/apartment\/properties\/([^/]+)\/pauses$/, 'pauses.list', ({ world, m }) => {
+    const p = world.authMe.is_platform_admin ? propertyById(world, m[1]) : inScope(world, m[1]);
+    return p ? ok({ pauses: livePauses(world, new Set([p.id])) }) : detail(404, 'Property not found');
+  }],
+  ['POST', /^\/apartment\/properties\/([^/]+)\/pauses$/, 'pauses.create', ({ world, m, body }) => {
+    const p = pauseAdminScope(world, m[1]);
+    if (!p) return detail(404, 'Property not found');
+    if (p.property_type !== 'apartment') return detail(422, 'not_apartment');
+    const reason = body?.reason == null ? null : String(body.reason).replace(/\s+/g, ' ').trim() || null;
+    if (reason && reason.length > 120) return detail(422, 'reason_too_long');
+    const now = world.now.getTime();
+    const given = body?.starts_at ? Date.parse(body.starts_at) : now;
+    const start = Math.max(given, now);
+    const end = Date.parse(body?.ends_at);
+    if (!(end > start)) return detail(422, 'ends_before_start');
+    if (end - start > 72 * HOUR) return detail(422, 'too_long');
+    if (given < now - 5 * MIN) return detail(422, 'starts_in_past');
+    if (given > now + 30 * DAY) return detail(422, 'too_far_ahead');
+    const live = world.pauses.filter((r) => r.property_id === p.id && !r.cancelled_at);
+    const by = world.authMe.contact_name ?? world.authMe.display_name ?? null;
+    const repeat = live.find((r) => r.created_by_name === by && Date.parse(r.ends_at) === end && now - Date.parse(r.created_at) >= 0 && now - Date.parse(r.created_at) <= 120_000);
+    if (repeat) return ok({ pause: pauseJson(world, repeat) }, 200);
+    if (live.filter((r) => Date.parse(r.starts_at) > now).length >= 3) return detail(422, 'too_many_scheduled');
+    const conflict = live.find((r) => start < Date.parse(effectiveEnd(r)) + DAY && Date.parse(r.starts_at) < end + DAY);
+    if (conflict) {
+      const earliest = new Date(Date.parse(effectiveEnd(conflict)) + DAY).toISOString();
+      return detail(409, 'overlaps', { conflict: pauseJson(world, conflict), earliest_start: pyIso(earliest), earliest_start_local: etLocal(earliest) });
+    }
+    const row = {
+      id: uid(11, 100 + world.pauses.length), property_id: p.id, starts_at: new Date(start).toISOString(), ends_at: new Date(end).toISOString(),
+      reason, created_at: world.now.toISOString(), created_by_name: world.authMe.contact_name ?? world.authMe.display_name ?? null,
+      ended_early_at: null, ended_by_name: null, cancelled_at: null, cancelled_by_name: null,
+    };
+    world.pauses.push(row);
+    return ok({ pause: pauseJson(world, row) }, 201);
+  }],
+  ['POST', /^\/apartment\/properties\/([^/]+)\/pauses\/([^/]+)\/(end|cancel)$/, 'pauses.stop', ({ world, m }) => {
+    const p = pauseAdminScope(world, m[1]);
+    if (!p) return detail(404, 'Property not found');
+    const r = world.pauses.find((x) => x.id === m[2] && x.property_id === p.id);
+    if (!r) return detail(404, 'pause_not_found');
+    const status = pauseStatus(r, world.now);
+    if (status === 'cancelled') return detail(409, 'already_cancelled');
+    const who = world.authMe.contact_name ?? world.authMe.display_name ?? null;
+    if (m[3] === 'end') {
+      if (status === 'scheduled') return detail(409, 'not_started');
+      if (status === 'ended') return detail(409, 'already_ended');
+      r.ended_early_at = world.now.toISOString(); r.ended_by_name = who;
+    } else {
+      if (status !== 'scheduled') return detail(409, 'already_started');
+      r.cancelled_at = world.now.toISOString(); r.cancelled_by_name = who;
+    }
+    return ok({ pause: pauseJson(world, r) });
   }],
 
   // ── property ──
