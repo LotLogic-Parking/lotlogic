@@ -724,9 +724,12 @@ export function clientRows(world: World): Row[] {
     return {
       id: p.id, name: p.name, address: p.address, property_type: p.property_type, owner_email: owner.email,
       partner_email: partner.email, partner_id: partner.id, partner_name: partner.company_name,
-      tow_company_id: partner.id, tow_company_name: partner.company_name,
+      // An apartment names its tow company; a truck plaza does not (routers/admin.py), its partner is the account.
+      tow_company_id: p.property_type === 'truck_plaza' ? null : partner.id,
+      tow_company_name: p.property_type === 'truck_plaza' ? null : partner.company_name,
       active_pass_count: world.guests.filter((g) => g.property_id === p.id && g.status === 'active').length + (p.key === 'plaza' ? 4 : 0),
       open_violation_count: 0, qr_code_id: p.qr_code_id, go_live_date: p.go_live_date, units: p.units,
+      archived_at: null, verification_status: 'verified',
       owner_name: owner.business_name || owner.contact_name,
       pending_registration_count: pending.length, oldest_pending_registration_at: oldest,
       tows_this_week: p.week.tows, unreached_request_count: world.unreached[p.id] ?? 0, boots_this_week: p.week.boots,

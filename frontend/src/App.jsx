@@ -39,6 +39,9 @@ const JobsPage         = lazyPage(() => import('./pages/JobsPage.jsx'));
 const AnalyticsPage    = lazyPage(() => import('./pages/AnalyticsPage.jsx'));
 const TowActivityPage  = lazyPage(() => import('./pages/TowActivityPage.jsx'));
 const AdminConsolePage = lazyPage(() => import('./pages/AdminConsolePage.jsx'));
+// The platform admin's Properties table and Money tab (spec 2026-11-16 Part 2).
+const AdminPropertiesPage = lazyPage(() => import('./pages/admin/AdminPropertiesPage.jsx'));
+const MoneyPage        = lazyPage(() => import('./pages/MoneyPage.jsx'));
 const EnforcementPage  = lazyPage(() => import('./pages/EnforcementPage.jsx'));
 const PartnerRequestsPage = lazyPage(() => import('./pages/PartnerRequestsPage.jsx'));
 
@@ -394,17 +397,18 @@ export function App() {
   // LotLogic is no property's tow company, so Lookup and Requests would be
   // empty for them; the properties they cover are listed in the tab instead.
   const agentMode = !viewAs && isLotLogicAgent(owner);
+  // A platform admin, signed in as themselves (isPlatformAdmin is false in
+  // View as Partner): Properties · Money · Admin (+ Enforcement) · Account,
+  // the Properties tab is the portfolio table, and Money is Earnings + Billing
+  // (spec 2026-11-16 Part 2). The base nav (features.js ADMIN_TABS) carries
+  // Money and Admin, so the extras below add only Enforcement for them.
+  const adminTable = isOwner && isPlatformAdmin;
   const navExtras = isOwner
     ? [
       // SaaS (all-apartment) owners have no per-tow money flow — see showMoney.
-      ...(showMoney ? [
+      ...(showMoney && !adminTable ? [
         { id: 'earnings', label: 'Earnings' },
         { id: 'invoices', label: 'Billing' },
-      ] : []),
-      // Platform-admin only: the internal console (clients / onboard /
-      // feedback) folded in from admin.html. Gated again at render.
-      ...(isPlatformAdmin ? [
-        { id: 'admin', label: 'Admin' },
       ] : []),
       // The Smart Boot fleet: gabriel@ and victor@lotlogicparking.com only
       // (lib/enforcement.js). The boot-portal function checks the email
@@ -416,7 +420,7 @@ export function App() {
     : [];
   const navTabs = (() => {
     if (agentMode) return [{ id: 'enforcement', label: 'Enforcement' }, { id: 'account', label: 'Account' }];
-    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
+    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice), platformAdmin: adminTable });
     const account = base.filter(t => t.id === 'account');
     // One property: the tab opens it on Today (spec 2026-11-16 Part 1), so
     // "Properties" (a list of one) reads "Today".
@@ -426,7 +430,11 @@ export function App() {
   })();
   // Overview has no nav button (it is reached from the cards) but is a real
   // owner tab, so it stays valid.
-  const validTabs = isOwner ? ['overview', ...navTabs.map(t => t.id)] : navTabs.map(t => t.id);
+  // A platform admin also reaches Analytics and Tow truck from the links at
+  // the top of Properties; they left the bottom nav, not the app.
+  const validTabs = isOwner
+    ? ['overview', ...navTabs.map(t => t.id), ...(adminTable ? ['analytics', 'towactivity'] : [])]
+    : navTabs.map(t => t.id);
 
   useEffect(() => {
     if (!owner) return;
@@ -441,11 +449,14 @@ export function App() {
     // `?property=` link) goes to Requests.
     if (!lotsLoaded && !truck) return;
     if (!validTabs.includes(tab)) {
-      const home = agentMode ? 'enforcement' : homeTabFor(truck ? 'driver' : null);
+      // An admin's remembered Earnings or Billing tab is now a section of Money.
+      const home = agentMode ? 'enforcement'
+        : (adminTable && (tab === 'earnings' || tab === 'invoices')) ? 'money'
+        : homeTabFor(truck ? 'driver' : null);
       setTab(validTabs.includes(home) ? home : (validTabs[0] || 'account'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, agentMode, validTabs.join(',')]);
+  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, agentMode, adminTable, validTabs.join(',')]);
 
   // Apply the deep link, once, as soon as there is a session. Deliberately not
   // while signed out: the query has to survive the sign-in (LoginPage replays
@@ -986,7 +997,8 @@ export function App() {
   function exitViewAs() {
     setViewAs(null);
     setPartnerSwitcherOpen(false);
-    setTab('overview');
+    // A platform admin goes back to the Properties table they left from.
+    setTab(owner?.is_platform_admin ? 'lots' : 'overview');
     haptic('light');
   }
 
@@ -1004,7 +1016,7 @@ export function App() {
   const NavIconAdmin = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('path', {d:'M12 2l7 4v6c0 4.4-3 7.5-7 9-4-1.5-7-4.6-7-9V6z'}));
   const NavIconLookup = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'11',cy:'11',r:'7'}), React.createElement('line', {x1:'21',y1:'21',x2:'16.65',y2:'16.65'}));
   const NavIconEnforce = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'12',cy:'12',r:'8'}), React.createElement('circle', {cx:'12',cy:'12',r:'3'}), React.createElement('path', {d:'M12 4v5M12 15v5M4 12h5M15 12h5'}));
-  const navIcons = { enforcement: NavIconEnforce, overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
+  const navIcons = { enforcement: NavIconEnforce, overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, money: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
   // Tab roles (kept intentionally narrow so each surface has one meaning):
   //   Jobs     → every violation needing action (enforcement + ALPR unified)
   //   Lots     → register + manage properties (plates, passes, cameras, plate detections)
@@ -1052,7 +1064,7 @@ export function App() {
             </div>
           )}
           {isOwner && ownPartners.length > 0 && (
-            <div style={{position:'relative'}}>
+            <div className="header-switch" style={{position:'relative'}}>
               <button
                 onClick={() => setPartnerSwitcherOpen(o => !o)}
                 aria-haspopup="menu"
@@ -1172,7 +1184,26 @@ export function App() {
           <React.Suspense fallback={<SkeletonCards />}>
           {tab === 'overview' && isOwner && !viewAs && <OverviewPage violations={violations} lots={lots} partners={partners} lotStates={lotStates} onViewAs={handleViewAs} />}
           {tab === 'jobs' && !truck && <JobsPage lots={effectiveLots} violations={effectiveViolations} alprViolations={alprViolations} loading={loading} lotStates={effectiveLotStates} onAction={() => loadData(owner, true)} isOwner={isOwner} deepLinkViolationId={deepLinkViolationId} user={effectiveUser} onNavigate={setTab} />}
-          {tab === 'lots' && !truck && <ALPRPropertiesPage
+          {tab === 'lots' && adminTable && <AdminPropertiesPage
+            user={effectiveUser}
+            properties={properties}
+            partners={partners}
+            onViewAs={handleViewAs}
+            onNavigate={setTab}
+            initialOpenId={deepLink.property || null}
+            initialSection={deepLink.section}
+            request={deepLink.request}
+            upload={deepLink.upload}
+            firstrun={deepLink.firstrun}
+            verify={deepLink.verify}
+            onNeedVerify={onNeedVerify}
+          />}
+          {tab === 'money' && adminTable && <MoneyPage
+            earnings={{ violations: effectiveViolations, lots: effectiveLots, isOwner, user: effectiveUser }}
+            invoices={{ lots, partners, user: owner, isOwner, isPlatformAdmin }}
+            onNavigate={setTab}
+          />}
+          {tab === 'lots' && !truck && !adminTable && <ALPRPropertiesPage
             user={effectiveUser}
             impersonating={!!viewAs}
             initialSelectedId={deepLink.property || ((isOwner && !isPlatformAdmin && (properties || []).length === 1 && !isClassicOffice(properties[0])) ? properties[0].id : undefined)}

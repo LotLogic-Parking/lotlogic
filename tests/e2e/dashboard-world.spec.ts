@@ -122,12 +122,13 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
         expectClean(world);
       });
 
-      test('admin: the Lots list, then Admin > Today with boots, cameras and needs', async ({ page }) => {
+      test('admin: the Properties table, then Admin > Today with boots, cameras and needs', async ({ page }) => {
         const world = await enter(page, server.origin, 'admin');
-        await expect(nav(page)).toHaveText(['Lots', 'Analytics', 'Tow truck', 'Earnings', 'Billing', 'Admin', 'Enforcement', 'Account'], { timeout: 30_000 });
-        for (const p of Object.values(PROPERTIES)) await expect(page.getByText(p.address)).toBeVisible();
-        await expect(page.getByText('View property')).toHaveCount(5);
-        await before(page, world, 'before-admin-lots');
+        // Spec 2026-11-16 Part 2: Properties · Money · Admin (+ Enforcement for gabriel@) · Account.
+        await expect(nav(page)).toHaveText(['Properties', 'Money', 'Admin', 'Enforcement', 'Account'], { timeout: 30_000 });
+        await expect(page.getByTestId('admin-properties')).toBeVisible();
+        // A row on a laptop, a card on a phone: whichever is showing.
+        for (const p of Object.values(PROPERTIES)) await expect(page.getByTestId('admin-properties').getByText(p.name, { exact: true }).locator('visible=true').first()).toBeVisible();
 
         await nav(page).filter({ hasText: 'Admin' }).click();
         // Today opens first inside Admin: tiles, what needs Victor or Gabe, the equipment, the properties.
@@ -230,7 +231,7 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
 
     test('admin: /admin/clients carries the new fields, and PATCH /admin/properties/{id} updates the row', async ({ page }) => {
       const world = await enter(page, server.origin, 'admin');
-      await expect(nav(page)).toHaveCount(8, { timeout: 30_000 });
+      await expect(nav(page)).toHaveCount(5, { timeout: 30_000 });
       const clients = await api(page, 'GET', '/admin/clients');
       expect(clients.json).toEqual(clientRows(world));
       const volaire = clients.json.find((r: any) => r.id === PROPERTIES.volaire.id);

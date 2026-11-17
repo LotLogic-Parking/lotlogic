@@ -3703,24 +3703,24 @@
        ══════════════════════════════════════════════════════════════════ */
 /* ── Shared pieces ── */
     /* A text link that is a 44 px target. */
-    .ot-link {
+    .ot-link, .ap-link {
       display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px;
       background: none; border: 0; border-radius: 8px; color: var(--accent-text);
       font-family: inherit; font-size: 13px; font-weight: 800; line-height: 1.2;
       text-decoration: none; white-space: nowrap; cursor: pointer;
     }
-    .ot-link:hover { text-decoration: underline; }
+    .ot-link:hover, .ap-link:hover { text-decoration: underline; }
     /* A value that failed to load: an em dash in grey, never 0. */
-    .ot-none { color: var(--text-secondary); font-weight: 500; }
+    .ot-none, .ap-none { color: var(--text-secondary); font-weight: 500; }
     /* Skeleton bars. Each has the box of the text it stands in for, so
        nothing moves when the data lands. Reuses the dashboard's shimmer
        keyframes; the two greys are visible on a card in both themes. */
-    .ot-skel {
+    .ot-skel, .ap-skel {
       display: block; border-radius: 6px;
       background: linear-gradient(90deg, var(--border) 25%, var(--border-subtle) 50%, var(--border) 75%);
       background-size: 200% 100%; animation: shimmer 1.5s ease infinite;
     }
-    @media (prefers-reduced-motion: reduce) { .ot-skel { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .ot-skel, .ap-skel { animation: none; } }
 
     /* ── Office › Today ─────────────────────────────────────────────── */
     /* The property header card: name, "Towing by …", the Today | Vehicles
@@ -3904,6 +3904,246 @@
     .ot-check-hint { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text-secondary); }
     .ot-check-hint.is-error { color: var(--red); }
     .ot-check-act { margin-left: auto; min-height: 32px; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Admin › Properties (ap-): the platform admin's portfolio table, side
+       panel and Money tab (spec 2026-11-16 Part 2,
+       src/pages/admin/AdminPropertiesPage.jsx, src/pages/MoneyPage.jsx).
+       Same rules as the ot- block above: theme tokens only, blue the one
+       accent, red and green only as small tags, dots or text; breakpoints
+       1024 px (table + panel, or cards) and 640 px; flat 1 px hairlines.
+       ══════════════════════════════════════════════════════════════════ */
+    /* ── Admin › Properties ─────────────────────────────────────────── */
+    .ap {
+      --ap-top: calc(58px + env(safe-area-inset-top));
+      --ap-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    /* The table and its panel need ~1,240 px: the page widens the column
+       for this screen only, as Today and Passes do. */
+    @media (min-width: 1024px) { .page-content:has(.ap) { max-width: 1272px; } }
+    .ap-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 16px; }
+    /* Used WITH .section-title (Anton caps), at the 20 px Admin › Today uses. */
+    .ap-title { font-size: 20px; line-height: 1.2; }
+    .ap-top-links { display: flex; flex-wrap: wrap; gap: 0 8px; margin-right: -6px; }
+
+    .ap-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .ap-tools .pq-search { flex: 1 1 100%; min-width: 0; }
+    .ap-tools .pq-search input { width: 100%; }
+    .ap-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+    /* Used WITH .req-chip (44 px pill, pressed = blue fill). Adds the count
+       and a white fill, because these sit on the page, not on a card. */
+    .ap-chip {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-card); color: var(--text-secondary); font-size: 13px; white-space: nowrap;
+    }
+    .ap-chip-n { font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .ap-chip[aria-pressed="true"] .ap-chip-n { color: var(--on-accent); }
+    .ap-chip[aria-pressed="true"]:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+    @media (max-width: 1023px) {
+      /* One row of chips that scrolls sideways, edge to edge: the only
+         sideways scroller on the page. */
+      .ap-chips {
+        flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+        margin-inline: -16px; padding-inline: 16px;
+      }
+      .ap-chips::-webkit-scrollbar { display: none; }
+    }
+    @media (min-width: 1024px) {
+      .ap-tools .pq-search { flex: 0 0 auto; }
+      .ap-tools .pq-search input { width: 300px; }
+    }
+
+    .ap-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (min-width: 1024px) {
+      .ap-layout { grid-template-columns: minmax(0, 1fr) 320px; }
+      /* Both columns scroll inside one screen height, as .pq-layout does:
+         the panel stays beside the row that opened it however long the
+         table is. (Nothing can be position: sticky on the page itself.) */
+      .ap-tablecard, .ap-panel { max-height: calc(100vh - var(--ap-top) - var(--ap-bottom) - 24px); overflow-y: auto; }
+    }
+
+    /* The table: Admin › Today's table family (13 px cells, 11 px caps
+       heads, hairline rows) with fixed columns and right-aligned numbers. */
+    .ap-tablecard { min-width: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow-x: hidden; }
+    .ap-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+    .ap-table th {
+      position: sticky; top: 0; z-index: 1; height: 44px; padding: 8px 10px;
+      background: var(--bg-card); box-shadow: inset 0 -1px 0 var(--border);
+      text-align: left; vertical-align: bottom;
+      font-size: 11px; font-weight: 700; line-height: 1.3; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .ap-table td {
+      height: 48px; padding: 6px 10px; border-top: 1px solid var(--border-subtle);
+      color: var(--text-primary); vertical-align: middle;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ap-table tbody tr:first-child td { border-top: 0; }
+    .ap-table th:first-child, .ap-table td:first-child { padding-left: 16px; }
+    .ap-table th:last-child, .ap-table td:last-child { padding-right: 16px; }
+    /* 88 px keeps every number heading to two lines ("Tows this / week"). */
+    .ap-col-partner { width: 132px; }
+    .ap-col-num { width: 88px; }
+    .ap-col-status { width: 176px; }
+    .ap-name { font-size: 14px; font-weight: 700; }
+    .ap-partner { color: var(--text-secondary); }
+    .ap-table th.ap-num, .ap-num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.ap-num, .ap-card-stat .ap-num { font-weight: 700; color: var(--text-primary); }
+    /* A zero is quiet so the eye lands on what is not zero. */
+    td.ap-num.is-zero, .ap-card-stat .ap-num.is-zero { font-weight: 500; color: var(--text-secondary); }
+    /* Registrations waiting longer than 24 hours: blue ink, heavier. */
+    td.ap-num.is-late, .ap-card-stat .ap-num.is-late { font-weight: 800; color: var(--accent-text); }
+
+    .ap-row { cursor: pointer; }
+    .ap-row:hover td { background: var(--bg-inset); }
+    .ap-row.is-selected td { background: var(--accent-tint); }
+    .ap-row.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .ap-row:focus { outline: none; }
+    .ap-row:focus-visible td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    .ap-row:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    .ap-row:focus-visible td:last-child { box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    /* Between 1024 and 1199 px the tow partner column goes (the chips and
+       the panel both name it) so the property name keeps its room. */
+    @media (min-width: 1024px) and (max-width: 1199px) {
+      .ap-layout { grid-template-columns: minmax(0, 1fr) 300px; }
+      .ap-col-partner, .ap-table .ap-partner { display: none; }
+    }
+
+    /* Status. The urgent states and "N waiting" are .pq-tag (--red, and
+       --amber, which is the blue slot); "Starts <date>" is .pq-tag--neutral;
+       "All good" is not a pill: a green dot and the words. */
+    .ap-tag-strong { font-weight: 800; }
+    .ap-ok { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }
+    .ap-ok::before { content: ''; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .ap-empty { padding: 28px 16px; text-align: center; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+
+    /* Side panel (and the same body inside an opened card on a phone). */
+    .ap-panel {
+      display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ap-panel-empty { padding: 32px 20px; text-align: center; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+    .ap-panel-head { display: flex; align-items: flex-start; gap: 8px; }
+    .ap-panel-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .ap-panel-name { font-size: 18px; font-weight: 800; line-height: 1.25; color: var(--text-primary); overflow-wrap: anywhere; }
+    .ap-panel-addr { font-size: 13px; line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
+    .ap-panel-id .pq-tag, .ap-panel-id .ap-ok { margin-top: 6px; }
+    .ap-panel-close {
+      flex: 0 0 auto; width: 44px; height: 44px; margin: -10px -10px 0 0;
+      background: none; border: 0; border-radius: 10px; color: var(--text-muted);
+      font-family: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+    }
+    .ap-panel-close:hover { color: var(--text-primary); }
+    .ap-panel-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .ap-label {
+      margin-bottom: 8px; font-size: 11px; font-weight: 700; line-height: 1.35; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+
+    /* What needs us at this property (from admin-ops): a dot, a sentence,
+       one small button. Red dot = urgent; blue dot = the rest. */
+    .ap-needs { list-style: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .ap-need { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 8px 10px; padding: 12px; }
+    .ap-need + .ap-need { border-top: 1px solid var(--border-subtle); }
+    .ap-need-dot { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--accent); }
+    .ap-need.is-urgent .ap-need-dot { background: var(--red); }
+    .ap-need-title { font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text-primary); overflow-wrap: anywhere; }
+    .ap-need-detail { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+    .ap-need .pq-btn { grid-column: 2; justify-self: start; }
+
+    .ap-facts { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .ap-fact {
+      display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; column-gap: 8px;
+      min-height: 44px; padding: 0 4px 0 12px; font-size: 13px; line-height: 1.4;
+    }
+    .ap-fact + .ap-fact { border-top: 1px solid var(--border-subtle); }
+    .ap-fact dt { color: var(--text-secondary); }
+    /* The <dd> holds the value and its Edit button (a <dl> row may hold only
+       <dt> and <dd>); display: contents lets both sit in the row's grid. */
+    .ap-fact dd { display: contents; }
+    .ap-fact-v { grid-column: 2; padding: 6px 0; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .ap-fact-v.is-unset { font-weight: 500; color: var(--text-secondary); }
+    .ap-edit {
+      min-width: 48px; min-height: 44px; padding: 0 8px; background: none; border: 0; border-radius: 8px;
+      color: var(--accent-text); font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+    }
+    .ap-edit:hover { background: var(--accent-tint); }
+    /* Editing one fact in place: the label on its own line, then the field
+       with Save and Cancel. */
+    .ap-fact.is-editing { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px; padding: 10px 12px 12px; }
+    .ap-fact.is-editing dt { grid-column: 1 / -1; }
+    .ap-input {
+      width: 100%; min-height: 44px; padding: 8px 10px;
+      background: var(--bg-inset); border: 1px solid var(--border); border-radius: 10px;
+      color: var(--text-primary); font-family: inherit; font-size: 14px; font-weight: 600;
+    }
+    .ap-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-line); }
+    .ap-error { grid-column: 1 / -1; font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--red); }
+
+    .ap-panel-acts { display: flex; flex-direction: column; gap: 8px; }
+    .ap-panel-acts .pq-btn { width: 100%; }
+    .ap-hint { margin-top: -2px; text-align: center; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+
+    /* Phone and tablet: the table becomes cards, the panel opens inside the
+       chosen card. */
+    .ap-cards { list-style: none; display: none; flex-direction: column; gap: 8px; }
+    .ap-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .ap-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .ap-card-btn {
+      display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 56px; padding: 14px 16px;
+      background: none; border: 0; border-radius: 12px; color: inherit; font-family: inherit; text-align: left; cursor: pointer;
+    }
+    .ap-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .ap-card-name {
+      flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ap-card-top .pq-tag, .ap-card-top .ap-ok { flex: 0 0 auto; }
+    .ap-card-partner { font-size: 13px; line-height: 1.4; color: var(--text-secondary); }
+    .ap-card-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; margin-top: 2px; }
+    .ap-card-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+    .ap-card-stat .ap-num { font-size: 13px; }
+    .ap-card-body { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; border-top: 1px solid var(--border-subtle); }
+    @media (max-width: 1023px) {
+      .ap-tablecard, .ap-panel { display: none; }
+      .ap-cards { display: flex; }
+    }
+
+    /* Loading rows and cards. */
+    .ap-skel--name { width: 62%; height: 14px; }
+    .ap-skel--cell { width: 70%; height: 12px; }
+    .ap-skel--num { width: 24px; height: 12px; margin-left: auto; }
+    .ap-skel--tag { width: 84px; height: 22px; }
+
+    /* ── Admin › Money: Earnings, then Billing, one heading each ────── */
+    .ap-money { display: flex; flex-direction: column; gap: 32px; }
+    .ap-money-sec { min-width: 0; }
+    .ap-money-sec > .ap-title { margin-bottom: 12px; }
+    .ap-money-sec + .ap-money-sec { padding-top: 24px; border-top: 1px solid var(--border); }
+
+    /* A load that failed: one line on the page with its words and a retry. */
+    .ap-alert {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px;
+      padding: 8px 8px 8px 14px; background: var(--bg-card); border: 1px solid var(--border);
+      border-left: 3px solid var(--red); border-radius: 10px;
+      font-size: 13px; line-height: 1.45; color: var(--text-secondary);
+    }
+    .ap-alert[role="status"] { border-left-color: var(--accent); }
+    .ap-alert strong { color: var(--text-primary); }
+    .ap-fact dt label { cursor: pointer; }
+
+    /* Phone header and nav with five tabs (the admin's Properties · Money ·
+       Admin · Enforcement · Account). The 480 px nav rule near the top of
+       this sheet loses the cascade to the base .nav-label rule declared after
+       it, so five uppercase labels ran out of room ("PROPERTI…"); and with
+       "View as Partner" in the header, the signed-in name pushed the header
+       past the screen. The name is on Account and "Live" is the default; at
+       phone width the switcher keeps the room. */
+    @media (max-width: 480px) {
+      .bottom-nav [role="tablist"]:has(> :nth-child(5)) .nav-label { font-size: 9px; letter-spacing: .02em; }
+      .header-right:has(.header-switch) :is(.header-name, .conn-indicator) { display: none; }
+    }
 
   </style>
 </head>

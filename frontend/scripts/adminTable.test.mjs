@@ -163,9 +163,12 @@ test('sortRows: red first, then waiting / amber, then starts, then all good; by 
   assert.deepEqual(sortRows(rows, NOW).map(r => r.name), ['Mayfield', 'Plaza', 'Fort Mill', 'The Volaire', 'Alpha', 'Zeta']);
 });
 
-test('needsFor: the row\'s needs, red first', () => {
-  const [m] = joinOps([row('mayfield')], { ...OPS, needs: [OPS.needs[3], OPS.needs[0]], boots: OPS.boots.map(b => (b.id === 'b5' ? { ...b, where: 'car', car: { property_id: 'mayfield' } } : b)) });
+test('needsFor: the row\'s needs, red first, without the 4-hour registration need', () => {
+  const reg = { key: 'reg:mayfield', severity: 'amber', title: '1 registration waiting over 4 h', detail: '', at: ago(5 * HOUR), action: { type: 'property', id: 'mayfield' } };
+  const [m] = joinOps([row('mayfield')], { ...OPS, needs: [OPS.needs[3], reg, OPS.needs[0]], boots: OPS.boots.map(b => (b.id === 'b5' ? { ...b, where: 'car', car: { property_id: 'mayfield' } } : b)) });
   assert.deepEqual(needsFor(m).map(n => n.key), ['paid:b2', 'battery:b5']);
+  // ...and it never sets the status either: 5 h is not a day.
+  assert.equal(statusFor({ ...m, ops: { ...m.ops, needs: [reg] } }, NOW).key, 'ok');
   assert.deepEqual(needsFor({ ...m, ops: null }), []);
 });
 

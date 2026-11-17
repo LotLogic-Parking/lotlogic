@@ -68,14 +68,19 @@ export function joinOps(clientRows, ops) {
   });
 }
 
-// A silent camera and registrations over a day are needs in admin-ops too; the
+// A silent camera and waiting registrations are needs in admin-ops too; the
 // table says them with its own words ("Camera offline", "3 waiting"), so the
 // need does not take the pill first.
 const OWN_WORDS = /^(camera|reg):/;
+// admin-ops calls a registration late after 4 hours; the table's rule is a day
+// (plan Global Constraints), and the Waiting column shows the count. Its need
+// is left out of the panel so the panel never contradicts the row's status.
+const LEFT_OUT = /^reg:/;
 
 /** The row's admin-ops needs, red first (empty when admin-ops did not answer). */
 export function needsFor(row) {
-  return [...list(row?.ops?.needs)].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'red' ? -1 : 1));
+  return list(row?.ops?.needs).filter(n => !LEFT_OUT.test(String(n.key || '')))
+    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'red' ? -1 : 1));
 }
 
 function startsShort(date) {

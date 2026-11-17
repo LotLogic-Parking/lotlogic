@@ -357,6 +357,8 @@ export function resolveSectionFilter({ propertyType, features, initialSection, s
 export function ALPRPropertyDetailPage({
   propertyId,
   onBack,
+  // What the back link says: the platform admin's table is "Properties".
+  backLabel = 'Back to Lots',
   user,
   // `/auth/me.properties[].features {passes, qr, cameras}` for exactly this
   // property — ALPRPropertiesPage already holds it (that's where the list
@@ -909,7 +911,7 @@ export function ALPRPropertyDetailPage({
   return (
     <div className="page-enter">
       {/* A one-property office has no list to go back to (App.jsx officeSingle). */}
-      {onBack && <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>}
+      {onBack && <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← {backLabel}</button>}
 
       {officeHome ? (
         /* The office's header (spec 2026-11-16 Part 1): the property, its tow
