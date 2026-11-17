@@ -340,3 +340,56 @@ test('scopeCountLine: no line without a count', () => {
     assert.equal(scopeCountLine(bad), null, JSON.stringify(bad));
   }
 });
+
+// ── Part 3: enforcement paused at the property ───────────────
+const PAUSED_DETAIL = {
+  pause_id: 'p1', property_name: 'The Volaire', starts_at: '2026-11-20T23:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00',
+  ends_local: 'Sat Nov 21, 6:00 PM ET', reason: 'Pool party',
+  underlying: { verdict: 'not_registered', detail: { plate: 'ABC1234' } },
+};
+
+test('paused -> DO NOT TOW — PAUSED, the go tone (so the phone buzzes), who paused it and until when', () => {
+  const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
+  assert.equal(p.signal, 'DO NOT TOW — PAUSED');
+  assert.equal(p.tone, 'go');
+  assert.ok(p.glyph);
+  assert.equal(p.reason, 'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM ET · Pool party');
+  assert.equal(verdictPresentation('paused', { ...PAUSED_DETAIL, reason: null }, 'property').reason,
+    'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM ET');
+});
+
+test('paused: what the answer would be after the pause is a quiet second line', () => {
+  assert.equal(verdictPresentation('paused', PAUSED_DETAIL, 'property').after, 'After the pause: no parking pass here');
+  const pass = { ...PAUSED_DETAIL, underlying: { verdict: 'resident', detail: {} } };
+  assert.equal(verdictPresentation('paused', pass, 'property').after, 'After the pause: parking pass');
+  const none = { ...PAUSED_DETAIL, underlying: null };
+  assert.equal(verdictPresentation('paused', none, 'property').after, undefined);
+});
+
+test('tow_requested during a pause says the office asked for it during the pause', () => {
+  const p = verdictPresentation('tow_requested', { property_name: 'The Volaire', ref: 'T-2052', during_pause: true }, 'property');
+  assert.equal(p.signal, 'TOW REQUESTED');
+  assert.match(p.reason, /^Requested by the office during a pause/);
+  assert.match(p.reason, /T-2052/);
+});
+
+test('grouped: a paused property\'s line says DO NOT TOW — PAUSED and until when', () => {
+  const p = verdictPresentation('grouped', { matches: [
+    { property_id: 'a', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL },
+    { property_id: 'b', property_name: 'Mayfield', verdict: 'not_registered', detail: {} },
+  ] }, 'all');
+  assert.equal(p.lines[0], 'At The Volaire: DO NOT TOW — PAUSED until Sat Nov 21, 6:00 PM ET');
+});
+
+test('resolveAllScopeResult: a paused answer is never turned into "on file elsewhere"', () => {
+  const out = { verdict: 'paused', matches: [{ property_id: 'v', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL }] };
+  assert.deepEqual(resolveAllScopeResult(out, 'mayfield'), { verdict: 'paused', detail: PAUSED_DETAIL });
+  // Two paused properties: one line each, not one property's card for both.
+  const two = { verdict: 'paused', matches: [out.matches[0], { property_id: 'f', property_name: 'Fort Mill', verdict: 'paused', detail: { ...PAUSED_DETAIL, property_name: 'Fort Mill' } }] };
+  assert.equal(resolveAllScopeResult(two, 'mayfield').verdict, 'grouped');
+});
+
+test('paused copy uses no banned word', () => {
+  const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
+  for (const s of [p.signal, p.reason, p.after]) assert.doesNotMatch(s, BANNED);
+});

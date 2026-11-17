@@ -49,7 +49,24 @@ function groupedLine(match) {
     case 'pending': return 'pending approval';
     case 'expired_guest': return 'parking pass expired';
     case 'tow_requested': return `TOW REQUESTED${d.ref ? ' ' + d.ref : ''}`;
+    case 'paused': return `DO NOT TOW — PAUSED${d.ends_local ? ' until ' + d.ends_local : ''}`;
     default: return "can't read this answer";
+  }
+}
+
+// What a paused property's answer would be without the pause (contract C's
+// `underlying`), in the grouped card's quiet words: a second line under
+// DO NOT TOW — PAUSED, never a signal word of its own.
+function afterPause(underlying) {
+  switch (underlying?.verdict) {
+    case 'resident':
+    case 'guest': return 'parking pass';
+    case 'pending': return 'pending approval';
+    case 'hold': return 'on hold';
+    case 'expired_guest': return 'parking pass expired';
+    case 'tow_requested': return `tow requested${underlying.detail?.ref ? ' ' + underlying.detail.ref : ''}`;
+    case 'not_registered': return 'no parking pass here';
+    default: return '';
   }
 }
 
@@ -88,9 +105,21 @@ export function verdictPresentation(verdict, detail, scope, companyName) {
       reason += ` · ${d.property_name || 'the property'}`;
       return { signal: 'ELIGIBLE TO TOW', glyph: '!', tone: 'amber', reason };
     }
+    case 'paused': {
+      // Spec Part 3: the office stopped enforcement for a while. DO NOT TOW,
+      // in the go tone every DO NOT TOW uses (the Lookup page's short buzz).
+      let reason = `Enforcement paused by ${d.property_name || 'the property'}${d.ends_local ? ` until ${d.ends_local}` : ''}`;
+      const why = String(d.reason || '').trim();
+      if (why) reason += ` · ${why}`;
+      const after = afterPause(d.underlying);
+      return { signal: 'DO NOT TOW — PAUSED', glyph: '⏸', tone: 'go', reason, ...(after ? { after: `After the pause: ${after}` } : {}) };
+    }
     case 'tow_requested': {
       const when = d.placed_at || d.created_at;
-      const bits = [`Requested by ${d.property_name || 'the property'} office${when ? ' ' + fmtClock(when) : ''}`];
+      // An office tow request placed during a pause is the one answer a pause
+      // does not cover (contract C, `during_pause`).
+      const who = d.during_pause ? 'Requested by the office during a pause' : `Requested by ${d.property_name || 'the property'} office`;
+      const bits = [`${who}${when ? ' ' + fmtClock(when) : ''}`];
       if (d.note) bits.push(`"${d.note}"`);
       if (d.ref) bits.push(d.ref);
       return { signal: 'TOW REQUESTED', glyph: '🚨', tone: 'stop', reason: bits.join(' · ') };
@@ -148,6 +177,15 @@ export function resolveAllScopeResult(result, rememberedPropertyId) {
   if (matches.length === 0) return { verdict: 'not_registered', detail: {} };
 
   if (result?.verdict === 'grouped') return { verdict: 'grouped', detail: { matches } };
+
+  // Every match paused (contract C: a paused property is listed even when the
+  // plate is on file nowhere). The pause is the answer wherever the driver
+  // stands, so it is never turned into "on file elsewhere"; two paused
+  // properties are one line each.
+  if (result?.verdict === 'paused') {
+    if (matches.length > 1) return { verdict: 'grouped', detail: { matches } };
+    return { verdict: 'paused', detail: matches[0]?.detail || {} };
+  }
 
   if (rememberedPropertyId && !matches.some(m => m.property_id === rememberedPropertyId)) {
     const top = matches[0]; // backend orders verified-first, then by VERDICT_ORDER

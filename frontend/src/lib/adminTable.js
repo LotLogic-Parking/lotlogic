@@ -17,6 +17,7 @@
 import { displayPartnerName } from './towPartner.js';
 import { goLiveLabel, startsLater } from './officeToday.js';
 import { registrationLink } from './permitsQueue.js';
+import { fmtPauseTime } from './pause.js';
 
 export const DASH = '—';
 /** A registration is late after a day without an answer (plan Global Constraints). */
@@ -115,9 +116,10 @@ function startsShort(date) {
 
 /**
  * One status per row, the most urgent that applies:
- * Request not reached · a red need · Camera offline · N waiting over a day · an amber need · Starts <date> ·
+ * Request not reached · a red need · Camera offline · N waiting over a day · an amber need ·
+ * Paused until <time> (an enforcement pause covering the property now, Part 3) · Starts <date> ·
  * Not checked (admin-ops or /admin/clients did not answer for the row) · All good.
- * @returns {{key: 'unreached'|'needs_red'|'camera_offline'|'waiting'|'needs_amber'|'starts'|'unknown'|'ok', label: string, tone: 'red'|'amber'|'blue'|'neutral'|'green'}}
+ * @returns {{key: 'unreached'|'needs_red'|'camera_offline'|'waiting'|'needs_amber'|'paused'|'starts'|'unknown'|'ok', label: string, tone: 'red'|'amber'|'blue'|'neutral'|'green'}}
  */
 export function statusFor(row, now = Date.now()) {
   if (Number(row?.unreached_request_count) > 0) return { key: 'unreached', label: 'Request not reached', tone: 'red' };
@@ -130,10 +132,24 @@ export function statusFor(row, now = Date.now()) {
   }
   const amber = needs.find(n => n.severity === 'amber');
   if (amber) return { key: 'needs_amber', label: amber.title, tone: 'amber' };
+  const pause = activePause(row, now);
+  if (pause) return { key: 'paused', label: `Paused until ${fmtPauseTime(pause.ends_at, now)}`, tone: 'blue' };
   if (startsLater(row?.go_live_date, now)) return { key: 'starts', label: `Starts ${startsShort(row.go_live_date)}`, tone: 'blue' };
   // No health claim without the data behind it.
   if (row?.ops == null || row?._partial) return { key: 'unknown', label: 'Not checked', tone: 'neutral' };
   return { key: 'ok', label: 'All good', tone: 'green' };
+}
+
+/**
+ * `/admin/clients`' `active_pause` while it still covers now: the server sends
+ * only a pause running when it answered, and a table left open drops it once
+ * its end passes (contract C).
+ */
+export function activePause(row, now = Date.now()) {
+  const p = row?.active_pause;
+  if (!p) return null;
+  const end = ms(p.ends_at);
+  return Number.isFinite(end) && end > now ? p : null;
 }
 
 /** True when the oldest waiting registration has waited more than a day. */
@@ -148,7 +164,7 @@ const needsAttention = (row, now) => {
 };
 
 // The order statusFor checks its rules in: an office waiting on us first.
-const RANK = { unreached: 0, needs_red: 1, camera_offline: 2, waiting: 3, needs_amber: 4, starts: 5, unknown: 6, ok: 7 };
+const RANK = { unreached: 0, needs_red: 1, camera_offline: 2, waiting: 3, needs_amber: 4, paused: 5, starts: 6, unknown: 7, ok: 8 };
 
 /** Most urgent first (statusFor's order), then by name. */
 export function sortRows(rows, now = Date.now()) {
