@@ -26,20 +26,38 @@ test.describe('dashboard smoke @smoke', () => {
   test('owner can log in and navigate core tabs', async ({ page }) => {
     await loginAs(page, accounts.ownerA());
 
-    // The registration-based dashboard's bottom nav is a role="tab" bar:
-    // Lots / Analytics / Tow Truck / Earnings / Billing / Account.
-    for (const tab of ['Lots', 'Analytics', 'Billing']) {
-      const t = page.getByRole('tab', { name: new RegExp(`^${tab}$`, 'i') }).first();
-      await t.click();
+    // The bottom nav is a role="tab" bar inside the tablist "Main
+    // navigation". Which tabs it holds depends on the account
+    // (features.js navTabsFor + App.jsx's extras): a platform admin or a
+    // classic office gets Lots / Analytics / Tow truck / ..., a property
+    // manager gets Properties (or Home, with one property) / Earnings /
+    // Billing / Account since 2026-11-11 ("Managers see only their
+    // property"). So walk the tabs this account actually has rather than a
+    // hard-coded list that goes stale with every nav change.
+    const nav = page.getByRole('tablist', { name: 'Main navigation' });
+    const tabs = nav.getByRole('tab');
+    const names = (await tabs.evaluateAll(els =>
+      els.map(el => (el.getAttribute('aria-label') ?? el.textContent ?? '').trim()))) as string[];
+    // Every owner has a home tab (id `lots`, under one of its labels) and
+    // Account; a nav missing either is broken, not merely different.
+    expect(names.some(n => /^(lots|properties|home)\b/i.test(n)),
+      `owner nav must have its home tab, got ${JSON.stringify(names)}`).toBe(true);
+    expect(names.some(n => /^account\b/i.test(n)),
+      `owner nav must have Account, got ${JSON.stringify(names)}`).toBe(true);
+    for (let i = 0; i < names.length; i++) {
+      if (/^account\b/i.test(names[i])) continue; // logout test covers Account
+      await tabs.nth(i).click();
+      await expect(tabs.nth(i)).toHaveAttribute('aria-selected', 'true');
       // No unhandled error text
-      await expect(page.getByText(/something went wrong|unhandled error/i)).toHaveCount(0);
+      await expect(page.getByText(/something went wrong|unhandled error/i),
+        `the ${names[i]} tab must render without an error boundary`).toHaveCount(0);
     }
   });
 
   test('logout clears session and returns to login', async ({ page }) => {
     await loginAs(page, accounts.ownerA());
 
-    // "Sign Out" lives on the Account tab, not on the default Lots view.
+    // "Sign Out" lives on the Account tab, not on the default home view.
     await page.getByRole('tab', { name: /^account$/i }).click();
     const logout = page.getByRole('button', { name: /log ?out|sign ?out/i }).first();
     await logout.click();
