@@ -11,10 +11,12 @@
 // camera missed does not sit on the screen for ever.
 //
 // Enforcement pause (2026-11-17): while a property is paused the sweep keeps
-// its apartment grace visits (index.ts). After the pause, `seenFloor` is the
-// pause's end, so the stale clock starts no earlier than that: gate cameras
-// do not re-read parked cars, and without the floor a car that arrived early
-// in a long pause would be closed clean before bootDispatch ever saw it.
+// its apartment grace visits (index.ts), where bootDispatch could act on them
+// (holdGraceForPause). After the pause, `seenFloor` is the pause's end, so
+// the stale clock starts no earlier than that: gate cameras do not re-read
+// parked cars, and without the floor a car that arrived early in a long pause
+// would be closed clean before bootDispatch ever saw it. A property bootDispatch
+// can never act on (no exit camera, no drivers) keeps the normal stale rule.
 
 export const APARTMENT_GRACE_STALE_HOURS_DEFAULT = 24;
 
@@ -40,4 +42,15 @@ export function graceDecision(input: {
   const seen = Math.max(entered, Number.isFinite(last) ? last : entered, Number.isFinite(floor) ? floor : entered);
   const staleMs = (input.staleHours ?? APARTMENT_GRACE_STALE_HOURS_DEFAULT) * 3_600_000;
   return nowMs - seen >= staleMs ? "close" : "keep";
+}
+
+/**
+ * Keep a grace visit open through an enforcement pause? Only at an apartment
+ * that is paused (or whose pause state is unknown this tick) and where
+ * bootDispatch could dispatch it afterwards: drivers configured and an exit
+ * camera. Anywhere else nothing would act on the kept visit, and it would
+ * only sit on the office screen after the car had gone.
+ */
+export function holdGraceForPause(i: { propertyType: string | null; paused: boolean; bootable: boolean }): boolean {
+  return i.propertyType === "apartment" && i.paused && i.bootable;
 }

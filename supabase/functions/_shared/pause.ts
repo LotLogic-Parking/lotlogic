@@ -12,8 +12,10 @@
 //
 // A failed read is never "not paused". It comes back { ok: false } and each
 // caller decides what to hold (see cron-sessions-sweep/index.ts). A missing
-// table is the one error that is safe to read as "no pauses": the migration
-// has not been applied, so no pause can exist yet.
+// table (PGRST205 / 42P01) reads as "no pauses", because before migration 2
+// no pause can exist, but it is not silent: `pauseHealth` turns it into a
+// failed heartbeat (`pause_table_missing`), so a lasting miss (a PostgREST
+// schema cache that never reloaded while pauses are being written) is seen.
 
 export const PAUSE_TABLE = "enforcement_pauses";
 export const PAUSE_TZ = "America/New_York";
@@ -112,6 +114,29 @@ export async function readPauses(db: PauseDb, at: Date, opts: { recentHours?: nu
     }
   }
   return { ok: false, error: errText(last) };
+}
+
+/**
+ * The end of the pause that held something at `propertyId` that fell due at
+ * `dueAt` (a pass expiry, a violation's creation, a dispatch minute), or null.
+ * Non-null only for a pause that ended within the read's `recentHours` and
+ * only when `dueAt` is before that end: the steps that re-check a held row
+ * (is the car covered now, did it leave) apply to rows the pause held and to
+ * nothing else, so enforcement outside a pause is unchanged.
+ */
+export function heldThroughPause(read: PauseRead, propertyId: string, dueAt: string | null | undefined): string | null {
+  if (!read.ok) return null;
+  const end = read.recentlyEnded.get(propertyId);
+  if (!end) return null;
+  const due = ms(dueAt), e = ms(end);
+  return Number.isFinite(due) && Number.isFinite(e) && due < e ? end : null;
+}
+
+/** Heartbeat error for one tick's pause reads: null when every read was clean. */
+export function pauseHealth(...reads: PauseRead[]): string | null {
+  for (const r of reads) if (!r.ok) return `pause_lookup_failed: ${r.error}`;
+  for (const r of reads) if (r.ok && r.missing) return "pause_table_missing";
+  return null;
 }
 
 /** "(a,b)" for PostgREST's not.in / in filters. Ids are uuids, so no quoting is needed. */

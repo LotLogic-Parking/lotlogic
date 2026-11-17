@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { coversAt, effectiveEnd, endsLocal, excludePaused, inList, pausesFromRows, readPauses, type PauseRow } from "./pause.ts";
+import { coversAt, effectiveEnd, endsLocal, excludePaused, heldThroughPause, inList, pauseHealth, pausesFromRows, readPauses, type PauseRead, type PauseRow } from "./pause.ts";
 
 const P = (o: Partial<PauseRow>): PauseRow => ({
   id: "x", property_id: "p1", starts_at: "2026-11-20T23:00:00Z", ends_at: "2026-11-21T23:00:00Z",
@@ -127,4 +127,24 @@ Deno.test("readPauses: any other error is retried once, then reported as unknown
   assertEquals(down.calls(), 2);
   const thrown = await readPauses({ from() { throw new Error("network"); } }, at("2026-11-21T00:00:00Z"));
   assertEquals(thrown.ok, false);
+});
+
+Deno.test("heldThroughPause: only for something due before the end of a pause that ended recently", () => {
+  const now = at("2026-11-22T01:00:00Z"); // two hours after P's end
+  const read: PauseRead = { ok: true, missing: false, ...pausesFromRows([P({})], now, 24) };
+  assertEquals(heldThroughPause(read, "p1", "2026-11-21T10:00:00Z"), "2026-11-21T23:00:00Z"); // fell due during the pause
+  assertEquals(heldThroughPause(read, "p1", "2026-11-20T22:00:00Z"), "2026-11-21T23:00:00Z"); // just before it, still held by it
+  assertEquals(heldThroughPause(read, "p1", "2026-11-21T23:00:00Z"), null);                 // due at the end: never held
+  assertEquals(heldThroughPause(read, "p2", "2026-11-21T10:00:00Z"), null);                 // another property: normal rules
+  assertEquals(heldThroughPause(read, "p1", null), null);
+  const later: PauseRead = { ok: true, missing: false, ...pausesFromRows([P({})], at("2026-11-23T00:00:00Z"), 24) };
+  assertEquals(heldThroughPause(later, "p1", "2026-11-21T10:00:00Z"), null);                // outside the recent window
+  assertEquals(heldThroughPause({ ok: false, error: "x" }, "p1", "2026-11-21T10:00:00Z"), null);
+});
+
+Deno.test("pauseHealth: a failed read or a missing table fails the heartbeat; clean reads pass", () => {
+  const clean: PauseRead = { ok: true, missing: false, active: new Map(), recentlyEnded: new Map() };
+  assertEquals(pauseHealth(clean, clean), null);
+  assertEquals(pauseHealth(clean, { ok: true, missing: true, active: new Map(), recentlyEnded: new Map() }), "pause_table_missing");
+  assertEquals(pauseHealth({ ok: true, missing: true, active: new Map(), recentlyEnded: new Map() }, { ok: false, error: "timeout" }), "pause_lookup_failed: timeout");
 });

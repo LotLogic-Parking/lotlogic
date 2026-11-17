@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision } from "./grace_policy.ts";
+import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision, holdGraceForPause } from "./grace_policy.ts";
 
 const now = new Date("2026-11-12T17:00:00Z");
 const min = (n: number) => new Date(now.getTime() - n * 60_000).toISOString();
@@ -33,4 +33,11 @@ Deno.test("apartment after a pause: the stale clock starts no earlier than the p
   assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(80 * 60), lastDetectedAt: null, now, expiryMinutes: 15, seenFloor: min(24 * 60) }), "close");
   // The floor never touches a truck plaza.
   assertEquals(graceDecision({ propertyType: "truck_plaza", enteredAt: min(16), lastDetectedAt: null, now, expiryMinutes: 15, seenFloor: pauseEnd }), "close");
+});
+
+Deno.test("holdGraceForPause: only a paused apartment that bootDispatch could act on keeps its grace visits", () => {
+  assertEquals(holdGraceForPause({ propertyType: "apartment", paused: true, bootable: true }), true);
+  assertEquals(holdGraceForPause({ propertyType: "apartment", paused: true, bootable: false }), false); // no exit camera / no drivers: normal stale rule
+  assertEquals(holdGraceForPause({ propertyType: "apartment", paused: false, bootable: true }), false);
+  assertEquals(holdGraceForPause({ propertyType: "truck_plaza", paused: true, bootable: true }), false);
 });

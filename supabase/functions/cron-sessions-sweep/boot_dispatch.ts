@@ -179,7 +179,7 @@ async function sendToAll(deps: BootDeps, body: string, mediaUrls: string[]): Pro
 const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? v[0] ?? null : v ?? null);
 
 /** Properties that may dispatch: an active camera that sees cars leave. Cached per tick. */
-async function exitCameraProperties(db: SupabaseClient, propertyIds: string[]): Promise<Set<string>> {
+export async function exitCameraProperties(db: SupabaseClient, propertyIds: string[]): Promise<Set<string>> {
   if (propertyIds.length === 0) return new Set();
   const { data, error } = await db
     .from("alpr_cameras")

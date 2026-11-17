@@ -39,42 +39,7 @@ Deno.test("pastDispatchWindow", () => {
   assertEquals(pastDispatchWindow("bad", now, 10), false);
 });
 
-// ── a small PostgREST fake ───────────────────────────────────────────────
-type Row = Record<string, unknown>;
-function fakeDb(tables: Record<string, Row[]>) {
-  let seq = 0;
-  return {
-    from(table: string) {
-      const all = tables[table] ?? (tables[table] = []);
-      let rows = [...all];
-      let patch: Row | null = null;
-      const b: Record<string, unknown> = {};
-      const self = b as Record<string, (...a: unknown[]) => unknown>;
-      const finish = () => { if (patch) for (const r of rows) Object.assign(r, patch); return { data: rows, error: null }; };
-      // Any point in the chain can be awaited, as with supabase-js.
-      self.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise.resolve(finish()).then(res, rej);
-      self.select = () => Object.assign(Object.create(b), { then: (res: (v: unknown) => unknown) => Promise.resolve(finish()).then(res) });
-      self.insert = (row: unknown) => { const r = { id: `v${++seq}`, ...(row as Row) }; all.push(r); rows = [r]; return b; };
-      self.update = (p: unknown) => { patch = p as Row; return b; };
-      self.eq = (c: unknown, v: unknown) => { rows = rows.filter(r => (c === "properties.property_type" ? (r.properties as Row)?.property_type : r[c as string]) === v); return b; };
-      self.is = (c: unknown, _v: unknown) => { rows = rows.filter(r => r[c as string] == null); return b; };
-      self.in = (c: unknown, v: unknown) => { rows = rows.filter(r => (v as unknown[]).includes(r[c as string])); return b; };
-      self.lt = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) < String(v)); return b; };
-      const col = (r: Row, c: string) => (c.startsWith("properties.") ? (r.properties as Row)?.[c.slice(11)] : r[c]);
-      self.neq = (c: unknown, v: unknown) => { rows = rows.filter(r => col(r, c as string) !== v); return b; };
-      self.not = (c: unknown, op: unknown, v: unknown) => {
-        if (op !== "in") throw new Error(`fake not(${String(op)})`);
-        const list = String(v).replace(/^\(|\)$/g, "").split(",");
-        rows = rows.filter(r => !list.includes(String(r[c as string]))); return b;
-      };
-      self.limit = (n: unknown) => { rows = rows.slice(0, Number(n)); return Promise.resolve(finish()); };
-      self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
-      self.single = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
-      return b;
-    },
-  // deno-lint-ignore no-explicit-any
-  } as any;
-}
+import { fakeDb, type Row } from "./fake_db.ts";
 
 const NOW = new Date("2026-11-11T20:23:00Z");
 const APT = { property_type: "apartment", name: "Mayfield Memorial Apartments", address: "4912 Daybreak Dr" };

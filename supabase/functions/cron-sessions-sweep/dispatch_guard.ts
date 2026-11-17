@@ -8,6 +8,10 @@
 // holds a violation for up to 72 h, so without these two signals the end of
 // a pause would email a tow for a car that is gone and then, a tick later, a
 // stand-down for it: two messages for nothing (contrarian P1-3).
+//
+// The last two signals are passed only for a row the pause held
+// (pause_hold.ts pendingDecision); every other row keeps the first two, as
+// before PR D, so this stays a pause filter.
 
 export type LeftSignal = { signal: "session_exit" | "pass_exited" | "session_closed" | "violation_left"; at: string };
 
