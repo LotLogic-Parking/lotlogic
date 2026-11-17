@@ -5,16 +5,39 @@
 // because the property is optional there (picked, or matched from GPS, or
 // neither). It applies to every company's boots, not only LotLogic's: the
 // manager paused the property and the tow company has been told.
+//
+// One exception (spec Part 3, "flags already sent ... to a boot driver before
+// the pause stand"): a car LotLogic's drivers were texted to boot before the
+// pause started, still open, may still be booted. Without it the driver who
+// was sent at 5:55 PM arrives at 6:10 PM, fits the boot and is refused.
+//
+// A refusal comes after the agent has opened and fitted the boot, so it says
+// that nothing was recorded and the boot has to come off (brainstorm 7.3).
 
 import { endsLocal, type ActivePause, type PauseRead } from "../_shared/pause.ts";
 import { matchProperty, type PropertyPoint } from "./payments.ts";
 
 type Named = { id: string; name: string | null };
 export type Refusal = { code: "enforcement_paused"; message: string };
+/** An open boot dispatch (alpr_violations, action_channel boot_sms, status dispatched). */
+export type StandingDispatch = { property_id: string; plate_text: string | null; dispatched_at: string | null };
 
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+const norm = (s: unknown) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const pausedMessage = (name: string | null, p: ActivePause) =>
   `Enforcement is paused at ${name || "this property"} until ${endsLocal(p.ends_at)}.`;
+const TAKE_IT_OFF = "Nothing was recorded. Take the boot off the wheel.";
+
+/** The drivers were texted to boot this plate at this property before the pause started, and the dispatch is still open. */
+export function dispatchedBeforePause(plate: string | null | undefined, propertyId: string, pause: ActivePause, standing: StandingDispatch[]): boolean {
+  const want = norm(plate);
+  const start = Date.parse(pause.starts_at);
+  if (!want || !Number.isFinite(start)) return false;
+  return standing.some((d) => {
+    const sent = d.dispatched_at ? Date.parse(d.dispatched_at) : NaN;
+    return d.property_id === propertyId && norm(d.plate_text) === want && Number.isFinite(sent) && sent < start;
+  });
+}
 
 export function lockPauseRefusal(i: {
   propertyId: string | null;
@@ -23,25 +46,30 @@ export function lockPauseRefusal(i: {
   lon: number | null;
   active: Map<string, ActivePause>;
   points: PropertyPoint[];
+  plate?: string | null;
+  standing?: StandingDispatch[];
 }): Refusal | null {
   if (i.active.size === 0) return null;
+  const stands = (propertyId: string, p: ActivePause) => dispatchedBeforePause(i.plate, propertyId, p, i.standing ?? []);
   const nameOf = (id: string) => i.myProperties.find((p) => p.id === id)?.name ?? i.points.find((p) => p.id === id)?.name ?? null;
   if (i.propertyId) {
     const p = i.active.get(i.propertyId);
-    return p ? { code: "enforcement_paused", message: pausedMessage(nameOf(i.propertyId), p) } : null;
+    if (!p || stands(i.propertyId, p)) return null;
+    return { code: "enforcement_paused", message: `${pausedMessage(nameOf(i.propertyId), p)} ${TAKE_IT_OFF}` };
   }
   const gps = finite(i.lat) && finite(i.lon) && !(i.lat === 0 && i.lon === 0);
   if (gps) {
     // Any paused property the phone is at, not only the agent's own.
     const m = matchProperty(i.lat, i.lon, i.points.filter((p) => i.active.has(p.id)));
     const p = m.at_property && m.property_id ? i.active.get(m.property_id) : undefined;
-    return p ? { code: "enforcement_paused", message: pausedMessage(m.property, p) } : null;
+    if (!p || stands(m.property_id!, p)) return null;
+    return { code: "enforcement_paused", message: `${pausedMessage(m.property, p)} ${TAKE_IT_OFF}` };
   }
   // No property and no location: if any of the agent's properties is paused,
   // the agent has to say where they are.
   const mine = i.myProperties.find((p) => i.active.has(p.id));
   if (!mine) return null;
-  return { code: "enforcement_paused", message: `${pausedMessage(mine.name, i.active.get(mine.id)!)} Pick the property you are booting at.` };
+  return { code: "enforcement_paused", message: `${pausedMessage(mine.name, i.active.get(mine.id)!)} Nothing was recorded. Pick the property you are booting at.` };
 }
 
 /**

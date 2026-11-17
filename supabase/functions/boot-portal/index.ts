@@ -39,7 +39,7 @@ import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword
 import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt, memberFromAuthMe } from "./admin.ts";
 import { addAgent, isLotLogicAgent, listAgents, removeAgent, resendAgent, supabaseStore, type TeamCall } from "./agents.ts";
 import { joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
-import { annotatePauses, lockPauseRefusal, unknownPauseBlocks } from "./pause_gate.ts";
+import { annotatePauses, lockPauseRefusal, unknownPauseBlocks, type StandingDispatch } from "./pause_gate.ts";
 import { readPauses } from "../_shared/pause.ts";
 
 const SESSION_H = 12;
@@ -420,7 +420,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     const { properties } = await listProperties(db, me);
     if (!properties.some((p: { id: string }) => p.id === propertyId)) throw new HttpError(403, "property_not_yours", "You can't boot at that property.");
   }
-  await refuseIfPaused(db, me, propertyId, num(body.lat), num(body.lon));
+  await refuseIfPaused(db, me, propertyId, num(body.lat), num(body.lon), plate);
   const { data: partner } = await db.from("enforcement_partners").select("boot_fee_cents").eq("id", b.partner_id).single();
   const fee = partner?.boot_fee_cents ?? 0;
   if (fee <= 0) throw new HttpError(409, "no_boot_fee", "Your company has no boot fee set, so the motorist couldn't pay. Ask LotLogic to set it.");
@@ -457,7 +457,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
 }
 
 /** Enforcement pause (pause_gate.ts): no boot at a paused property. The agent's draft is kept by the screen. */
-async function refuseIfPaused(db: SupabaseClient, me: Me, propertyId: string | null, lat: number | null, lon: number | null) {
+async function refuseIfPaused(db: SupabaseClient, me: Me, propertyId: string | null, lat: number | null, lon: number | null, plate: string) {
   const pauses = await readPauses(db, new Date());
   if (!pauses.ok) {
     console.error(`lock pause_lookup_failed err=${pauses.error}`);
@@ -471,7 +471,16 @@ async function refuseIfPaused(db: SupabaseClient, me: Me, propertyId: string | n
   }
   if (pauses.active.size === 0) return;
   const { properties: mine } = await listProperties(db, me);
-  const refusal = lockPauseRefusal({ propertyId, myProperties: mine, lat, lon, active: pauses.active, points: await propertyPoints(db) });
+  // Open boot dispatches at the paused properties: one texted before the pause started stands.
+  const { data: standing, error: sErr } = await db.from("alpr_violations")
+    .select("property_id, plate_text, dispatched_at")
+    .eq("action_channel", "boot_sms").eq("status", "dispatched")
+    .in("property_id", [...pauses.active.keys()]);
+  if (sErr) console.error(`lock standing_dispatch_lookup_failed err=${sErr.message}`);
+  const refusal = lockPauseRefusal({
+    propertyId, myProperties: mine, lat, lon, active: pauses.active, points: await propertyPoints(db),
+    plate, standing: (standing ?? []) as StandingDispatch[],
+  });
   if (refusal) throw new HttpError(409, refusal.code, refusal.message);
 }
 
