@@ -28,8 +28,8 @@ const DAY = 24 * HOUR;
 const PAST_SLACK_MS = 5 * MIN;
 /** …and at most 30 days ahead. */
 const AHEAD_MS = 30 * DAY;
-/** Within this, a time is named by its weekday alone ("Sat 6:00 PM"). */
-const WEEKDAY_WINDOW_MS = 6 * DAY;
+/** Up to this many days after today, a time is named by its weekday alone ("Sat 6:00 PM"). */
+const WEEKDAY_DAYS = 6;
 
 const TZ = 'America/New_York';
 const PARTS = new Intl.DateTimeFormat('en-US', {
@@ -73,14 +73,17 @@ const clock = (p) => {
 };
 
 /**
- * "Sat 6:00 PM" within six days of now (either way), "Fri Dec 4, 6:00 PM"
- * further out. '' for nothing.
+ * "Sat 6:00 PM" from today through the sixth day after it (in Charlotte), where
+ * a weekday names one day only; "Fri Dec 4, 6:00 PM" before today or further
+ * out. '' for nothing.
  */
 export function fmtPauseTime(value, now = Date.now()) {
   const t = typeof value === 'number' ? value : ms(value);
   if (!Number.isFinite(t)) return '';
   const p = etParts(t);
-  if (Math.abs(t - now) < WEEKDAY_WINDOW_MS) return `${WEEKDAYS[p.wd]} ${clock(p)}`;
+  const n = etParts(now);
+  const days = Math.round((Date.UTC(p.y, p.mo - 1, p.d) - Date.UTC(n.y, n.mo - 1, n.d)) / DAY);
+  if (days >= 0 && days <= WEEKDAY_DAYS) return `${WEEKDAYS[p.wd]} ${clock(p)}`;
   return `${WEEKDAYS[p.wd]} ${MONTHS[p.mo - 1]} ${p.d}, ${clock(p)}`;
 }
 
@@ -284,4 +287,26 @@ export function pauseBanners(pauses, now = Date.now()) {
 export function pauseBanner(pauses, now = Date.now()) {
   const [first] = pauseBanners(pauses, now);
   return first ? { text: first.text, pauseId: first.pauseId, canEnd: first.action === 'end' } : null;
+}
+
+/**
+ * The tow company's Requests tab: each property group gains `pauses` (its
+ * banners, the running one first). A property that is paused but has no open
+ * request still gets a group, at the top, so the pause is never missed.
+ */
+export function withPauses(groups, pauses, now = Date.now()) {
+  const list = Array.isArray(pauses) ? pauses : [];
+  const byProperty = new Map();
+  for (const p of list) {
+    if (!showing(p, now)) continue;
+    const id = p.property_id || '';
+    if (!byProperty.has(id)) byProperty.set(id, []);
+    byProperty.get(id).push(p);
+  }
+  const known = new Set((groups || []).map(g => g.propertyId));
+  const extra = [...byProperty.entries()]
+    .filter(([id]) => !known.has(id))
+    .map(([id, ps]) => ({ propertyId: id, propertyName: ps[0].property_name || id, propertyVerified: true, count: 0, items: [] }))
+    .sort((a, b) => a.propertyName.localeCompare(b.propertyName));
+  return [...extra, ...(groups || [])].map(g => ({ ...g, pauses: pauseBanners(byProperty.get(g.propertyId) || [], now) }));
 }

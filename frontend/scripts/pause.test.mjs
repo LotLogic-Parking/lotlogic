@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAX_HOURS, REASON_MAX, etWallToMs, fromInputValue, toInputValue, pausePresets, validatePause, cleanReason,
-  pauseBody, pauseErrorText, pauseSummary, pauseBanner, pauseBanners, pauseLine, fmtPauseTime, durationText,
+  pauseBody, pauseErrorText, pauseSummary, pauseBanner, pauseBanners, pauseLine, fmtPauseTime, durationText, withPauses,
 } from '../src/lib/pause.js';
 
 const HOUR = 3600_000;
@@ -143,6 +143,11 @@ test('fmtPauseTime: a weekday within the week, the date further out', () => {
   assert.equal(fmtPauseTime('2026-11-23T04:59:00+00:00', FRI_2PM), 'Sun 11:59 PM');
   assert.equal(fmtPauseTime('2026-12-04T23:00:00+00:00', FRI_2PM), 'Fri Dec 4, 6:00 PM');
   assert.equal(fmtPauseTime('', FRI_2PM), '');
+  // Monday afternoon to the coming Sunday night: still one week, so the weekday.
+  assert.equal(fmtPauseTime('2026-11-23T04:59:00+00:00', at('2026-11-16T19:30:00Z')), 'Sun 11:59 PM');
+  assert.equal(fmtPauseTime('2026-11-23T23:00:00+00:00', at('2026-11-16T19:30:00Z')), 'Mon Nov 23, 6:00 PM');
+  // Earlier than today: the date, never a weekday that could be next week's.
+  assert.equal(fmtPauseTime('2026-11-19T23:00:00+00:00', FRI_2PM), 'Thu Nov 19, 6:00 PM');
 });
 
 test('durationText', () => {
@@ -217,4 +222,21 @@ test('no word for the pass but "parking pass", and no money', () => {
     ...pausePresets(FRI_2PM).flatMap(p => [p.label, p.hint]),
   ];
   for (const t of texts) assert.doesNotMatch(t, BANNED, t);
+});
+
+test('withPauses: each property\'s pause lines go on its group; a paused property with no request gets its own group first', () => {
+  const groups = [
+    { propertyId: 'm', propertyName: 'Mayfield', propertyVerified: true, count: 1, items: [{ id: 'r1' }] },
+    { propertyId: 'v', propertyName: 'The Volaire', propertyVerified: true, count: 2, items: [{ id: 'r2' }, { id: 'r3' }] },
+  ];
+  const fort = { ...SCHEDULED, id: 'p3', property_id: 'f', property_name: 'Fort Mill Townhomes II', starts_at: '2026-11-21T23:00:00+00:00', ends_at: '2026-11-22T12:00:00+00:00' };
+  const out = withPauses(groups, [SCHEDULED, ACTIVE, fort, { ...ACTIVE, id: 'gone', status: 'ended' }], FRI_2PM);
+  assert.deepEqual(out.map(g => g.propertyId), ['f', 'm', 'v']);
+  assert.deepEqual(out[0].items, []);
+  assert.equal(out[0].count, 0);
+  assert.deepEqual(out[0].pauses.map(p => p.text), ['Enforcement pause scheduled Sat 6:00 PM – Sun 7:00 AM']);
+  assert.deepEqual(out[1].pauses, []);
+  assert.deepEqual(out[2].pauses.map(p => p.kind), ['active', 'scheduled']);
+  // No pauses: the groups as they were, each with an empty list.
+  assert.deepEqual(withPauses(groups, null, FRI_2PM).map(g => g.pauses.length), [0, 0]);
 });

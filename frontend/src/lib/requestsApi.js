@@ -232,6 +232,25 @@ export const getPresence = (propertyId) =>
  */
 export const getPropertySummary = (propertyId) => get(`/apartment/properties/${seg(propertyId)}/summary`);
 
+// ── Enforcement pauses (spec 2026-11-16 Part 3, backend contract C) ──
+// Each answers `{pause}` (or `{pauses}`); refusals carry `err.code` (e.g.
+// `too_long`, `overlaps` with `err.body.earliest_start_local`).
+
+/** GET /apartment/properties/{id}/pauses → `{pauses}`: this property's active and scheduled pauses. */
+export const listPauses = (propertyId) => get(`/apartment/properties/${seg(propertyId)}/pauses`);
+
+/** GET /apartment/pauses → `{pauses}`: every active or scheduled pause the caller can see. */
+export const listAllPauses = () => get('/apartment/pauses');
+
+/** POST /apartment/properties/{id}/pauses `{starts_at|null, ends_at, reason|null}` → 201 (or a repeat's 200) `{pause}` */
+export const createPause = (propertyId, body) => post(`/apartment/properties/${seg(propertyId)}/pauses`, body);
+
+/** POST /apartment/properties/{id}/pauses/{pause}/end → `{pause}` (End now; an active pause only) */
+export const endPause = (propertyId, pauseId) => post(`/apartment/properties/${seg(propertyId)}/pauses/${seg(pauseId)}/end`, {});
+
+/** POST /apartment/properties/{id}/pauses/{pause}/cancel → `{pause}` (a scheduled pause only) */
+export const cancelPause = (propertyId, pauseId) => post(`/apartment/properties/${seg(propertyId)}/pauses/${seg(pauseId)}/cancel`, {});
+
 /** GET /apartment/passes/metrics?property_id=&days= → `{source, registrations, traffic}` (days 1..90). */
 export const getPassMetrics = (propertyId, days) =>
   get(`/apartment/passes/metrics${query({ property_id: propertyId, days })}`);
@@ -308,7 +327,8 @@ export const requestsApi = {
   inviteMember, updateMember, removeMember, approveMember, declineMember,
   joinProperty, resendJoinRequest, createApartmentProperty, updateApartmentProperty,
   archiveApartmentProperty, listPartnerProperties, verifyPartnerProperty,
-  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPropertySummary, getPassMetrics, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
+  rejectPartnerProperty, getLotStatus, getPlateTimeline, getPassHistory, getPermits, getPresence, getPropertySummary, getPassMetrics,
+  listPauses, listAllPauses, createPause, endPause, cancelPause, getSlackStatus, slackInstallLink, listSlackIdentities, updateSlackIdentity,
   deleteSlackIdentity, setSlackFeedChannel, getRequestAction, postRequestAction,
   listTeam, inviteTeammate, patchTeammate, removeTeammate, resendTeammate, assignProperties,
 };

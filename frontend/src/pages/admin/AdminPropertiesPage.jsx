@@ -4,10 +4,12 @@ import { opsFetch, REFRESH_MS } from '../../lib/ops.js';
 import { ago } from '../../lib/enforcement.js';
 import { goLiveLabel } from '../../lib/officeToday.js';
 import {
-  DASH, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
+  DASH, activePause, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
 } from '../../lib/adminTable.js';
+import { cleanReason, fmtPauseTime } from '../../lib/pause.js';
 import { lazyPage } from '../../lib/lazyPage.js';
 import { ErrorBoundary } from '../../ui/ErrorBoundary.jsx';
+import { NoBreakTimes } from '../../ui/NoBreakTimes.jsx';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
 
 const ALPRPropertyDetailPage = lazyPage(() => import('../ALPRPropertyDetailPage.jsx'));
@@ -23,9 +25,10 @@ const ALPRPropertyDetailPage = lazyPage(() => import('../ALPRPropertyDetailPage.
 // Styles: .ap-* in dashboard.html (theme tokens only), with .pq-* buttons,
 // tags and search, and .req-chip for the filter chips.
 
-/** The status pill: red and the waiting / amber needs are tags; Starts and Not checked are neutral; All good is a dot and the words. */
+/** The status pill: red and the waiting / amber needs are tags; Paused is the blue tag; Starts and Not checked are neutral; All good is a dot and the words. */
 function Status({ status }) {
   if (status.tone === 'green') return <span className="ap-ok">{status.label}</span>;
+  if (status.key === 'paused') return <span className="pq-tag pq-tag--info ap-tag-strong" title={status.label}>{status.label}</span>;
   if (status.tone === 'red') return <span className="pq-tag pq-tag--red" title={status.label}>{status.label}</span>;
   if (status.tone === 'amber') return <span className="pq-tag pq-tag--amber ap-tag-strong" title={status.label}>{status.label}</span>;
   return <span className="pq-tag pq-tag--neutral">{status.label}</span>;
@@ -136,8 +139,17 @@ function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, ori
   };
   const isPlaza = row.property_type === 'truck_plaza';
   const manager = managerName(row);
+  const pause = activePause(row);
+  const pauseReason = cleanReason(pause?.reason);
   return (
     <>
+      {/* Part 3: a pause running now, with its reason (the pill has only the time). */}
+      {pause && (
+        <p className="ap-pause" data-testid="ap-pause">
+          <NoBreakTimes text={`Enforcement paused until ${fmtPauseTime(pause.ends_at)}`} />
+          {pauseReason && <><span className="ap-pause-sep"> · </span><span className="ap-pause-reason">{pauseReason}</span></>}
+        </p>
+      )}
       <Needs row={row} onShowBoot={onShowBoot} />
       <dl className="ap-facts">
         {/* A row built from admin-ops alone does not know its tow partner: a dash, not "None yet". */}
@@ -438,7 +450,6 @@ export function AdminPropertiesPage({
                 </div>
                 <button type="button" className="ap-panel-close" aria-label={`Close ${selected.name}`} onClick={() => setSelectedId(null)}>✕</button>
               </div>
-              {/* Part 3: an active pause shows here, between the head and the body. */}
               <div className="ap-panel-body">
                 <Details row={selected} {...detailProps} />
               </div>
