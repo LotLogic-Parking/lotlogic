@@ -118,7 +118,10 @@ test.describe('public signup @portal', () => {
     await uiLogin(page, frontendOrigin(), email, acct.signup.password);
     await expect(page.getByRole('alert')).toBeVisible();
     await uiLogin(page, frontendOrigin(), email, newPassword);
-    await expect(page.getByRole('tab', { name: /^properties$/i }).first()).toBeVisible({ timeout: 15_000 });
+    // Signed in = the nav is up. Anchored on Account, the one tab every role
+    // has under a fixed label: the first tab is relabelled once the property
+    // list loads ("Properties", then "Home" for an office with one property).
+    await expect(page.getByRole('tab', { name: 'Account', exact: true }).first()).toBeVisible({ timeout: 15_000 });
   });
 });
 
