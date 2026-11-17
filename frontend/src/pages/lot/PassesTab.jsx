@@ -180,7 +180,7 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
 
   return (
     <DocCacheContext.Provider value={docCache}>
-      <section ref={rootRef} className="ls ls--blue" aria-label="Passes" data-testid="passes-tab">
+      <section ref={rootRef} className="ls ls--blue ls-passes" aria-label="Passes" data-testid="passes-tab">
         <div className="ls-head">
           <h2 className="pq-title">Passes{propertyName ? ` · ${propertyName}` : ''}</h2>
           <div className="ls-asof">
