@@ -80,3 +80,15 @@ Deno.test("lock with no property and no GPS: a car sent to the agent before the 
   assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", standing: [{ ...before[0], dispatched_at: "2026-11-20T23:05:00Z" }] })?.code, "enforcement_paused");
   assertEquals(lockPauseRefusal({ ...base, plate: "XYZ789", standing: before })?.code, "enforcement_paused");
 });
+
+Deno.test("lock during a pause: a dispatch answered DONE stands only while the reply is recent (BOOT_REPLY_HOURS)", () => {
+  const now = new Date("2026-11-21T01:00:00Z");
+  const sent = { property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-20T22:55:00Z", status: "resolved", action_taken: "boot" };
+  assertEquals(dispatchedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...sent, resolved_at: "2026-11-20T23:10:00Z" }], now), true);
+  // The same car booted weeks ago and back during the pause: refused, it is new enforcement.
+  const old = { ...sent, dispatched_at: "2026-10-30T15:00:00Z", resolved_at: "2026-10-30T15:20:00Z" };
+  assertEquals(dispatchedBeforePause("ABC1234", "mayfield", pause("mayfield"), [old], now), false);
+  assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS, plate: "ABC1234", standing: [old], now })?.code, "enforcement_paused");
+  // An open dispatch is not windowed here: the sweep dismisses a stale one (BOOT_STALE_HOURS), which then refuses.
+  assertEquals(dispatchedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...sent, status: "dispatched", action_taken: null }], now), true);
+});

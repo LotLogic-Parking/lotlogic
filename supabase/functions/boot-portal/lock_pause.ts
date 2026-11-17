@@ -8,7 +8,9 @@
 //   • Otherwise the boot dispatches at the paused properties are read, open
 //     or answered DONE: one texted before the pause started still goes ahead
 //     (pause_gate.ts dispatchedBeforePause). A failed read of them counts as
-//     none, so the boot is refused, not allowed.
+//     none, so the boot is refused, not allowed. The read covers the last
+//     STANDING_LOOKBACK_DAYS only: a dispatch that can still stand is hours
+//     old, and years of old ones must not fill PostgREST's row cap first.
 //   • A refusal is 409 enforcement_paused with the pause_gate.ts message.
 
 import { HttpError } from "../_shared/boot.ts";
@@ -17,6 +19,9 @@ import { lockPauseRefusal, unknownPauseBlocks, type StandingDispatch } from "./p
 import type { PropertyPoint } from "./payments.ts";
 
 type Named = { id: string; name: string | null };
+
+/** Far wider than any dispatch that can still stand (open: BOOT_STALE_HOURS; DONE: BOOT_REPLY_HOURS). */
+export const STANDING_LOOKBACK_DAYS = 7;
 
 export async function refuseIfPaused(db: PauseDb, i: {
   now: Date;
@@ -44,13 +49,14 @@ export async function refuseIfPaused(db: PauseDb, i: {
   const mine = await i.myProperties();
   // Boot dispatches at the paused properties, open or answered DONE: one texted before the pause started goes ahead.
   const { data: standing, error: sErr } = await db.from("alpr_violations")
-    .select("property_id, plate_text, dispatched_at, status, action_taken")
+    .select("property_id, plate_text, dispatched_at, status, action_taken, resolved_at")
     .eq("action_channel", "boot_sms").in("status", ["dispatched", "resolved"])
-    .in("property_id", [...pauses.active.keys()]);
+    .in("property_id", [...pauses.active.keys()])
+    .gte("dispatched_at", new Date(i.now.getTime() - STANDING_LOOKBACK_DAYS * 86_400_000).toISOString());
   if (sErr) console.error(`lock standing_dispatch_lookup_failed err=${sErr.message}`);
   const refusal = lockPauseRefusal({
     propertyId: i.propertyId, myProperties: mine, lat: i.lat, lon: i.lon, active: pauses.active, points: await i.points(),
-    plate: i.plate, standing: (standing ?? []) as StandingDispatch[],
+    plate: i.plate, standing: (standing ?? []) as StandingDispatch[], now: i.now,
   });
   if (refusal) throw new HttpError(409, refusal.code, refusal.message);
 }

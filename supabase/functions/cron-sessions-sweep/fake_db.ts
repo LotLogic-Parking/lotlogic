@@ -3,10 +3,11 @@
 // given per table; update() patches the rows the chain has narrowed to.
 // Timestamps compare as strings, so tests use one ISO format throughout.
 // failUpdates names tables whose update() returns an error and changes nothing;
-// failReads, tables whose reads return an error.
+// failReads, tables whose reads return an error. maxRows caps every read,
+// as PostgREST's max-rows does (the first rows in table order).
 
 export type Row = Record<string, unknown>;
-export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: string[]; failReads?: string[] } = {}) {
+export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: string[]; failReads?: string[]; maxRows?: number } = {}) {
   let seq = 0;
   return {
     from(table: string) {
@@ -19,7 +20,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
         if (patch && opts.failUpdates?.includes(table)) return { data: null, error: { message: `fake update failed on ${table}` } };
         if (!patch && opts.failReads?.includes(table)) return { data: null, error: { message: `fake read failed on ${table}` } };
         if (patch) for (const r of rows) Object.assign(r, patch);
-        return { data: rows, error: null };
+        return { data: !patch && opts.maxRows != null ? rows.slice(0, opts.maxRows) : rows, error: null };
       };
       // Any point in the chain can be awaited, as with supabase-js.
       self.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise.resolve(finish()).then(res, rej);
@@ -31,6 +32,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
       self.in = (c: unknown, v: unknown) => { rows = rows.filter(r => (v as unknown[]).includes(r[c as string])); return b; };
       self.lt = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) < String(v)); return b; };
       self.lte = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) <= String(v)); return b; };
+      self.gte = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) >= String(v)); return b; };
       self.gt = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) > String(v)); return b; };
       const col = (r: Row, c: string) => (c.startsWith("properties.") ? (r.properties as Row)?.[c.slice(11)] : r[c]);
       self.neq = (c: unknown, v: unknown) => { rows = rows.filter(r => col(r, c as string) !== v); return b; };

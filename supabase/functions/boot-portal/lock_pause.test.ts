@@ -69,6 +69,23 @@ Deno.test("lock wiring: a dispatch texted before the pause that the driver alrea
   await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [bootSms({ status: "resolved", action_taken: "boot" })] }), "mayfield").p;
 });
 
+Deno.test("lock wiring: an old dispatch of the same plate answered DONE long ago does not let a new boot through during the pause", async () => {
+  // Same car, same property, booted three weeks ago (resolved as a boot). It is back during the pause: that is
+  // new enforcement, so the pause holds it. Only a DONE within the last BOOT_REPLY_HOURS counts.
+  const old = bootSms({ status: "resolved", action_taken: "boot", dispatched_at: "2026-10-30T15:00:00.000Z", resolved_at: "2026-10-30T15:20:00.000Z" });
+  assertEquals((await refusal(run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [old] }), "mayfield").p)).code, "enforcement_paused");
+  // Answered DONE 10 minutes after the pause began, for a text sent 5 minutes before it: stands.
+  const recent = bootSms({ status: "resolved", action_taken: "boot", resolved_at: "2026-11-20T23:10:00.000Z" });
+  await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [recent] }), "mayfield").p;
+});
+
+Deno.test("lock wiring: a pre-pause dispatch is found even with a long history of old boot dispatches at the property", async () => {
+  // PostgREST caps a read (max-rows); the standing read is bounded by time so old rows cannot crowd out the one that matters.
+  const history = Array.from({ length: 1200 }, (_, i) => bootSms({ plate_text: `OLD${i}`, status: "resolved", action_taken: "boot", dispatched_at: "2026-09-01T12:00:00.000Z", resolved_at: "2026-09-01T12:30:00.000Z" }));
+  const db = fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [...history, bootSms({})] }, { maxRows: 1000 });
+  await run(db, "mayfield").p;
+});
+
 Deno.test("lock wiring: the dispatch does not stand if sent after the start, closed, another channel, another plate or another property", async () => {
   const refused = async (v: Row) =>
     (await refusal(run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [v] }), "mayfield").p)).code;
