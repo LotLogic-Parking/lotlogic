@@ -103,7 +103,7 @@ jobs:
       # so they need no BASE_URL and no credentials.
       - name: Self-serving e2e specs
         working-directory: tests
-        run: npx playwright test e2e/pay2park-visit.spec.ts e2e/error-reporting.spec.ts e2e/dashboard-qr.spec.ts e2e/agent.spec.ts --project=chromium-desktop
+        run: npx playwright test e2e/pay2park-visit.spec.ts e2e/error-reporting.spec.ts e2e/dashboard-qr.spec.ts e2e/agent.spec.ts e2e/parking-log-date-bounds.spec.ts e2e/pay2park-dashboard.spec.ts e2e/partner-fee-editor.spec.ts --project=chromium-desktop
 
       # Backgrounded with its stdout/stderr redirected to a file: a child that
       # keeps the step's output pipe open makes the step itself hang.
@@ -196,9 +196,21 @@ jobs:
         with:
           node-version: '20'
           # tests/package-lock.json IS tracked (root .gitignore re-includes it via
-          # `!tests/package-lock.json`), so enable npm caching keyed on it.
+          # `!tests/package-lock.json`), so enable npm caching keyed on it --
+          # and on the frontend's, which this job installs from too.
           cache: 'npm'
-          cache-dependency-path: tests/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            tests/package-lock.json
+
+      # BASE_URL is the preview, but the self-serving specs do not use it:
+      # fixtures/buildAndServeFrontend.ts runs `npm run build` in frontend/ and
+      # serves the result, and that build needs frontend/node_modules (esbuild).
+      # Without this step every one of them fails in beforeAll with
+      # "Cannot find package 'esbuild'".
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
 
       - name: Install deps
         # Strict install from the committed lockfile — a broken/out-of-date
@@ -378,8 +390,9 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      # The a11y sweep's `upsell chips @a11y` block serves frontend/dist,
-      # so it must exist before `npm run test:a11y` (same as the e2e job).
+      # A build check before the suite. The specs no longer need this dist/:
+      # every self-serving one, the a11y sweep's `upsell chips @a11y` block
+      # included, builds a private copy (fixtures/buildAndServeFrontend.ts).
       - name: Build frontend
         working-directory: frontend
         run: npm run build

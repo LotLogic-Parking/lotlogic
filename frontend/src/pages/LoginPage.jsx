@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { authLogin, authRequestPasswordReset } from '../lib/api.js';
+import { authLogin, authRequestPasswordReset, loginErrorMessage } from '../lib/api.js';
 import { RETURN_TO_KEY, returnToTarget } from '../lib/deepLink.js';
 import { sessionNames } from '../lib/partnerTeam.js';
 
@@ -63,9 +63,7 @@ export function LoginPage({ onLogin }) {
       });
       replayReturnTo();
     } catch (err) {
-      if (err.status === 401) setError('Invalid email or password.');
-      else if (err.status === 403) setError(err.message || 'Password not set. Use "Email me a setup link" below.');
-      else setError(err.message || "Can't connect right now. Check your connection and try again.");
+      setError(loginErrorMessage(err));
     } finally { setLoading(false); }
   }
 

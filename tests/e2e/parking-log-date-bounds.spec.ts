@@ -21,39 +21,24 @@
  * Run: cd tests && npx playwright test parking-log-date-bounds --project=chromium-desktop
  */
 import { test, expect, type Page } from '@playwright/test';
-import http from 'node:http';
-import fs from 'node:fs';
 import path from 'node:path';
-import type { AddressInfo } from 'node:net';
+import { buildAndServeFrontend } from '../fixtures/buildAndServeFrontend';
 
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
 const PROPERTY_ID = '33333333-3333-4333-8333-333333333333';
 
-let server: http.Server;
+// The BUILT frontend, not the source tree: `dashboard.html` loads
+// `/dashboard.js`, which exists only in the esbuild output, so a server over
+// raw `frontend/` 404s the entry module and the page never boots.
 let origin: string;
+let closeServer: () => Promise<void>;
 
 test.beforeAll(async () => {
-  server = http.createServer((req, res) => {
-    const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-    const file = path.join(FRONTEND_DIR, pathname.replace(/^\/+/, ''));
-    if (!file.startsWith(FRONTEND_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('not found');
-      return;
-    }
-    const type = file.endsWith('.html') ? 'text/html; charset=utf-8'
-      : file.endsWith('.js') ? 'text/javascript; charset=utf-8'
-      : file.endsWith('.css') ? 'text/css; charset=utf-8'
-      : 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type });
-    fs.createReadStream(file).pipe(res);
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  ({ origin, close: closeServer } = await buildAndServeFrontend(FRONTEND_DIR));
 });
 
 test.afterAll(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeServer();
 });
 
 /** Boot the real dashboard file so its top-level helpers are defined. */
