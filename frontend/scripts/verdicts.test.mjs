@@ -264,6 +264,29 @@ test('resolveAllScopeResult: a pending match at a DIFFERENT property is on_file_
   assert.equal(verdictPresentation(r.verdict, r.detail, 'all').tone, 'amber');
 });
 
+test('resolveAllScopeResult: a camera tow notice sent before a pause at ANOTHER property is not "on file" there (no pass or hold)', () => {
+  // Contract C: a paused property where a flag was sent before the pause is kept as a not_registered match
+  // with flagged_before_pause, though the plate has no parking pass or hold there. The remembered lot is
+  // not among the matches, so the plate is on file at neither: never "Pass or hold is for <there>".
+  const r = resolveAllScopeResult({
+    verdict: 'not_registered',
+    matches: [{ property_id: 'p2', property_name: 'The Volaire', verdict: 'not_registered',
+      detail: { plate: 'ABC1234', flagged_before_pause: true, camera_flag: { kind: 'tow', sent_local: 'Thu Oct 8, 9:00 AM ET' } } }],
+  }, 'p1', 'Mayfield');
+  assert.notEqual(r.verdict, 'on_file_elsewhere');
+  const p = verdictPresentation(r.verdict, r.detail, 'all');
+  assert.doesNotMatch(JSON.stringify(p), /Pass or hold is for/);
+  assert.deepEqual(p.lines, [
+    'At The Volaire: no parking pass or hold · tow notice sent before the pause',
+    'At Mayfield: no parking pass or hold',
+  ]);
+  // At the remembered lot itself: its own ELIGIBLE TO TOW card and the stands line.
+  const own = resolveAllScopeResult({ verdict: 'not_registered', matches: [{ property_id: 'p2', property_name: 'The Volaire', verdict: 'not_registered',
+    detail: { flagged_before_pause: true, camera_flag: { kind: 'tow' } } }] }, 'p2');
+  assert.equal(own.verdict, 'not_registered');
+  assert.equal(verdictPresentation(own.verdict, own.detail, 'all').stands, 'Tow notice sent before the pause — still stands');
+});
+
 test('resolveAllScopeResult: no remembered property -> no on_file_elsewhere override, backend result stands', () => {
   const r = resolveAllScopeResult({
     verdict: 'hold',

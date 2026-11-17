@@ -184,6 +184,18 @@ test.describe('Lot status tab @lot-status', () => {
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/pause-screens', `pause-lot-status-${test.info().project.name}.png`), fullPage: true });
   });
 
+  test('a pause with only a tow request the office placed during it: listed, and the top line is not DO NOT TOW', async ({ page }) => {
+    // Contract C counts only what was in motion before the pause, but the office's request during it goes ahead too.
+    const pause = { id: 'p1', starts_at: '2026-10-15T22:00:00Z', ends_at: '2026-10-16T22:00:00Z', ends_local: 'Fri Oct 16, 6:00 PM ET', reason: null, open_before_pause_count: 0 };
+    const [, abc] = lotStatusFixture().towable;
+    const paused = { ...lotStatusFixture(), pause, towable: [{ ...abc, pause_note: 'during_pause' }], counts: { ...lotStatusFixture().counts, towable: 1 } };
+    await serveLotStatus(page, { status: paused });
+    await mountTab(page);
+    await expect(page.getByTestId('ls-pause')).toHaveText('Enforcement paused until Fri 6:00 PM — tow requests from the office still stand');
+    await expect(page.locator('.ls-row', { hasText: abc.plate }).getByTestId('ls-pause-note')).toHaveText('Requested by the office during the pause');
+    await expect(page.locator('body')).not.toContainText('DO NOT TOW — enforcement paused');
+  });
+
   test('a capped list says how many more there are', async ({ page }) => {
     const big = lotStatusFixture();
     big.counts.registered_long_term = 60;

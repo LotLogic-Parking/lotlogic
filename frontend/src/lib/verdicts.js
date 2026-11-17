@@ -239,6 +239,16 @@ export function resolveAllScopeResult(result, rememberedPropertyId, rememberedPr
   }
 
   if (rememberedPropertyId && !matches.some(m => m.property_id === rememberedPropertyId)) {
+    // A not_registered match is only ever a paused property's camera flag
+    // sent before the pause (contract C, flagged_before_pause): the plate has
+    // no parking pass or hold there, so it is not "on file" there. Say both
+    // lots plainly, as the paused case above does.
+    if (matches.every(m => m.verdict === 'not_registered')) {
+      return { verdict: 'grouped', detail: { matches: [
+        ...matches,
+        { property_id: rememberedPropertyId, property_name: rememberedPropertyName || 'your property', verdict: 'not_registered', detail: {} },
+      ] } };
+    }
     const top = matches[0]; // backend orders verified-first, then by VERDICT_ORDER
     return { verdict: 'on_file_elsewhere', detail: { property_id: top.property_id, property_name: top.property_name } };
   }

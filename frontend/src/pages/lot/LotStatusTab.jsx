@@ -151,7 +151,7 @@ export function LotStatusTab({ propertyId, propertyName = '', onOpenRow = () => 
   // in place of an empty towable list, so it never reads as "nothing to tow"
   // or missing data. While it is on, `towable` lists only the cars something
   // was already in motion for before the pause (Gabe 2026-11-17).
-  const pause = lotStatusPause(data?.pause, asOf ? Date.parse(asOf) : Date.now());
+  const pause = lotStatusPause(data?.pause, asOf ? Date.parse(asOf) : Date.now(), data?.towable);
 
   const exportCsv = useCallback(() => {
     if (!data) return;

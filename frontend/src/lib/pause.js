@@ -462,7 +462,7 @@ export function isSamePause(conflict, body) {
  * pause is on, `towable` lists only the cars something was already in motion
  * for (contract C), each with its `pause_note`.
  */
-export function lotStatusPause(pause, now = Date.now()) {
+export function lotStatusPause(pause, now = Date.now(), towable = []) {
   if (!pause) return null;
   const until = fmtPauseTime(pause.ends_at, now) || String(pause.ends_local || '').replace(/ ET$/, '');
   // Something already in motion before the pause still goes ahead (Gabe
@@ -470,6 +470,15 @@ export function lotStatusPause(pause, now = Date.now()) {
   if (Number(pause.open_before_pause_count) > 0) {
     return {
       title: `Enforcement paused${until ? ` until ${until}` : ''} — requests placed before the pause still stand`,
+      reason: cleanReason(pause.reason),
+    };
+  }
+  // The count leaves out a tow request the office placed during the pause
+  // (it is new), but that request goes ahead too, and its car is listed as
+  // towable: the line above that list must not say DO NOT TOW.
+  if (Array.isArray(towable) && towable.some(t => t?.pause_note)) {
+    return {
+      title: `Enforcement paused${until ? ` until ${until}` : ''} — tow requests from the office still stand`,
       reason: cleanReason(pause.reason),
     };
   }

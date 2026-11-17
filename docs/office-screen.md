@@ -169,7 +169,9 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
   with "DO NOT TOW — enforcement paused until …" (and says it in place of the empty
   towable list); when something was in motion before the pause it reads "Enforcement
   paused until … — requests placed before the pause still stand" and lists only those
-  cars, each with its note.
+  cars, each with its note. When the only car listed is one the office asked to tow
+  during the pause (which the count leaves out, as it is new), it reads "Enforcement
+  paused until … — tow requests from the office still stand".
 - **What a pause holds (Gabe, 2026-11-17, binding).** A pause holds only *new*
   enforcement. Anything already in motion before the pause's start still goes ahead
   during it: an office tow request placed before the pause (one placed during it goes
@@ -198,6 +200,7 @@ by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right
 | 2 | A camera flag whose tow notice or boot text went out before the pause keeps its normal Lookup card, with "Tow notice (Boot text) sent before the pause (<time>) — still stands"; grouped lines gain "· placed before the pause" and the like. | The same decision, for what the cameras had already sent. |
 | 3 | The pause sheet's first line says "No new tows or boots", and the box says how many open tow requests and tow notices from before will still go ahead. | The office should know, before Save, that a pause does not call back what is already out. |
 | 4 | The Lot status tab's pause line and towable list follow `open_before_pause_count` and each car's `pause_note`. | During a pause the list holds only the cars already in motion; a blanket DO NOT TOW above them would contradict the list. |
+| 5 | Review: a car listed only for a tow request placed during the pause no longer sits under "DO NOT TOW — enforcement paused"; and a company-wide Lookup from another lot that finds only a tow notice sent before a pause elsewhere is the grouped card ("no parking pass or hold · tow notice sent before the pause" there, and the driver's own lot's line), not "On file at …: Pass or hold is for …". | The backend's `open_before_pause_count` leaves out requests placed during the pause, though they go ahead; and that plate has no parking pass or hold anywhere. |
 
 ## Changes on 2026-11-17 (review of the pause screens), and why
 

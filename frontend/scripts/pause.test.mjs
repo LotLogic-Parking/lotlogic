@@ -346,6 +346,20 @@ test('lotStatusPause: the Lot status tab\'s DO NOT TOW line', () => {
   assert.equal(lotStatusPause({ ...pause, open_before_pause_count: 0 }, FRI_2PM).title, 'DO NOT TOW — enforcement paused until Sat 6:00 PM');
 });
 
+test('lotStatusPause: a tow request the office placed during the pause is listed, so the top line is never DO NOT TOW', () => {
+  // Contract C: lot-status `open_before_pause_count` leaves out a request placed during the pause (it is
+  // new), but `towable` still lists its car with pause_note 'during_pause': it goes ahead (Gabe 2026-11-17).
+  const pause = { id: 'p', starts_at: '2026-11-20T18:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00', ends_local: 'Sat Nov 21, 6:00 PM ET', reason: null, open_before_pause_count: 0 };
+  const towable = [{ plate: 'ABC1234', pause_note: 'during_pause' }];
+  const out = lotStatusPause(pause, FRI_2PM, towable);
+  assert.doesNotMatch(out.title, /DO NOT TOW/);
+  assert.equal(out.title, 'Enforcement paused until Sat 6:00 PM — tow requests from the office still stand');
+  // Nothing listed: DO NOT TOW, as before; with a count, the count's line wins.
+  assert.equal(lotStatusPause(pause, FRI_2PM, []).title, 'DO NOT TOW — enforcement paused until Sat 6:00 PM');
+  assert.equal(lotStatusPause({ ...pause, open_before_pause_count: 1 }, FRI_2PM, towable).title,
+    'Enforcement paused until Sat 6:00 PM — requests placed before the pause still stand');
+});
+
 test('lotPauseNote: why a towable car is listed during a pause', () => {
   assert.equal(lotPauseNote('placed_before_pause'), 'Placed before the pause — still stands');
   assert.equal(lotPauseNote('during_pause'), 'Requested by the office during the pause');
