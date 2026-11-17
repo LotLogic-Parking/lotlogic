@@ -9,7 +9,7 @@
  *   Fort Mill Townhomes II   a tow request that never reached N Style       → Request not reached
  *   Charlotte Travel Plaza   Gate South silent for 3 h                      → Camera offline
  *   The Volaire              go-live 2027-01-01, 93 units, NMLD             → Starts Jan 1
- *   Mayfield Memorial        Hannah Lee's registration waiting 26 h         → 1 waiting, 1 boot on a car
+ *   Mayfield Memorial        Hannah Lee's registration waiting 26 h         → 1 waiting over a day, 1 boot on a car
  *   Stevensons Apartments                                                   → All good
  *
  * Screenshots (1280 and 390 px, light and dark) land in tests/test-results/dash-screens/.
@@ -38,11 +38,11 @@ const rowOf = (page: Page, name: string) => rows(page).filter({ has: page.locato
 const panel = (page: Page) => page.getByTestId('ap-panel');
 const chip = (page: Page, name: RegExp) => page.getByRole('group', { name: 'Show properties' }).getByRole('button', { name });
 
-/** The order the table puts them in: red, then waiting, then Starts, then All good; by name inside each. */
+/** The order the table puts them in: statusFor's order (an office waiting on us first), then by name. */
 const ORDER = [
-  ['Charlotte Travel Plaza', 'Camera offline'],
   ['Fort Mill Townhomes II', 'Request not reached'],
-  ['Mayfield Memorial Apartments', '1 waiting'],
+  ['Charlotte Travel Plaza', 'Camera offline'],
+  ['Mayfield Memorial Apartments', '1 waiting over a day'],
   ['The Volaire', 'Starts Jan 1'],
   ['Stevensons Apartments', 'All good'],
 ] as const;
@@ -72,16 +72,23 @@ test.describe('Admin › Properties @desktop-only', () => {
       // Columns: Property · Tow partner · Active passes · Waiting · Boots on cars · Tows this week · Status.
       await expect(page.locator('.ap-table thead th')).toHaveText(['Property', 'Tow partner', 'Active passes', 'Waiting', 'Boots on cars', 'Tows this week', 'Status']);
       const cells = (name: string) => rowOf(page, name).locator('td');
-      await expect(cells('Mayfield Memorial Apartments')).toHaveText(['Mayfield Memorial Apartments', 'N Style Towing', /\d+/, '1', '1', '1', '1 waiting']);
+      await expect(cells('Mayfield Memorial Apartments')).toHaveText(['Mayfield Memorial Apartments', 'N Style Towing', /\d+/, '1', '1', '1', '1 waiting over a day']);
       await expect(cells('The Volaire')).toHaveText(['The Volaire', 'NMLD Towing', /\d+/, '3', '0', '0', 'Starts Jan 1']);
       // Waiting over a day is the heavier blue; under a day (The Volaire's 3 h) is plain.
       await expect(cells('Mayfield Memorial Apartments').nth(3)).toHaveClass(/is-late/);
+      await expect(cells('Mayfield Memorial Apartments').nth(3)).toHaveAttribute('title', 'Waiting more than a day');
       await expect(cells('The Volaire').nth(3)).not.toHaveClass(/is-late/);
       await expect(cells('Charlotte Travel Plaza').nth(1)).toHaveText('NMLD Towing');      // a truck plaza: its account partner
       // Chips: All, Needs attention, one per tow partner (from the data), Truck plaza.
       await expect(page.getByRole('group', { name: 'Show properties' }).getByRole('button')).toHaveText(['All 5', 'Needs attention 3', 'N Style Towing 3', 'NMLD Towing 2', 'Truck plaza 1']);
       await expect(chip(page, /^All/)).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByText('Pick a property to see its manager')).toBeVisible();
+      // The panel is never empty on a laptop: the most urgent row is selected on the first load.
+      await expect(rowOf(page, 'Fort Mill Townhomes II')).toHaveAttribute('aria-current', 'true');
+      await expect(panel(page).getByRole('heading', { level: 2, name: 'Fort Mill Townhomes II' })).toBeVisible();
+      // The admin's tables refresh on their own clock: no "Updated …" line above them.
+      await expect(page.locator('.last-updated')).toHaveCount(0);
+      // "View as Partner" is the token button, not the purple one.
+      await expect(page.getByRole('button', { name: /View as Partner/ })).toHaveClass(/pq-btn/);
       expect(world.calls.filter((c) => c.path === '/admin/clients')).toHaveLength(1);
       expect(world.calls.filter((c) => c.path === '/functions/v1/admin-ops')).toHaveLength(1);
       await shoot(page, 'admin-properties', { world });
@@ -100,7 +107,8 @@ test.describe('Admin › Properties @desktop-only', () => {
       await expect(p).toContainText('Starts Jan 1');
       const fact = (label: string) => p.locator('.ap-fact', { has: page.locator('dt', { hasText: label }) }).locator('.ap-fact-v');
       await expect(fact('Tow partner')).toHaveText('NMLD Towing');
-      await expect(fact('Manager')).toHaveText('The Volaire');
+      // The owner's name is the property's own name again: no Manager row.
+      await expect(p.locator('.ap-fact', { has: page.locator('dt', { hasText: 'Manager' }) })).toHaveCount(0);
       await expect(fact('Units')).toHaveText('93');
       await expect(fact('Go-live')).toHaveText('Jan 1, 2027');
       await expect(p.getByRole('button', { name: 'Open property' })).toBeVisible();
@@ -156,6 +164,7 @@ test.describe('Admin › Properties @desktop-only', () => {
       const p = panel(page);
       await expect(p.getByRole('heading', { name: /^Needs you · 1$/ })).toBeVisible();
       await expect(p.getByTestId('ap-need')).toContainText('Travel Plaza Gate South has gone quiet');
+      await expect(p.getByTestId('ap-need')).not.toContainText('At Charlotte Travel Plaza');   // the panel's own title
       await expect(p.getByRole('button', { name: /resident link|No link yet/ })).toHaveCount(0);   // a truck plaza has no residents
       await expect(p.locator('.ap-fact', { hasText: 'Units' })).toHaveCount(0);
       await shoot(page, 'admin-properties-needs', { world });
@@ -180,7 +189,7 @@ test.describe('Admin › Properties @desktop-only', () => {
       const world = await enter(page, server.origin, 'admin');
       await landed(page);
       await chip(page, /^Needs attention/).click();
-      await expect(rows(page).locator('td.ap-name')).toHaveText(['Charlotte Travel Plaza', 'Fort Mill Townhomes II', 'Mayfield Memorial Apartments']);
+      await expect(rows(page).locator('td.ap-name')).toHaveText(['Fort Mill Townhomes II', 'Charlotte Travel Plaza', 'Mayfield Memorial Apartments']);
       await chip(page, /^NMLD Towing/).click();
       await expect(rows(page).locator('td.ap-name')).toHaveText(['Charlotte Travel Plaza', 'The Volaire']);
       await chip(page, /^Truck plaza/).click();
@@ -203,8 +212,11 @@ test.describe('Admin › Properties @desktop-only', () => {
       await expect(rows(page)).toHaveCount(5);
       await expect(page.getByRole('status').filter({ hasText: "Cameras and boots didn't load." })).toBeVisible();
       await expect(rowOf(page, 'Mayfield Memorial Apartments').locator('td').nth(4)).toHaveText('—');
-      await expect(rowOf(page, 'Charlotte Travel Plaza').locator('td').last()).toHaveText('All good');
+      // Nobody knows whether its camera works: Not checked, never All good.
+      await expect(rowOf(page, 'Charlotte Travel Plaza').locator('td').last()).toHaveText('Not checked');
+      await expect(rowOf(page, 'Stevensons Apartments').locator('td').last()).toHaveText('Not checked');
       await expect(rowOf(page, 'Fort Mill Townhomes II').locator('td').last()).toHaveText('Request not reached');   // the backend's own column
+      await expect(rowOf(page, 'The Volaire').locator('td').last()).toHaveText('Starts Jan 1');
       expectClean(world, [`500 (Internal Server Error) [${ADMIN_OPS_URL}]`]);
     });
 
@@ -215,7 +227,7 @@ test.describe('Admin › Properties @desktop-only', () => {
       await expect(table(page)).toBeVisible({ timeout: 30_000 });
       await expect(page.getByRole('alert').filter({ hasText: "Properties didn't load." })).toBeVisible();
       await expect(rows(page)).toHaveCount(5);
-      await expect(rowOf(page, 'Mayfield Memorial Apartments').locator('td')).toHaveText(['Mayfield Memorial Apartments', 'None', '—', '—', '1', '—', 'All good']);
+      await expect(rowOf(page, 'Mayfield Memorial Apartments').locator('td')).toHaveText(['Mayfield Memorial Apartments', '—', '—', '—', '1', '—', 'Not checked']);
       await expect(rowOf(page, 'Charlotte Travel Plaza').locator('td').last()).toHaveText('Camera offline');
       expectClean(world, [`500 (Internal Server Error) [${API_ORIGIN}/admin/clients]`]);
     });
@@ -234,6 +246,14 @@ test.describe('Admin › Properties @desktop-only', () => {
       await nav(page).filter({ hasText: 'Properties' }).click();
       await page.getByRole('button', { name: 'Analytics', exact: true }).click();
       await expect(table(page)).toHaveCount(0);
+      await settle(page, world);
+      expectClean(world);
+    });
+
+    test('a remembered Overview tab lands on the Properties table', async ({ page }) => {
+      const world = await enter(page, server.origin, 'admin', { tab: 'overview' });
+      await landed(page);
+      await expect(nav(page).filter({ hasText: 'Properties' })).toHaveAttribute('aria-selected', 'true');
       await settle(page, world);
       expectClean(world);
     });
@@ -277,6 +297,70 @@ test.describe('Admin › Properties @desktop-only', () => {
       await expect(nav(page)).toHaveText(['Lots', 'Analytics', 'Tow truck', 'Account'], { timeout: 30_000 });
       await expect(table(page)).toHaveCount(0);
       await settle(page, world);
+      expectClean(world);
+    });
+  });
+
+  // The states a reviewer needs to see, at both widths and in both themes.
+  for (const viewport of [DESKTOP, PHONE]) {
+    test.describe(`states at ${viewport.width} px`, () => {
+      test.use({ viewport });
+      const wide = viewport.width >= 1024;
+      /** The selected property's details: the side panel on a laptop, the opened card on a phone. */
+      async function openRow(page: Page, name: string) {
+        if (wide) { await rowOf(page, name).click(); return panel(page); }
+        const card = cards(page).filter({ hasText: name });
+        await card.getByRole('button', { name: new RegExp(name) }).first().click();
+        return card;
+      }
+
+      test('the units editor open, No link yet, an opened property', async ({ page }) => {
+        const world = createWorld('admin');
+        world.allProperties.find((p) => p.key === 'fortMill')!.qr_code_id = null;
+        await enter(page, server.origin, world);
+        await landed(page);
+
+        let d = await openRow(page, 'The Volaire');
+        await d.getByRole('button', { name: 'Edit the number of units' }).click();
+        await expect(d.getByLabel('Units')).toBeFocused();
+        await shoot(page, 'admin-properties-editing', { world });
+        await d.getByLabel('Units').press('Escape');
+
+        d = await openRow(page, 'Fort Mill Townhomes II');
+        await expect(d.getByRole('button', { name: 'No link yet' })).toBeDisabled();
+        await shoot(page, 'admin-properties-nolink', { world });
+
+        await d.getByRole('button', { name: 'Open property' }).click();
+        await expect(page.getByRole('button', { name: '← Back to Properties' })).toBeVisible({ timeout: 15_000 });
+        await shoot(page, 'admin-properties-opened', { world });
+        await settle(page, world);
+        expectClean(world, [/403 \(Forbidden\)/]);
+      });
+
+      test('the two load failures', async ({ page }) => {
+        let world = createWorld('admin');
+        world.overrides.push({ url: ADMIN_OPS_URL, respond: () => ({ status: 500, json: { ok: false, message: 'Something broke.' } }) });
+        await enter(page, server.origin, world);
+        await landed(page);
+        await expect(page.getByRole('status').filter({ hasText: "Cameras and boots didn't load." })).toBeVisible();
+        await shoot(page, 'admin-properties-opsdown', { world });
+
+        world = createWorld('admin');
+        world.overrides.push({ url: `${API_ORIGIN}/admin/clients`, respond: () => ({ status: 500, json: { detail: 'boom' } }) });
+        await enter(page, server.origin, world);
+        await expect(page.getByRole('alert').filter({ hasText: "Properties didn't load." })).toBeVisible({ timeout: 30_000 });
+        await shoot(page, 'admin-properties-clientsdown', { world });
+      });
+    });
+  }
+
+  test.describe('1100 px: the table without the Tow partner column', () => {
+    test.use({ viewport: { width: 1100, height: 900 } });
+    test('the columns that fit, and the panel', async ({ page }) => {
+      const world = await enter(page, server.origin, 'admin');
+      await landed(page);
+      await expect(page.locator('.ap-table thead th.ap-partner')).toBeHidden();
+      await shoot(page, 'admin-properties', { world });
       expectClean(world);
     });
   });

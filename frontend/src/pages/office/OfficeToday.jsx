@@ -28,12 +28,19 @@ import { Tag } from '../permits/parts.jsx';
 const REFRESH_MS = 60000;
 const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
-function Tiles({ tiles }) {
+// `onOpen[tile id]`: a tile that opens its list. "Registered vehicles" (no
+// camera) opens them on Vehicles; the label is the button, stretched over the
+// whole tile.
+function Tiles({ tiles, onOpen = {} }) {
   return (
     <dl className="ot-tiles" aria-label="Right now">
       {tiles.map(t => (
-        <div key={t.id} className={`ot-tile${t.tone === 'attention' ? ' is-waiting' : ''}`} data-testid={`tile-${t.id}`}>
-          <dt className="ot-tile-l">{t.label}</dt>
+        <div key={t.id} className={`ot-tile${t.tone === 'attention' ? ' is-waiting' : ''}${onOpen[t.id] ? ' is-link' : ''}`} data-testid={`tile-${t.id}`}>
+          <dt className="ot-tile-l">
+            {onOpen[t.id]
+              ? <button type="button" className="ot-tile-btn" onClick={onOpen[t.id]}>{t.label}<span className="ot-tile-go" aria-hidden="true">›</span></button>
+              : t.label}
+          </dt>
           <dd className={`ot-tile-n${t.value === DASH ? ' ot-none' : ''}`}>
             {t.value === DASH ? <><span aria-hidden="true">{DASH}</span><span className="pq-sr">Not available</span></> : t.value}
           </dd>
@@ -104,7 +111,7 @@ function PlateCheck({ property, presence, holds, canRequest, onTow }) {
   );
 }
 
-export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRequests }) {
+export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRequests, onOpenVehicles }) {
   const propertyId = property?.id;
   const canRequest = ['admin', 'manager'].includes(property?.role);
   const now = useNowTick();
@@ -145,13 +152,13 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
     return () => { live = false; };
   }, [propertyId]);
 
-  const tiles = todayTiles({ presence, counts, summary, cameras, now });
+  const tiles = todayTiles({ presence, counts, summary, cameras, goLiveDate: property?.go_live_date, now });
   const holds = (requests || []).filter(r => r?.kind === 'hold');
   const open = requests ? requests.length : null;
 
   return (
     <section className="ot" aria-label="Today" data-testid="office-today">
-      <Tiles tiles={tiles} />
+      <Tiles tiles={tiles} onOpen={cameras === false && onOpenVehicles ? { onsite: onOpenVehicles } : {}} />
 
       <ApartmentPermits property={property} pendingOnly title="Approve these registrations" onCounts={setCounts} />
 

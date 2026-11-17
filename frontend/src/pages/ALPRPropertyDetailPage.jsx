@@ -29,7 +29,7 @@ import { LotStatusTab } from './lot/LotStatusTab.jsx';
 import { SOLO_SECTION_IDS, passTarget, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
 import { isClassicOffice } from '../lib/features.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
-import { towPartnerName } from '../lib/towPartner.js';
+import { displayPartnerName, towPartnerName } from '../lib/towPartner.js';
 import OfficeToday from './office/OfficeToday.jsx';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
@@ -920,7 +920,10 @@ export function ALPRPropertyDetailPage({
         <div className="ot-head">
           <div className="ot-head-id">
             <h1 className="ot-head-name">{property.name}</h1>
-            <div className="ot-head-sub">Towing by {towPartnerName(property, user)}</div>
+            {/* No name known: no line ("Towing by your tow company" says nothing). */}
+            {displayPartnerName(property.partner_name || property.tow_company_name) && (
+              <div className="ot-head-sub">Towing by {towPartnerName(property, user)}</div>
+            )}
           </div>
           <div className="ot-head-tools">
             {view !== 'today' && (
@@ -1057,6 +1060,7 @@ export function ALPRPropertyDetailPage({
           <OfficeToday
             property={property}
             cameras={features?.cameras ?? property?.features?.cameras}
+            onOpenVehicles={() => goSection('passes')}
             onHold={() => composeFromToday('hold')}
             onTow={(plate) => composeFromToday('tow', plate)}
             onOpenRequests={() => goSection('requests')}
@@ -1073,6 +1077,17 @@ export function ALPRPropertyDetailPage({
               onOpenPass={openPass}
               onRequestTow={canRequestTow ? requestTow : undefined}
               onOpenRegistrations={() => goSection('log')}
+              // No camera (The Volaire until 2026-12-17): the property's
+              // registered vehicles, the list the office's Today tile counts.
+              // Owner sessions only (the office, an admin); never a partner.
+              noCameraList={isOwner ? (
+                <ApartmentPermits
+                  property={property}
+                  title="Registered vehicles"
+                  initialSegment="approved"
+                  onRequestTow={canRequestTow ? requestTow : undefined}
+                />
+              ) : null}
             />
           </React.Suspense>
         </ErrorBoundary>

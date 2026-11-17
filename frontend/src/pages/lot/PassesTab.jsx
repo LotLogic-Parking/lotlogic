@@ -54,7 +54,7 @@ function Column({ id, title, count, empty, rows, rowProps, status }) {
   );
 }
 
-export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenPass, onOpenRegistrations, needsReview = 0 }) {
+export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenPass, onOpenRegistrations, needsReview = 0, noCameraList = null }) {
   const [data, setData] = useState(null);
   const [permits, setPermits] = useState(null);
   const [visits, setVisits] = useState([]);
@@ -156,7 +156,14 @@ export function PassesTab({ propertyId, propertyName = '', onRequestTow, onOpenP
   } else if (!data) {
     body = <SkeletonCards count={2} />;
   } else if (!hasCameras) {
-    body = <p className="ls-note">{PASSES_COPY.no_camera}</p>;
+    // No camera yet: no one to show "on the property", so the property's
+    // registered vehicles (the page passes the list) sit under one muted line.
+    body = (
+      <>
+        <p className="ls-note">{PASSES_COPY.no_camera}</p>
+        {noCameraList && <div className="ot-nocam">{noCameraList}</div>}
+      </>
+    );
   } else {
     body = (
       <div className="ls-cols">

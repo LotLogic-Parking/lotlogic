@@ -59,7 +59,9 @@ test.describe('Office › Today @desktop-only', () => {
       test('office with no camera: lands on Today with the three tiles, the registrations and the actions', async ({ page }) => {
         const world = await enter(page, server.origin, 'office');
         await expect(today(page)).toBeVisible({ timeout: 30_000 });
-        await expect(nav(page)).toHaveText(['Today', 'Account']);
+        await expect(nav(page)).toHaveText(['Home', 'Account']);
+        // Acting as the tow company is not an office task: no "View as Partner".
+        await expect(page.getByRole('button', { name: /View as Partner/ })).toHaveCount(0);
         await expect(page.getByRole('heading', { level: 1, name: PROPERTIES.volaire.name })).toBeVisible();
         await expect(page.getByText('Towing by NMLD Towing')).toBeVisible();
         await expect(switchButton(page, 'Today')).toHaveAttribute('aria-pressed', 'true');
@@ -127,17 +129,75 @@ test.describe('Office › Today @desktop-only', () => {
         await page.getByRole('button', { name: 'Check', exact: true }).click();
         const result = page.getByTestId('plate-result');
         await expect(result).toContainText('Registered');
-        await expect(result).toContainText('Resident · Unit 102 · blue Hyundai Sonata');
+        await expect(result).toContainText('Unit 102 · blue Hyundai Sonata');
+        await expect(result).not.toContainText('Resident');
         await shoot(page, 'office-today-check', { world });
 
         await switchButton(page, 'Vehicles').click();
         await expect(page.getByTestId('passes-tab')).toBeVisible();
         await expect(switchButton(page, 'Vehicles')).toHaveAttribute('aria-pressed', 'true');
         await expect(page.getByRole('button', { name: 'More', exact: true })).toBeVisible();
+        // No camera yet: the one camera line, then the registered vehicles Today's first tile counts.
+        await expect(page.getByText('Once LotLogic installs a camera here')).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Registered vehicles' })).toBeVisible();
+        await expect(page.locator('.ot-nocam .pq-segment[aria-pressed="true"]')).toContainText('Approved');
+        await expect(page.locator('.ot-nocam .pq-segment[aria-pressed="true"]')).toContainText(`(${registeredAt(world, PROPERTIES.volaire.id)})`);
+        expect(new URL(page.url()).search).toBe('');                                       // the embedded list never writes ?status=
         await shoot(page, 'office-vehicles', { world });
         await switchButton(page, 'Today').click();
         await expect(today(page)).toBeVisible();
         expectClean(world);
+      });
+    });
+  }
+
+  // The states a reviewer needs to see, at both widths and in both themes.
+  for (const viewport of [DESKTOP, PHONE]) {
+    test.describe(`states at ${viewport.width} px`, () => {
+      test.use({ viewport });
+
+      test('Deny sheet, Not registered, Hold composer, Nothing waiting, a failed load', async ({ page }) => {
+        const world = await enter(page, server.origin, 'office');
+        await expect(regs(page).locator('.ot-reg')).toHaveCount(3, { timeout: 30_000 });
+
+        await regs(page).locator('.ot-reg', { hasText: 'Marcus Webb' }).getByRole('button', { name: `Deny ${PENDING[1].plate}` }).click();
+        await expect(page.getByRole('dialog', { name: 'Deny this request?' })).toBeVisible();
+        await shoot(page, 'office-today-deny', { world, fullPage: false });
+        await page.getByRole('dialog', { name: 'Deny this request?' }).getByRole('button', { name: 'Cancel' }).click();
+        await expect(page.getByRole('dialog', { name: 'Deny this request?' })).toHaveCount(0);
+
+        await page.getByRole('button', { name: 'Check a plate' }).click();
+        await page.getByLabel('Plate', { exact: true }).fill('ZZZ 999');
+        await page.getByRole('button', { name: 'Check', exact: true }).click();
+        await expect(page.getByTestId('plate-result')).toContainText('Not registered');
+        const act = page.getByTestId('plate-result').getByRole('button', { name: 'Request a tow' });
+        expect((await act.boundingBox())!.height).toBeGreaterThanOrEqual(44);               // a 44 px target
+        await shoot(page, 'office-today-notreg', { world });
+
+        await page.getByRole('button', { name: 'Hold a car' }).click();
+        await expect(page.locator('#req-plate')).toBeFocused();
+        await shoot(page, 'office-today-hold', { world });
+
+        await switchButton(page, 'Today').click();
+        for (const name of ['Jane Smith', 'Marcus Webb', 'Ana Ruiz']) {
+          await regs(page).locator('.ot-reg', { hasText: name }).getByRole('button', { name: /^Approve/ }).click();
+        }
+        await expect(regs(page).getByText('Nothing waiting.')).toBeVisible();
+        await shoot(page, 'office-today-nothing', { world });
+        await settle(page, world);
+        expectClean(world);
+      });
+
+      test('a failed load shows dashes', async ({ page }) => {
+        const world = createWorld('officeCameras');
+        world.overrides.push(
+          { method: 'GET', url: /\/apartment\/properties\/[^/]+\/summary$/, respond: () => ({ status: 500, json: { detail: 'boom' } }) },
+          { method: 'GET', url: /\/apartment\/passes\/presence\?/, respond: () => ({ status: 500, json: { detail: 'boom' } }) },
+        );
+        await enter(page, server.origin, world);
+        await expect(tile(page, 'enforced').locator('.ot-tile-n')).toContainText('—', { timeout: 30_000 });
+        await shoot(page, 'office-today-failed', { world });
+        expectClean(world, ['500 (Internal Server Error)']);
       });
     });
   }
@@ -224,17 +284,63 @@ test.describe('Office › Today @desktop-only', () => {
     test('Hold a car, Request a tow and See all open Requests', async ({ page }) => {
       const world = await enter(page, server.origin, 'office');
       await expect(today(page)).toBeVisible({ timeout: 30_000 });
+      const kind = (name: 'Hold' | 'Tow' | 'Photo') => page.getByRole('group', { name: 'What are you asking for?' }).getByRole('button', { name, exact: true });
+      const plate = page.locator('#req-plate');
+
+      // Hold a car: the composer on Hold, the plate empty and ready.
       await page.getByRole('button', { name: 'Hold a car' }).click();
       await expect(page.getByText(OPEN_REQUESTS.hold.ref)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible();   // the More menu is open
+      await expect(kind('Hold')).toHaveAttribute('aria-pressed', 'true');
+      await expect(kind('Tow')).toHaveAttribute('aria-pressed', 'false');
+      await expect(plate).toHaveValue('');
+      await expect(plate).toBeFocused();
+
+      // Switch the composer away, so the next prefill has to set Tow itself.
+      await kind('Photo').click();
       await switchButton(page, 'Today').click();
       await page.getByRole('button', { name: /^2 open requests/ }).click();
       await expect(page.getByText(OPEN_REQUESTS.tow.ref)).toBeVisible();
+
+      // Request a tow: the composer on Tow, the plate empty.
       await switchButton(page, 'Today').click();
+      await expect(page.locator('#req-plate')).toHaveCount(0);                              // Today has no composer
       await page.getByRole('button', { name: 'Request a tow' }).click();
       await expect(page.getByText(OPEN_REQUESTS.tow.ref)).toBeVisible();
+      await expect(kind('Tow')).toHaveAttribute('aria-pressed', 'true');
+      await expect(kind('Hold')).toHaveAttribute('aria-pressed', 'false');
+      await expect(plate).toHaveValue('');
       await settle(page, world);
       expectClean(world);
+    });
+
+    test('no camera: the Registered vehicles tile opens the list on Vehicles', async ({ page, context }) => {
+      const world = await enter(page, server.origin, 'office');
+      await expect(today(page)).toBeVisible({ timeout: 30_000 });
+      await tile(page, 'onsite').getByRole('button', { name: /Registered vehicles/ }).click();
+      await expect(page.getByTestId('passes-tab')).toBeVisible();
+      await expect(switchButton(page, 'Vehicles')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByRole('heading', { name: 'Registered vehicles' })).toBeVisible();
+      // With a camera the tile counts cars, and is not a button.
+      await settle(page, world);
+      const other = await context.newPage();
+      const cams = await enter(other, server.origin, 'officeCameras');
+      await expect(today(other)).toBeVisible({ timeout: 30_000 });
+      await expect(tile(other, 'onsite').getByRole('button')).toHaveCount(0);
+      await settle(other, cams);
+      expectClean(world);
+      expectClean(cams);
+    });
+
+    test('the summary failed: the go-live notice still shows, from the property itself', async ({ page }) => {
+      const world = createWorld('office');
+      world.overrides.push({ method: 'GET', url: /\/apartment\/properties\/[^/]+\/summary$/, respond: () => ({ status: 500, json: { detail: 'boom' } }) });
+      await enter(page, server.origin, world);
+      await expect(today(page)).toBeVisible({ timeout: 30_000 });
+      await expect(tile(page, 'enforced').locator('.ot-tile-n')).toContainText('—');
+      await expect(tile(page, 'enforced')).toContainText('Enforcement starts Jan 1, 2027');
+      await settle(page, world);
+      expectClean(world, ['500 (Internal Server Error)']);
     });
 
     test('a number that failed to load is a dash, never 0', async ({ page }) => {

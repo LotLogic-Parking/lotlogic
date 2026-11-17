@@ -331,8 +331,8 @@ export function App() {
   // Platform-admin (Gabe / Victor / Standard Vending) — gets admin-only surfaces.
   // Sourced from the JWT claim issued by /auth/login. Never set this from
   // partner-controlled state.
-  const isPlatformAdmin = (() => {
-    if (viewAs) return false;
+  // The signed-in account itself, whether or not it is viewing as a partner.
+  const signedInAdmin = (() => {
     // Prefer the in-memory owner object (server-fresh from /auth/login or
     // the /auth/me self-heal above). Fall back to JWT-decode for the
     // first render before the owner state is hydrated.
@@ -345,6 +345,7 @@ export function App() {
       return !!p.is_platform_admin;
     } catch { return false; }
   })();
+  const isPlatformAdmin = !viewAs && signedInAdmin;
 
   // The leasing office (Victor, 2026-11-12): an owner who is not a platform
   // admin and whose every property uses the office screen (not Stevenson's
@@ -423,17 +424,20 @@ export function App() {
     const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice), platformAdmin: adminTable });
     const account = base.filter(t => t.id === 'account');
     // One property: the tab opens it on Today (spec 2026-11-16 Part 1), so
-    // "Properties" (a list of one) reads "Today".
+    // "Properties" (a list of one) reads "Home". Not "Today": the page's own
+    // Today | Vehicles switch says which of the two is showing, and a bottom
+    // tab reading "Today" stayed lit on Vehicles (review 2026-11-17).
     const rest = base.filter(t => t.id !== 'account')
-      .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Today' } : t));
+      .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Home' } : t));
     return [...rest, ...navExtras, ...account];
   })();
   // Overview has no nav button (it is reached from the cards) but is a real
-  // owner tab, so it stays valid.
+  // owner tab, so it stays valid. Not for a platform admin: the Properties
+  // table replaced it, and a remembered 'overview' lands on the table.
   // A platform admin also reaches Analytics and Tow truck from the links at
   // the top of Properties; they left the bottom nav, not the app.
   const validTabs = isOwner
-    ? ['overview', ...navTabs.map(t => t.id), ...(adminTable ? ['analytics', 'towactivity'] : [])]
+    ? [...(adminTable ? ['analytics', 'towactivity'] : ['overview']), ...navTabs.map(t => t.id)]
     : navTabs.map(t => t.id);
 
   useEffect(() => {
@@ -998,14 +1002,16 @@ export function App() {
     setViewAs(null);
     setPartnerSwitcherOpen(false);
     // A platform admin goes back to the Properties table they left from.
-    setTab(owner?.is_platform_admin ? 'lots' : 'overview');
+    setTab(signedInAdmin ? 'lots' : 'overview');
     haptic('light');
   }
 
   // Owner-side partners list — `partners` is already scoped to this owner
   // by getPartnersForOwner (covers both lots.partner_id and
-  // properties.tow_company_id assignments). Just gate on role.
-  const ownPartners = isOwner ? partners : [];
+  // properties.tow_company_id assignments). Just gate on role. A leasing
+  // office never gets the switcher: acting as its tow company is not an
+  // office task (spec 2026-11-16 keeps an office preview out of scope).
+  const ownPartners = isOwner && !officeMode ? partners : [];
 
   // Role-based navigation:
   // Owner:    Overview + Jobs + Lots + Earnings + Invoices + Account
@@ -1030,7 +1036,7 @@ export function App() {
   }));
 
   const lastRefreshLabel = lastRefresh ? (
-    Math.floor((Date.now() - lastRefresh) / 1000) < 10 ? 'Just now' :
+    Math.floor((Date.now() - lastRefresh) / 1000) < 10 ? 'just now' :
     Math.floor((Date.now() - lastRefresh) / 1000) < 60 ? `${Math.floor((Date.now() - lastRefresh) / 1000)}s ago` :
     `${Math.floor((Date.now() - lastRefresh) / 60000)}m ago`
   ) : null;
@@ -1066,20 +1072,15 @@ export function App() {
           {isOwner && ownPartners.length > 0 && (
             <div className="header-switch" style={{position:'relative'}}>
               <button
+                type="button"
+                className="pq-btn pq-btn--small header-switch-btn"
                 onClick={() => setPartnerSwitcherOpen(o => !o)}
                 aria-haspopup="menu"
                 aria-expanded={partnerSwitcherOpen}
                 title="Open one of your partners' portals"
-                style={{
-                  background:'rgba(167,139,250,.12)', color: theme === 'dark' ? '#a78bfa' : '#6d28d9',
-                  border:'1px solid rgba(167,139,250,.3)', borderRadius:8,
-                  padding:'6px 10px', fontSize:12, fontWeight:700,
-                  cursor:'pointer', whiteSpace:'nowrap',
-                  display:'inline-flex', alignItems:'center', gap:6,
-                }}
               >
                 View as Partner
-                <span style={{fontSize:10, opacity:.7}}>▾</span>
+                <span aria-hidden="true" className="header-switch-caret">▾</span>
               </button>
               {partnerSwitcherOpen && (
                 <>
@@ -1127,7 +1128,8 @@ export function App() {
               )}
             </div>
           )}
-          <div className="header-name" title={headerName(owner)}>{headerName(owner)}</div>
+          {/* A one-property office: the property card right below names it. */}
+          {!officeSingle && <div className="header-name" title={headerName(owner)}>{headerName(owner)}</div>}
         </div>
       </header>
 
@@ -1175,8 +1177,10 @@ export function App() {
           </div>
         )}
         {/* Last updated. The office's Passes screen carries its own
-            "As of … · Refresh" line, so it does not get a second one. */}
-        {lastRefresh && !loading && !officeMode && (
+            "As of … · Refresh" line, so it does not get a second one. The
+            admin's Properties and Money refresh on their own clock, which
+            this line does not report. */}
+        {lastRefresh && !loading && !officeMode && !(adminTable && (tab === 'lots' || tab === 'money')) && (
           <div className="last-updated" aria-live="polite">Updated {lastRefreshLabel}</div>
         )}
 
@@ -1218,7 +1222,7 @@ export function App() {
           />}
           {tab === 'towactivity' && isOwner && <TowActivityPage user={effectiveUser} />}
           {tab === 'earnings' && isOwner && showMoney && <EarningsPage violations={effectiveViolations} lots={effectiveLots} isOwner={isOwner} user={effectiveUser} onNavigate={setTab} />}
-          {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} />}
+          {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} showOverview={!adminTable} />}
           {tab === 'invoices' && isOwner && showMoney && <InvoicesPage lots={lots} partners={partners} user={owner} isOwner={isOwner} isPlatformAdmin={isPlatformAdmin} />}
           {tab === 'admin' && isPlatformAdmin && <AdminConsolePage user={owner} />}
           {tab === 'enforcement' && enforcementAllowed && <EnforcementPage agent={agentMode} />}

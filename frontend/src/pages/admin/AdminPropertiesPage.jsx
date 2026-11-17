@@ -4,7 +4,7 @@ import { opsFetch, REFRESH_MS } from '../../lib/ops.js';
 import { ago } from '../../lib/enforcement.js';
 import { goLiveLabel } from '../../lib/officeToday.js';
 import {
-  DASH, applyFilter, filterChips, joinOps, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
+  DASH, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
 } from '../../lib/adminTable.js';
 import { lazyPage } from '../../lib/lazyPage.js';
 import { ErrorBoundary } from '../../ui/ErrorBoundary.jsx';
@@ -23,7 +23,7 @@ const ALPRPropertyDetailPage = lazyPage(() => import('../ALPRPropertyDetailPage.
 // Styles: .ap-* in dashboard.html (theme tokens only), with .pq-* buttons,
 // tags and search, and .req-chip for the filter chips.
 
-/** The status pill: red and the waiting / amber needs are tags; Starts is neutral; All good is a dot and the words. */
+/** The status pill: red and the waiting / amber needs are tags; Starts and Not checked are neutral; All good is a dot and the words. */
 function Status({ status }) {
   if (status.tone === 'green') return <span className="ap-ok">{status.label}</span>;
   if (status.tone === 'red') return <span className="pq-tag pq-tag--red" title={status.label}>{status.label}</span>;
@@ -31,16 +31,21 @@ function Status({ status }) {
   return <span className="pq-tag pq-tag--neutral">{status.label}</span>;
 }
 
-function Num({ value, late = false }) {
-  const text = numberOrDash(value);
-  const cls = `ap-num${text === DASH ? ' ap-none' : Number(value) === 0 ? ' is-zero' : ''}${late ? ' is-late' : ''}`;
-  return <span className={cls}>{text}</span>;
-}
+const LATE_TITLE = 'Waiting more than a day';
 
 const numCell = (value, late = false) => {
   const text = numberOrDash(value);
-  return { className: `ap-num${text === DASH ? ' ap-none' : Number(value) === 0 ? ' is-zero' : ''}${late ? ' is-late' : ''}`, text };
+  return {
+    className: `ap-num${text === DASH ? ' ap-none' : Number(value) === 0 ? ' is-zero' : ''}${late ? ' is-late' : ''}`,
+    text,
+    title: late ? LATE_TITLE : undefined,
+  };
 };
+
+function Num({ value, late = false }) {
+  const { className, text, title } = numCell(value, late);
+  return <span className={className} title={title}>{text}</span>;
+}
 
 /** One fact the admin can set in place (units, go-live). */
 function EditableFact({ label, what, value, display, type, onSave }) {
@@ -108,7 +113,7 @@ function Needs({ row, onShowBoot }) {
             <span className="ap-need-dot" aria-hidden="true" />
             <div>
               <p className="ap-need-title"><span className="pq-sr">{n.severity === 'red' ? 'Urgent: ' : 'Warning: '}</span>{n.title}</p>
-              <p className="ap-need-detail">{[String(n.detail || '').replace(/\.\s*$/, ''), n.at ? ago(n.at) : ''].filter(Boolean).join(' · ')}</p>
+              <p className="ap-need-detail">{[needDetail(n, row), n.at ? ago(n.at) : ''].filter(Boolean).join(' · ')}</p>
             </div>
             {n.action?.type === 'boot' && <button type="button" className="pq-btn pq-btn--small" onClick={onShowBoot}>Show boot</button>}
           </li>
@@ -130,12 +135,15 @@ function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, ori
     catch { setCopied(`Copy it from here: ${link}`); }
   };
   const isPlaza = row.property_type === 'truck_plaza';
+  const manager = managerName(row);
   return (
     <>
       <Needs row={row} onShowBoot={onShowBoot} />
       <dl className="ap-facts">
-        <div className="ap-fact"><dt>Tow partner</dt><dd><span className={`ap-fact-v${tow.name ? '' : ' is-unset'}`}>{tow.name || 'None yet'}</span></dd></div>
-        <div className="ap-fact"><dt>Manager</dt><dd><span className={`ap-fact-v${row.owner_name ? '' : ' is-unset'}`}>{row.owner_name || 'Not known'}</span></dd></div>
+        {/* A row built from admin-ops alone does not know its tow partner: a dash, not "None yet". */}
+        <div className="ap-fact"><dt>Tow partner</dt><dd><span className={`ap-fact-v${tow.name ? '' : ' is-unset'}`}>{tow.name || (row._partial ? DASH : 'None yet')}</span></dd></div>
+        {/* The manager is a person; when all we have is the property's own name again, the row is left out. */}
+        {manager && <div className="ap-fact"><dt>Manager</dt><dd><span className="ap-fact-v">{manager}</span></dd></div>}
         {'units' in row && !(isPlaza && row.units == null) && (
           <EditableFact
             label="Units" what="number of units" type="number" value={row.units} display={numberOrDash(row.units)}
@@ -231,13 +239,23 @@ export function AdminPropertiesPage({
   // its property list stands in, with the backend's columns as dashes.
   const rows = useMemo(() => {
     const base = clients ?? (clientsError && ops
-      ? (ops.properties || []).map(p => ({ id: p.id, name: p.name, property_type: p.property_type }))
+      ? (ops.properties || []).map(p => ({ id: p.id, name: p.name, property_type: p.property_type, _partial: true }))
       : null);
     return base ? sortRows(joinOps(base, ops), now) : null;
   }, [clients, clientsError, ops, now]);
   const chips = useMemo(() => (rows ? filterChips(rows, now) : []), [rows, now]);
   const shown = useMemo(() => (rows ? applyFilter(rows, chip, query, now) : []), [rows, chip, query, now]);
   const selected = rows?.find(r => r.id === selectedId) || null;
+
+  // On a laptop the panel is never an empty third of the screen: the first
+  // load selects the most urgent row, as the mockup shows it.
+  const autoSelected = useRef(false);
+  useEffect(() => {
+    if (!rows?.length || autoSelected.current) return;
+    autoSelected.current = true;
+    const wide = typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches;
+    if (wide) setSelectedId(cur => cur ?? rows[0].id);
+  }, [rows]);
 
   // A chip that no longer exists (its last property left) falls back to All.
   useEffect(() => { if (rows && !chips.some(c => c.id === chip)) setChip('all'); }, [rows, chips, chip]);
@@ -363,8 +381,8 @@ export function AdminPropertiesPage({
                       onClick={() => select(r.id)}
                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(r.id); } }}>
                       <td className="ap-name" title={r.name}>{r.name}</td>
-                      <td className="ap-partner" title={tow.name}>{tow.name || <span className="ap-none">None</span>}</td>
-                      {cells.map((c, i) => <td key={i} className={c.className}>{c.text}</td>)}
+                      <td className="ap-partner" title={tow.name}>{tow.name || <span className="ap-none">{r._partial ? DASH : 'None'}</span>}</td>
+                      {cells.map((c, i) => <td key={i} className={c.className} title={c.title}>{c.text}</td>)}
                       <td><Status status={st} /></td>
                     </tr>
                   );
@@ -389,7 +407,7 @@ export function AdminPropertiesPage({
                 <li key={r.id} className={`ap-card${isSel ? ' is-selected' : ''}`} data-testid="ap-card">
                   <button type="button" className="ap-card-btn" aria-expanded={isSel} aria-controls={isSel ? `ap-card-${r.id}` : undefined} onClick={() => select(r.id)}>
                     <span className="ap-card-top"><span className="ap-card-name">{r.name}</span><Status status={st} /></span>
-                    <span className="ap-card-partner">{towPartnerOf(r).name || 'No tow partner'}</span>
+                    <span className="ap-card-partner">{towPartnerOf(r).name || (r._partial ? DASH : 'No tow partner')}</span>
                     <span className="ap-card-stats">
                       {stat('Active passes', r.active_pass_count)}
                       {stat('Waiting', r.pending_registration_count, waitingLate(r, now))}

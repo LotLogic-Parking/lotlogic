@@ -4,7 +4,7 @@ import { db } from '../lib/db.js';
 import { SkeletonCards, SkeletonKPIs } from '../ui/Skeletons.jsx';
 
 // ── Analytics tab ──────────────────────────────────────────────
-export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavigate }) {
+export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavigate, showOverview = true }) {
   const [hourlyData, setHourlyData] = useState(null);
   const [utilData, setUtilData] = useState(null);
   const [projData, setProjData] = useState(null);
@@ -250,7 +250,8 @@ export function AnalyticsPage({ lots, violations, partners = [], isOwner, onNavi
       </div>
 
       {/* Link to operator overview */}
-      {isOwner && onNavigate && (
+      {/* A platform admin's Overview is the Properties table now. */}
+      {isOwner && onNavigate && showOverview && (
         <button onClick={() => onNavigate('overview')} style={{
           width:'100%', background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:12,
           padding:'14px 16px', display:'flex', alignItems:'center', justifyContent:'space-between',

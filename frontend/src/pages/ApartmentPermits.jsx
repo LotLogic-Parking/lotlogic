@@ -75,6 +75,9 @@ import { Tag } from './permits/parts.jsx';
 // and the URL left alone. A row's photo opens its detail in place of the card,
 // at every width. `onCounts(counts)` hears `segmentCounts` after every load
 // and every decision, in both modes.
+//
+// `initialSegment` ('approved' on Vehicles at a property with no camera): the
+// full queue opened on that segment, with the URL left alone.
 
 const WIDE_QUERY = '(min-width: 1024px)';
 
@@ -100,7 +103,7 @@ function replaceQuery(state) {
   } catch { /* history blocked: the view still works, it just will not survive a refresh */ }
 }
 
-export function ApartmentPermits({ property, onRequestTow, title = 'Visitor passes', pendingOnly = false, onCounts }) {
+export function ApartmentPermits({ property, onRequestTow, title = 'Visitor passes', pendingOnly = false, initialSegment = null, onCounts }) {
   const propertyId = property?.id;
   const propertyName = property?.name || '';
   const cap = capOf(property);
@@ -112,7 +115,7 @@ export function ApartmentPermits({ property, onRequestTow, title = 'Visitor pass
   // The Today card has no side pane: a detail opens in place of the card.
   const isWide = wideScreen && !pendingOnly;
 
-  const initialQuery = useMemo(() => queueStateFor({ pendingOnly, search: window.location.search }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const initialQuery = useMemo(() => queueStateFor({ pendingOnly, search: window.location.search, segment: initialSegment }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [segment, setSegment] = useState(initialQuery.segment);
   const [q, setQ] = useState(initialQuery.q);
   const [rows, setRows] = useState([]);

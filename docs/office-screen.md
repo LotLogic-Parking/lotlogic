@@ -25,17 +25,18 @@ tow-company accounts never get the office screen.
 ## What the office gets
 
 At an apartment, the property's header shows its name, "Towing by" and its tow company
-(`towPartnerName`, e.g. "Towing by NMLD Towing") and a **Today | Vehicles** switch. Truck plazas
-keep their page as it was.
+(`towPartnerName`, e.g. "Towing by NMLD Towing"; no line when the name is not known) and a
+**Today | Vehicles** switch. Truck plazas keep their page as it was.
 
 - **Today** is the home screen (`src/pages/office/OfficeToday.jsx`, pure half
   `src/lib/officeToday.js`), top to bottom:
   - three tiles: *Cars on the property now* (residents · visitors, from the
     same presence data as Passes) or, at a property with no camera,
-    *Registered vehicles*; *Waiting for you* (registrations to approve, the
+    *Registered vehicles* (a button that opens them on Vehicles); *Waiting for you* (registrations to approve, the
     blue wash when above 0); *Towed or booted this week* (Monday 00:00 in
     Charlotte to now, a count only; "Enforcement starts Jan 1, 2027" before the
-    property's go-live). A number that did not load is "—", never 0.
+    property's go-live, from the property itself when the summary fails). A
+    number that did not load is "—", never 0.
   - **Approve these registrations**: the requests waiting, oldest first, with
     Approve and Deny on each row (`ApartmentPermits` with `pendingOnly`: same
     routes, same Deny sheet). The plate photo opens the request with its
@@ -48,7 +49,10 @@ keep their page as it was.
 - **Vehicles** is the Passes screen (`src/pages/lot/PassesTab.jsx`): residents
   on the left, visitors on the right, each with an entry photo. Tapping a
   person opens the details panel (`PersonRow` in `src/pages/lot/LiveTab.jsx`).
-  The week's numbers sit under the columns. Its **More** button opens Requests
+  The week's numbers sit under the columns. At a property with no camera it
+  says so in one muted line and lists the registered vehicles under it
+  (`ApartmentPermits` with `initialSegment="approved"`, URL left alone). Its
+  **More** button opens Requests
   (hold / tow / photo), Registrations (the approval queue,
   `src/pages/ApartmentPermits.jsx`) and Settings (parking rules and the two QR
   codes).
@@ -57,7 +61,9 @@ keep their page as it was.
   lands on Today.
 - **Account** shows the badge "Leasing office", the team, Dark mode, Change
   password and Sign out.
-- Bottom nav: **Today** (one property) or **Properties**, and **Account**.
+- Bottom nav: **Home** (one property) or **Properties**, and **Account**. The
+  header has no "View as Partner" and, with one property, no account name
+  (the property card names it).
 - No fee or amount appears anywhere on these screens.
 
 ## Changes on 2026-11-12, and why
@@ -100,6 +106,17 @@ Gabe, 2026-11-16: "make it cleaner, simpler, and with less clutter and more stra
 | 4 | The remembered section lasts one browser tab for the office. | Every office had "passes" remembered from before Today, which would have hidden Today for good. |
 | 5 | While Today shows, the page is up to 1200 px wide at ≥ 1024 px (as Passes). | The header and its switch stay in the same place between Today and Vehicles. |
 | 6 | Room is left for Part 3: the pause banner becomes Today's first child and "Pause enforcement" the fourth action. | Part 3 (enforcement pause) is a separate change. |
+
+## Changes on 2026-11-17 (review of Today and the admin table), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | Vehicles at a property with no camera lists the registered vehicles under the camera line; Today's *Registered vehicles* tile opens it. | Today said "Registered vehicles 8" and the tab called Vehicles showed none. |
+| 2 | No "View as Partner" for the office; for owners and admins it is the token button (`.pq-btn--small`), not purple. | Acting as the tow company is not an office task, and purple was a second accent. |
+| 3 | The bottom tab for one property reads **Home** again (it read Today, see the table above). | On Vehicles the bottom tab said "Today" and stayed lit while the switch said Vehicles. |
+| 4 | Inactive nav labels and icons use `--text-muted` in both themes (was `--text-ghost`, 2.2:1 on the dark nav). Every nav icon sits in a 20 px box. | Contrast, and the shield and target icons sat 2 px lower. |
+| 5 | Five nav tabs at 480 px or narrower (any role): 10 px sentence-case labels, was 9 px capitals. With "View as Partner" in the header at 480 px or narrower (any owner with partners, Stevenson's included), the account name and "Live" are hidden. | 9 px capitals were unreadable; the header ran off the screen. Accepted for every role rather than scoped to the new screens. |
+| 6 | A plate check that matches a long-term pass reads "Registered · Unit 102 · …", without "Resident". "Request a tow" beside Not registered is a 44 px target. | "Registered" and "Resident" said the same thing. |
 
 ## Open questions
 

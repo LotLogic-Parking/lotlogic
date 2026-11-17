@@ -500,11 +500,15 @@
       cursor: pointer;
       border: none;
       background: none;
-      color: var(--text-ghost);
+      /* --text-muted, not --text-ghost: ghost was 2.2:1 on the dark nav.
+         Muted is 6.8:1 dark and 4.8:1 light, so the themes match. */
+      color: var(--text-muted);
       font-family: inherit;
       transition: color .15s;
       position: relative;
     }
+    /* Every icon in one 20 px box (the inline 22 px ones sat 2 px lower). */
+    .nav-item > svg { width: 20px; height: 20px; flex: 0 0 20px; }
     .nav-item.active { color: var(--accent-text); }
     .nav-item.active::before {
       content: '';
@@ -1739,7 +1743,6 @@
     .theme-light .header-wordmark { color: var(--text-primary); }
     .theme-light .header-name { color: var(--text-muted); }
     .theme-light .bottom-nav { background: rgba(255,255,255,.97); border-top-color: var(--border); }
-    .theme-light .nav-item { color: var(--text-muted); }
     /* --accent-text (#1D4ED8) is 6.7:1 on the white nav. */
     .theme-light .nav-item.active { color: var(--accent-text); }
     .theme-light .nav-item.active::before { background: var(--accent); }
@@ -3792,6 +3795,18 @@
     .ot-tile.is-waiting .ot-tile-s { color: var(--text-primary); font-weight: 600; }
     .ot-tile .ot-skel--n { width: 56px; height: 37px; margin: 6px 0 2px; }
     .ot-tile .ot-skel--s { width: 132px; height: 12px; margin: 3px 0; }
+    /* A tile that opens its list ("Registered vehicles"): the label is the
+       button, stretched over the whole tile; a chevron says it goes on. */
+    .ot-tile.is-link { position: relative; transition: border-color .15s; }
+    .ot-tile.is-link:hover { border-color: var(--accent-line); }
+    .ot-tile.is-link:has(.ot-tile-btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ot-tile-btn {
+      display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: 0;
+      font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: left; cursor: pointer;
+    }
+    .ot-tile-btn:focus-visible { outline: none; }
+    .ot-tile-btn::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+    .ot-tile-go { font-size: 15px; line-height: 1; color: var(--accent-text); }
     @media (max-width: 1023px) {
       /* One tile per row: the words on the left, the number on the right. */
       .ot-tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -3817,6 +3832,10 @@
     /* The queue component (.pq) breaks out of a 640 px column on a laptop.
        On Today it sits in the page's own column. */
     .pq.ot-pq { margin-inline: 0; gap: 0; }
+    /* Vehicles at a property with no camera: the registered vehicles under
+       the one muted camera line, in the Passes screen's own column. */
+    .ot-nocam { margin-top: 14px; }
+    .ot-nocam .pq { margin-inline: 0; }
 
     .ot-regs { list-style: none; }
     .ot-reg { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-height: 72px; padding: 12px 16px; }
@@ -3903,7 +3922,7 @@
        "Not registered" result. */
     .ot-check-hint { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text-secondary); }
     .ot-check-hint.is-error { color: var(--red); }
-    .ot-check-act { margin-left: auto; min-height: 32px; }
+    .ot-check-act { margin-left: auto; }
 
     /* ══════════════════════════════════════════════════════════════════
        Admin › Properties (ap-): the platform admin's portfolio table, side
@@ -3948,6 +3967,11 @@
         margin-inline: -16px; padding-inline: 16px;
       }
       .ap-chips::-webkit-scrollbar { display: none; }
+      /* The row scrolls: its right edge fades so a cut chip reads as "more". */
+      .ap-chips {
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+        mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+      }
     }
     @media (min-width: 1024px) {
       .ap-tools .pq-search { flex: 0 0 auto; }
@@ -4014,6 +4038,8 @@
        --amber, which is the blue slot); "Starts <date>" is .pq-tag--neutral;
        "All good" is not a pill: a green dot and the words. */
     .ap-tag-strong { font-weight: 800; }
+    /* A long need title ends in "…" inside its cell (the full title is the tag's title). */
+    .ap-table td .pq-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .ap-ok { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }
     .ap-ok::before { content: ''; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
     .ap-empty { padding: 28px 16px; text-align: center; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
@@ -4094,10 +4120,13 @@
       display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 56px; padding: 14px 16px;
       background: none; border: 0; border-radius: 12px; color: inherit; font-family: inherit; text-align: left; cursor: pointer;
     }
-    .ap-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .ap-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+    /* The name wraps to a second line before it is cut: a status tag that
+       says why ("1 waiting over a day") takes room on a phone. */
     .ap-card-name {
       flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--text-primary);
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+      padding-top: 1px;
     }
     .ap-card-top .pq-tag, .ap-card-top .ap-ok { flex: 0 0 auto; }
     .ap-card-partner { font-size: 13px; line-height: 1.4; color: var(--text-secondary); }
@@ -4121,6 +4150,17 @@
     .ap-money-sec { min-width: 0; }
     .ap-money-sec > .ap-title { margin-bottom: 12px; }
     .ap-money-sec + .ap-money-sec { padding-top: 24px; border-top: 1px solid var(--border); }
+    /* Laptop: Earnings and Billing side by side in Properties' width, so the
+       page does not change width between the two tabs. */
+    @media (min-width: 1024px) {
+      .page-content:has(.ap-money) { max-width: 1272px; }
+      .ap-money { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; align-items: start; }
+      .ap-money-sec + .ap-money-sec { padding-top: 0; border-top: 0; }
+    }
+    /* Big numbers in ink; red and green only as small text (brand rule). */
+    .ap-money .kpi-val, .theme-light .ap-money .kpi-val { color: var(--text-primary); }
+    /* Billing's own "Billing & QuickBooks" heading repeats the section title. */
+    .ap-money-sec .page-section > h2:first-child { display: none; }
 
     /* A load that failed: one line on the page with its words and a retry. */
     .ap-alert {
@@ -4141,9 +4181,15 @@
        past the screen. The name is on Account and "Live" is the default; at
        phone width the switcher keeps the room. */
     @media (max-width: 480px) {
-      .bottom-nav [role="tablist"]:has(> :nth-child(5)) .nav-label { font-size: 9px; letter-spacing: .02em; }
+      /* Five tabs at 78 px each: 10 px sentence case fits "Enforcement". */
+      .bottom-nav [role="tablist"]:has(> :nth-child(5)) .nav-label { font-size: 10px; letter-spacing: 0; text-transform: none; }
       .header-right:has(.header-switch) :is(.header-name, .conn-indicator) { display: none; }
     }
+    /* "View as Partner" (owners and admins, never the office): the token
+       button, not the old purple one. */
+    .header-switch-btn { min-height: 36px; gap: 6px; white-space: nowrap; }
+    .header-switch-caret { font-size: 10px; opacity: .7; }
+    @media (max-width: 640px) { .header-switch-btn { min-height: 44px; } }
 
   </style>
 </head>

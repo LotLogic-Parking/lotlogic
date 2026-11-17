@@ -66,7 +66,7 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
       test('office: one property opens on Today; Vehicles is the Passes screen', async ({ page }) => {
         const world = await enter(page, server.origin, 'office');
         await expect(page.getByTestId('office-today')).toBeVisible({ timeout: 30_000 });
-        await expect(nav(page)).toHaveText(['Today', 'Account']);
+        await expect(nav(page)).toHaveText(['Home', 'Account']);
         await toVehicles(page);
         const passes = page.getByTestId('passes-tab');
         await expect(passes).toBeVisible();
@@ -89,7 +89,7 @@ test.describe('Dashboard mock world: today\'s screens @desktop-only', () => {
         const residents = page.getByTestId('passes-residents');
         const visitors = page.getByTestId('passes-visitors');
         await expect(residents).toBeVisible({ timeout: 30_000 });
-        await expect(nav(page)).toHaveText(['Today', 'Account']);
+        await expect(nav(page)).toHaveText(['Home', 'Account']);
         await expect(page.getByTestId('passes-tab').getByRole('heading', { name: `Passes · ${PROPERTIES.mayfield.name}` })).toBeVisible();
         await expect(residents.getByRole('listitem')).toHaveCount(4);
         await expect(residents).toContainText('Keisha Monroe');
