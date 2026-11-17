@@ -1077,6 +1077,12 @@ test('queueStateFor: pending-only ignores and never writes ?status=&q=', () => {
   assert.deepEqual(queueStateFor({ search: '?status=denied&q=214' }), { segment: r.status, q: r.q, syncUrl: true });
 });
 
+test('queueStateFor: an embedded queue opens on its segment and leaves the URL alone', () => {
+  assert.deepEqual(queueStateFor({ segment: 'approved', search: '?status=history&q=abc' }), { segment: 'approved', q: '', syncUrl: false });
+  // An unknown segment is ignored: the URL decides, as before.
+  assert.deepEqual(queueStateFor({ segment: 'nope', search: '?status=history' }).syncUrl, true);
+});
+
 test('pendingOldestFirst: only what waits for a decision, the longest wait first', () => {
   const rows = queueRows({
     residents: [

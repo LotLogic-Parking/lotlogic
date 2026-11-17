@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  joinOps, statusFor, filterChips, applyFilter, residentLink, sortRows, towPartnerOf, needsFor, numberOrDash, DASH,
+  joinOps, statusFor, filterChips, applyFilter, residentLink, sortRows, towPartnerOf, needsFor, needDetail, managerName, numberOrDash, DASH,
 } from '../src/lib/adminTable.js';
 
 const NOW = Date.parse('2026-11-16T19:30:00Z'); // Mon Nov 16, 2:30 PM in Charlotte
@@ -79,7 +79,7 @@ test('statusFor: each rule in order, the first match wins', () => {
   // Cameras silent: "Camera offline" (the camera's own need is that same fact, so it does not win).
   assert.deepEqual(statusFor(joined(row('plaza')), NOW), { key: 'camera_offline', label: 'Camera offline', tone: 'red' });
   // Registrations older than a day.
-  assert.deepEqual(statusFor(joined(row('fm', { pending_registration_count: 3, oldest_pending_registration_at: ago(30 * HOUR) })), NOW), { key: 'waiting', label: '3 waiting', tone: 'amber' });
+  assert.deepEqual(statusFor(joined(row('fm', { pending_registration_count: 3, oldest_pending_registration_at: ago(30 * HOUR) })), NOW), { key: 'waiting', label: '3 waiting over a day', tone: 'amber' });
   // An amber need: its title.
   assert.deepEqual(statusFor(joined(row('fm')), NOW), { key: 'needs_amber', label: 'Tow request not acknowledged', tone: 'amber' });
   // Go-live ahead.
@@ -87,19 +87,25 @@ test('statusFor: each rule in order, the first match wins', () => {
   assert.deepEqual(statusFor(joined(row('volaire')), NOW), { key: 'ok', label: 'All good', tone: 'green' });
 });
 
-test('statusFor: no ops (admin-ops failed) never says Camera offline; no cameras never says it either', () => {
-  assert.equal(statusFor({ ...row('plaza'), ops: null }, NOW).key, 'ok');
+test('statusFor: no ops (admin-ops failed) never says Camera offline, nor All good; no cameras never says offline', () => {
+  assert.deepEqual(statusFor({ ...row('plaza'), ops: null }, NOW), { key: 'unknown', label: 'Not checked', tone: 'neutral' });
   assert.equal(statusFor({ ...row('v'), ops: { working: false, cameras: 0, boots_on_cars: 0, needs: [] } }, NOW).key, 'ok');
+});
+
+test('statusFor: a row built from admin-ops alone (/admin/clients failed) is Not checked unless admin-ops says more', () => {
+  const ops = { working: true, cameras: 2, boots_on_cars: 0, needs: [] };
+  assert.equal(statusFor({ id: 'm', name: 'M', _partial: true, ops }, NOW).label, 'Not checked');
+  assert.equal(statusFor({ id: 'p', name: 'P', _partial: true, ops: { ...ops, working: false } }, NOW).label, 'Camera offline');
 });
 
 test('statusFor: pending 2 h old is not "waiting"; over 24 h is', () => {
   const r = (h) => ({ ...row('x', { pending_registration_count: 2, oldest_pending_registration_at: ago(h * HOUR) }), ops: null });
-  assert.equal(statusFor(r(2), NOW).key, 'ok');
-  assert.equal(statusFor(r(25), NOW).label, '2 waiting');
+  assert.equal(statusFor(r(2), NOW).key, 'unknown');
+  assert.equal(statusFor(r(25), NOW).label, '2 waiting over a day');
 });
 
 test('statusFor: go-live tomorrow starts, today or yesterday is all good, none is all good', () => {
-  const r = (d) => ({ ...row('x', { go_live_date: d }), ops: null });
+  const r = (d) => ({ ...row('x', { go_live_date: d }), ops: { working: null, cameras: 0, boots_on_cars: 0, needs: [] } });
   assert.equal(statusFor(r('2026-11-17'), NOW).label, 'Starts Nov 17');
   assert.equal(statusFor(r('2026-11-16'), NOW).label, 'All good');
   assert.equal(statusFor(r('2026-11-15'), NOW).label, 'All good');
@@ -161,6 +167,30 @@ test('sortRows: red first, then waiting / amber, then starts, then all good; by 
     row('mayfield', { name: 'Mayfield', unreached_request_count: 1 }),
   ], OPS);
   assert.deepEqual(sortRows(rows, NOW).map(r => r.name), ['Mayfield', 'Plaza', 'Fort Mill', 'The Volaire', 'Alpha', 'Zeta']);
+});
+
+test('sortRows: inside red, statusFor\'s order beats the name (Request not reached before Camera offline)', () => {
+  const rows = joinOps([
+    row('plaza', { name: 'Alpha Plaza' }),
+    row('fm', { name: 'Zed Townhomes', unreached_request_count: 1 }),
+    row('x', { name: 'Not Checked' }),
+  ], OPS);
+  rows[2] = { ...rows[2], ops: null };
+  assert.deepEqual(sortRows(rows, NOW).map(r => r.name), ['Zed Townhomes', 'Alpha Plaza', 'Not Checked']);
+});
+
+test('needDetail: the panel leaves out the property it is the panel of', () => {
+  assert.equal(needDetail({ detail: 'At Charlotte Travel Plaza.' }, { name: 'Charlotte Travel Plaza' }), '');
+  assert.equal(needDetail({ detail: 'SCX3108 at Fort Mill.' }, { name: 'Fort Mill' }), 'SCX3108 at Fort Mill');
+  assert.equal(needDetail({ detail: 'At A (B). Then more.' }, { name: 'A (B)' }), 'Then more');
+});
+
+test('managerName: the contact person, never the property\'s own name again', () => {
+  assert.equal(managerName({ name: 'The Volaire', owner_name: 'The Volaire' }), '');
+  assert.equal(managerName({ name: 'The Volaire', owner_name: 'the volaire ' }), '');
+  assert.equal(managerName({ name: 'The Volaire', owner_name: 'The Volaire', owner_contact_name: 'Justin Christian' }), 'Justin Christian');
+  assert.equal(managerName({ name: 'Fort Mill Townhomes II', owner_name: 'Fort Mill Townhomes' }), 'Fort Mill Townhomes');
+  assert.equal(managerName({ name: 'X', owner_name: null }), '');
 });
 
 test('needsFor: the row\'s needs, red first, without the 4-hour registration need', () => {

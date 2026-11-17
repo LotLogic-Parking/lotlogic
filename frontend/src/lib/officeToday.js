@@ -56,10 +56,12 @@ const num = (v) => (Number.isFinite(v) ? v : null);
  * @param {Array|null} [p.permitsRows] queue rows, when the caller holds them instead of counts
  * @param {object|null} p.summary   `GET /apartment/properties/{id}/summary`, null while loading or after a failure
  * @param {boolean} [p.cameras]     the property's `features.cameras`, for the label before presence lands
+ * @param {string|null} [p.goLiveDate] the property's own `go_live_date` (`/auth/me`), so "Enforcement starts"
+ *                                  still shows when the summary failed
  * @param {number} [p.now]
  * @returns {Array<{id: 'onsite'|'waiting'|'enforced', label: string, value: string, sub: string, tone: 'plain'|'attention'}>}
  */
-export function todayTiles({ presence, counts = null, permitsRows = null, summary, cameras, now = Date.now() }) {
+export function todayTiles({ presence, counts = null, permitsRows = null, summary, cameras, goLiveDate = null, now = Date.now() }) {
   const queue = counts || (Array.isArray(permitsRows) ? segmentCounts(permitsRows, '', now) : null);
 
   const hasCameras = typeof presence?.has_cameras === 'boolean' ? presence.has_cameras : cameras !== false;
@@ -87,9 +89,10 @@ export function todayTiles({ presence, counts = null, permitsRows = null, summar
   const tows = num(summary?.tows_this_week);
   const boots = num(summary?.boots_this_week);
   const known = summary && tows !== null && boots !== null;
+  const goLive = summary?.go_live_date ?? goLiveDate;
   const enforced = {
     id: 'enforced', label: 'Towed or booted this week', value: known ? String(tows + boots) : DASH,
-    sub: !summary ? '' : startsLater(summary.go_live_date, now) ? `Enforcement starts ${goLiveLabel(summary.go_live_date)}` : 'since Monday',
+    sub: startsLater(goLive, now) ? `Enforcement starts ${goLiveLabel(goLive)}` : !summary ? '' : 'since Monday',
     tone: 'plain',
   };
 
@@ -141,7 +144,8 @@ export function plateVerdict(found, propertyName = '') {
   const onNow = here ? 'On the property now' : '';
   switch (verdict) {
     case 'resident':
-      return { tone: 'green', word: 'Registered', detail: join('Resident', unit && `Unit ${unit}`, car, onNow) };
+      // "Registered" already says it is a resident's long-term pass.
+      return { tone: 'green', word: 'Registered', detail: join(unit && `Unit ${unit}`, car, onNow) };
     case 'visitor': {
       const until = row?.valid_until ? fmtETStamp(row.valid_until) : '';
       return { tone: 'green', word: 'Visitor pass', detail: join(unit && `Visiting unit ${unit}`, until && `until ${until}`, onNow) };

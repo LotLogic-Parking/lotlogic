@@ -581,10 +581,14 @@ export function readQueueQuery(search) {
  * The queue's starting segment and search, and whether it keeps them in the
  * URL. The full queue reads `?status=&q=`; the office's Today card
  * (`pendingOnly`) is always "Needs review", unsearched, and leaves the URL
- * alone (it shares the page with other sections).
+ * alone (it shares the page with other sections); `segment` opens an embedded
+ * queue on that segment, also leaving the URL alone.
  */
-export function queueStateFor({ pendingOnly = false, search = '' } = {}) {
+export function queueStateFor({ pendingOnly = false, search = '', segment = null } = {}) {
   if (pendingOnly) return { segment: 'pending', q: '', syncUrl: false };
+  // Embedded on another screen (Vehicles at a property with no camera): its
+  // own segment, and the URL left alone, like the Today card.
+  if (segment && SEGMENT_IDS.includes(segment)) return { segment, q: '', syncUrl: false };
   const { status, q } = readQueueQuery(search);
   return { segment: status, q, syncUrl: true };
 }

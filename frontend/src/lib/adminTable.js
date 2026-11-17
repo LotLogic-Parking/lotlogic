@@ -12,9 +12,11 @@
 //   * A property with no cameras, or no admin-ops answer, never says "Camera offline".
 //   * go-live null or past: no "Starts …".
 //   * A number that did not load is a dash, never 0.
+//   * A row a source did not answer for is "Not checked", never "All good".
 
 import { displayPartnerName } from './towPartner.js';
 import { goLiveLabel, startsLater } from './officeToday.js';
+import { registrationLink } from './permitsQueue.js';
 
 export const DASH = '—';
 /** A registration is late after a day without an answer (plan Global Constraints). */
@@ -83,6 +85,29 @@ export function needsFor(row) {
     .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'red' ? -1 : 1));
 }
 
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A need's detail line inside its own property's panel: without the property's
+ * name, which is the panel's title ("At Charlotte Travel Plaza." → "").
+ */
+export function needDetail(need, row) {
+  let d = String(need?.detail || '').trim();
+  const name = String(row?.name || '').trim();
+  if (name) d = d.replace(new RegExp(`^At ${escapeRe(name)}\\.?\\s*`, 'i'), '');
+  return d.replace(/\.\s*$/, '');
+}
+
+/**
+ * The person who runs the property, or '' when all we know is the property's
+ * own name again (`/admin/clients` sends `owner_name` = the owner's business
+ * name, which for most apartments is the property).
+ */
+export function managerName(row) {
+  const n = String(row?.owner_contact_name || row?.owner_name || '').trim();
+  return n && n.toLowerCase() !== String(row?.name || '').trim().toLowerCase() ? n : '';
+}
+
 function startsShort(date) {
   // "Jan 1, 2027" → "Jan 1"
   return goLiveLabel(date).replace(/, \d{4}$/, '');
@@ -90,8 +115,9 @@ function startsShort(date) {
 
 /**
  * One status per row, the most urgent that applies:
- * Request not reached · a red need · Camera offline · N waiting · an amber need · Starts <date> · All good.
- * @returns {{key: 'unreached'|'needs_red'|'camera_offline'|'waiting'|'needs_amber'|'starts'|'ok', label: string, tone: 'red'|'amber'|'blue'|'green'}}
+ * Request not reached · a red need · Camera offline · N waiting over a day · an amber need · Starts <date> ·
+ * Not checked (admin-ops or /admin/clients did not answer for the row) · All good.
+ * @returns {{key: 'unreached'|'needs_red'|'camera_offline'|'waiting'|'needs_amber'|'starts'|'unknown'|'ok', label: string, tone: 'red'|'amber'|'blue'|'neutral'|'green'}}
  */
 export function statusFor(row, now = Date.now()) {
   if (Number(row?.unreached_request_count) > 0) return { key: 'unreached', label: 'Request not reached', tone: 'red' };
@@ -100,11 +126,13 @@ export function statusFor(row, now = Date.now()) {
   if (red) return { key: 'needs_red', label: red.title, tone: 'red' };
   if (row?.ops && row.ops.cameras > 0 && row.ops.working === false) return { key: 'camera_offline', label: 'Camera offline', tone: 'red' };
   if (waitingLate(row, now)) {
-    return { key: 'waiting', label: `${Number(row.pending_registration_count)} waiting`, tone: 'amber' };
+    return { key: 'waiting', label: `${Number(row.pending_registration_count)} waiting over a day`, tone: 'amber' };
   }
   const amber = needs.find(n => n.severity === 'amber');
   if (amber) return { key: 'needs_amber', label: amber.title, tone: 'amber' };
   if (startsLater(row?.go_live_date, now)) return { key: 'starts', label: `Starts ${startsShort(row.go_live_date)}`, tone: 'blue' };
+  // No health claim without the data behind it.
+  if (row?.ops == null || row?._partial) return { key: 'unknown', label: 'Not checked', tone: 'neutral' };
   return { key: 'ok', label: 'All good', tone: 'green' };
 }
 
@@ -119,12 +147,13 @@ const needsAttention = (row, now) => {
   return tone === 'red' || tone === 'amber';
 };
 
-const RANK = { red: 0, amber: 1, blue: 2, green: 3 };
+// The order statusFor checks its rules in: an office waiting on us first.
+const RANK = { unreached: 0, needs_red: 1, camera_offline: 2, waiting: 3, needs_amber: 4, starts: 5, unknown: 6, ok: 7 };
 
-/** Most urgent first, then by name. */
+/** Most urgent first (statusFor's order), then by name. */
 export function sortRows(rows, now = Date.now()) {
   return list(rows)
-    .map(r => ({ r, rank: RANK[statusFor(r, now).tone] ?? 9 }))
+    .map(r => ({ r, rank: RANK[statusFor(r, now).key] ?? 9 }))
     .sort((a, b) => a.rank - b.rank || String(a.r.name || '').localeCompare(String(b.r.name || '')))
     .map(x => x.r);
 }
@@ -167,6 +196,5 @@ export function applyFilter(rows, chipId, query, now = Date.now()) {
 
 /** The resident registration link for an apartment with a QR code, else null. */
 export function residentLink(row, origin) {
-  if (!row?.qr_code_id || row.property_type === 'truck_plaza') return null;
-  return `${String(origin || '').replace(/\/+$/, '')}/apt/${encodeURIComponent(row.qr_code_id)}?role=resident`;
+  return row?.property_type === 'truck_plaza' ? null : registrationLink(String(origin || '').replace(/\/+$/, ''), row?.qr_code_id);
 }

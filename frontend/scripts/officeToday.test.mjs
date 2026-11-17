@@ -87,6 +87,13 @@ test('enforced: tows plus boots this week; a future go-live says when enforcemen
   assert.equal(tile(todayTiles({ presence: null, counts, summary: { ...summary, go_live_date: '2026-11-16' }, now: NOW }), 'enforced').sub, 'since Monday');
 });
 
+test('enforced: the summary failed, the property\'s own go-live still says when enforcement starts', () => {
+  const t = tile(todayTiles({ presence: null, counts, summary: null, goLiveDate: '2027-01-01', now: NOW }), 'enforced');
+  assert.equal(t.value, DASH);
+  assert.equal(t.sub, 'Enforcement starts Jan 1, 2027');
+  assert.equal(tile(todayTiles({ presence: null, counts, summary: null, goLiveDate: '2026-11-03', now: NOW }), 'enforced').sub, '');
+});
+
 test('go-live dates are calendar days in Charlotte', () => {
   assert.equal(goLiveLabel('2027-01-01'), 'Jan 1, 2027');
   assert.equal(goLiveLabel('nope'), '');
@@ -126,7 +133,7 @@ test('plateVerdict: every verdict has a word, and a tone that is never colour al
   const words = ['resident', 'visitor', 'pending', 'hold', 'not_registered'].map(v => plateVerdict({ verdict: v, row: null }, 'The Volaire'));
   assert.deepEqual(words.map(w => w.word), ['Registered', 'Visitor pass', 'Waiting for approval', 'On hold', 'Not registered']);
   assert.deepEqual(words.map(w => w.tone), ['green', 'green', 'info', 'info', 'red']);
-  assert.equal(plateVerdict(findPlate('ABC1234', { permitsRows: rows, now: NOW }), 'The Volaire').detail, 'Resident · Unit 214 · 2019 Honda Civic, gray');
+  assert.equal(plateVerdict(findPlate('ABC1234', { permitsRows: rows, now: NOW }), 'The Volaire').detail, 'Unit 214 · 2019 Honda Civic, gray');
   assert.equal(plateVerdict(findPlate('NOPE', { permitsRows: rows, now: NOW }), 'The Volaire').detail, 'No parking pass at The Volaire.');
   assert.match(plateVerdict(findPlate('GST7120', { permitsRows: rows, now: NOW }), 'X').detail, /^Visiting unit 205 · until Wed Nov 18, 6:30 PM$/);
   assert.equal(plateVerdict(null, 'X'), null);
