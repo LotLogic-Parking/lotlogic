@@ -427,7 +427,7 @@ export function AdminPropertiesPage({
             </aside>
           ) : (
             <aside className="ap-panel" aria-label="Selected property">
-              <p className="ap-panel-empty">Pick a property to see its manager, go-live date and links.</p>
+              <p className="ap-panel-empty">Pick a property to see its manager, go‑live date and links.</p>
             </aside>
           )}
         </div>
