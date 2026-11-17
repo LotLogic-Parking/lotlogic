@@ -15,7 +15,7 @@ const active = (...ids: string[]) => new Map(ids.map((id) => [id, pause(id)]));
 
 Deno.test("lock at a paused property: 409 enforcement_paused with the property and the Eastern end time", () => {
   assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS }), {
-    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Nothing was recorded. Take the boot off the wheel.",
+    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
 });
 
@@ -27,7 +27,7 @@ Deno.test("lock at an unpaused property: no refusal, even while another property
 Deno.test("lock with no property picked: GPS inside a paused property refuses, even one that is not the agent's", () => {
   // In Mayfield's lot; the agent here only has The Villas at 1825.
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: [MINE[0]], lat: 35.2831, lon: -80.8105, active: active("mayfield"), points: POINTS }), {
-    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Nothing was recorded. Take the boot off the wheel.",
+    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
   // GPS clearly somewhere else: the boot goes ahead.
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: 34.9776, lon: -80.9979, active: active("mayfield"), points: POINTS }), null);
@@ -35,7 +35,7 @@ Deno.test("lock with no property picked: GPS inside a paused property refuses, e
 
 Deno.test("lock with no property and no GPS while one of the agent's properties is paused: pick the property first", () => {
   const r = lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS });
-  assertEquals(r, { code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Nothing was recorded. Pick the property you are booting at." });
+  assertEquals(r, { code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Pick the property you are booting at." });
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: 0, lon: 0, active: active("mayfield"), points: POINTS })?.code, "enforcement_paused");
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: [MINE[0]], lat: null, lon: null, active: active("mayfield"), points: POINTS }), null);
 });
@@ -68,4 +68,15 @@ Deno.test("lock during a pause: a car the drivers were texted to boot before the
   assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", standing: [{ ...before[0], dispatched_at: "2026-11-20T23:05:00Z" }] })?.code, "enforcement_paused");
   assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", standing: [{ ...before[0], property_id: "1825" }] })?.code, "enforcement_paused");
   assertEquals(dispatchedBeforePause("", "mayfield", pause("mayfield"), before), false);
+});
+
+Deno.test("lock with no property and no GPS: a car sent to the agent before the pause still goes ahead; any other car is told to pick the property", () => {
+  // Gabe 2026-11-17: a boot dispatch texted before the pause goes ahead during it. Without a property or a
+  // location, the plate itself says where: it was sent to be booted at one of the agent's paused properties.
+  const before = [{ property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-20T22:55:00Z" }];
+  const base = { propertyId: null, myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS };
+  assertEquals(lockPauseRefusal({ ...base, plate: "abc 1234", standing: before }), null);
+  // Sent after the pause started, or another plate: refused, as before.
+  assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", standing: [{ ...before[0], dispatched_at: "2026-11-20T23:05:00Z" }] })?.code, "enforcement_paused");
+  assertEquals(lockPauseRefusal({ ...base, plate: "XYZ789", standing: before })?.code, "enforcement_paused");
 });

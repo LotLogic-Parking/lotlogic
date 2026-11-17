@@ -5,8 +5,8 @@
 //   • Read the pauses now. A failed read refuses (503 pause_check_failed),
 //     except at a property known to be a truck plaza (no pause exists there).
 //   • No pause anywhere: done, nothing else is read.
-//   • Otherwise the open boot dispatches at the paused properties are read: a
-//     boot_sms dispatch texted before the pause started stands
+//   • Otherwise the boot dispatches at the paused properties are read, open
+//     or answered DONE: one texted before the pause started still goes ahead
 //     (pause_gate.ts dispatchedBeforePause). A failed read of them counts as
 //     none, so the boot is refused, not allowed.
 //   • A refusal is 409 enforcement_paused with the pause_gate.ts message.
@@ -42,10 +42,10 @@ export async function refuseIfPaused(db: PauseDb, i: {
   }
   if (pauses.active.size === 0) return;
   const mine = await i.myProperties();
-  // Open boot dispatches at the paused properties: one texted before the pause started stands.
+  // Boot dispatches at the paused properties, open or answered DONE: one texted before the pause started goes ahead.
   const { data: standing, error: sErr } = await db.from("alpr_violations")
-    .select("property_id, plate_text, dispatched_at")
-    .eq("action_channel", "boot_sms").eq("status", "dispatched")
+    .select("property_id, plate_text, dispatched_at, status, action_taken")
+    .eq("action_channel", "boot_sms").in("status", ["dispatched", "resolved"])
     .in("property_id", [...pauses.active.keys()]);
   if (sErr) console.error(`lock standing_dispatch_lookup_failed err=${sErr.message}`);
   const refusal = lockPauseRefusal({

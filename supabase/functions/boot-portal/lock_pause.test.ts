@@ -33,7 +33,7 @@ Deno.test("lock wiring: a paused property refuses 409 enforcement_paused; an unp
   const db = () => fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [] });
   assertEquals(await refusal(run(db(), "mayfield").p), {
     status: 409, code: "enforcement_paused",
-    message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Nothing was recorded. Take the boot off the wheel.",
+    message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
   await run(db(), "plaza").p;
 });
@@ -64,11 +64,17 @@ Deno.test("lock wiring: a boot_sms dispatch texted before the pause started, sti
   await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [bootSms({})] }), "mayfield", "abc-1234").p;
 });
 
+Deno.test("lock wiring: a dispatch texted before the pause that the driver already answered DONE still lets the boot be recorded", async () => {
+  // The DONE reply (backend BOOT_REPLY_OUTCOMES "booted") resolves the row; the boot is still the one sent before the pause.
+  await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [bootSms({ status: "resolved", action_taken: "boot" })] }), "mayfield").p;
+});
+
 Deno.test("lock wiring: the dispatch does not stand if sent after the start, closed, another channel, another plate or another property", async () => {
   const refused = async (v: Row) =>
     (await refusal(run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [v] }), "mayfield").p)).code;
   assertEquals(await refused(bootSms({ dispatched_at: "2026-11-20T23:05:00.000Z" })), "enforcement_paused");
-  assertEquals(await refused(bootSms({ status: "booted" })), "enforcement_paused");
+  assertEquals(await refused(bootSms({ status: "dismissed", action_taken: "no_tow" })), "enforcement_paused"); // stood down, GONE, or stale
+  assertEquals(await refused(bootSms({ status: "dispatch_failed" })), "enforcement_paused"); // the text never went out
   assertEquals(await refused(bootSms({ action_channel: "email" })), "enforcement_paused");
   assertEquals(await refused(bootSms({ plate_text: "XYZ9876" })), "enforcement_paused");
   assertEquals(await refused(bootSms({ property_id: "plaza" })), "enforcement_paused");
