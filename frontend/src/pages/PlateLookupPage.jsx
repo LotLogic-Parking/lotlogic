@@ -3,7 +3,7 @@ import { db } from '../lib/db.js';
 import { apiFetch } from '../lib/api.js';
 import { scopePropsToPartner } from '../shared/scope.js';
 import { PlateTimeline } from './lot/PlateTimeline.jsx';
-import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine } from '../lib/verdicts.js';
+import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine, lookupSuggestions } from '../lib/verdicts.js';
 import { isTruck } from '../lib/partnerTeam.js';
 
 const REMEMBERED_KEY = 'lotlogic_lookup_property';
@@ -54,7 +54,8 @@ function PlateLookupVerdict({ out, scope, propertyName, companyName, history, ty
       ? <div style={{ marginTop: 12, fontWeight: 600, fontSize: 14, lineHeight: 1.45 }}>Temp tag EXPIRED — eligible for the expired-tag (48-hr-warning) tow path.</div>
       : <div style={{ marginTop: 12, fontSize: 14, opacity: .85 }}>Temp tag{d.tag_expiration ? ' · expires ' + fmtTagDate(d.tag_expiration) : ''}</div>
   ) : null;
-  const suggestions = out.verdict === 'not_registered' && Array.isArray(out.suggestions) ? out.suggestions : [];
+  // Also under a pause whose answer underneath is not_registered (contract C sends them then too).
+  const suggestions = lookupSuggestions(out);
   // A Truck's check covers only their properties, and says so (spec §2.2).
   const scopeLine = scopeCountLine(out.scope);
 

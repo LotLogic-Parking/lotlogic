@@ -3,7 +3,7 @@
 // can't silently shift another's signal word or tone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine } from '../src/lib/verdicts.js';
+import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine, lookupSuggestions } from '../src/lib/verdicts.js';
 import { fmtPauseTime } from '../src/lib/pause.js';
 
 const BANNED = /\b(resident|visitor|permanent|temporary|guest|driver)s?\b/i;
@@ -417,4 +417,15 @@ test('resolveAllScopeResult: a pause at ANOTHER property is never this lot\'s DO
 test('paused copy uses no banned word', () => {
   const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
   for (const s of [p.signal, p.reason, p.after]) assert.doesNotMatch(s, BANNED);
+});
+
+test('lookupSuggestions: near-miss plates for not_registered, and for a pause whose answer underneath is not_registered', () => {
+  const near = [{ plate: 'ABC1235', source: 'guest', active_now: true }];
+  assert.deepEqual(lookupSuggestions({ verdict: 'not_registered', suggestions: near }), near);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'not_registered', detail: {} } }, suggestions: near }), near);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'resident', detail: {} } }, suggestions: near }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'resident', suggestions: near }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'not_registered' } } }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'not_registered', suggestions: 'nope' }), []);
+  assert.deepEqual(lookupSuggestions(null), []);
 });

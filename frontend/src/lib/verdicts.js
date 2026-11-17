@@ -245,3 +245,14 @@ export function scopeCountLine(scope) {
   if (!Number.isInteger(n) || n < 0) return null;
   return `Checked at your ${n} ${n === 1 ? 'property' : 'properties'}`;
 }
+
+/**
+ * The near-miss plates under a Check (`suggestions`, sent with a
+ * not_registered answer). A paused property sends them too when the answer
+ * underneath the pause is not_registered (contract C), and they show the same
+ * way. Never a verdict themselves: a tap checks the plate again.
+ */
+export function lookupSuggestions(out) {
+  const underlying = out?.verdict === 'paused' ? out?.detail?.underlying?.verdict : out?.verdict;
+  return underlying === 'not_registered' && Array.isArray(out?.suggestions) ? out.suggestions : [];
+}

@@ -217,8 +217,13 @@ export interface World {
   rpc: Record<string, (args: Row) => unknown>;
   /** The rows the admin-ops function loads; its answer is `buildOps(world.ops)`. */
   ops: Omit<OpsInput, 'now'>;
-  /** The boot-portal fake's boots, agents and properties (reads only). */
-  boots: { me: Row; boots: Row[]; properties: Row[]; agents: Row[]; admin: boolean };
+  /**
+   * The boot-portal fake's boots, agents and properties (reads only). GET /properties gives each
+   * property `paused_until` from `world.pauses` (pause_gate.ts annotatePauses); `pausesUnknown`
+   * answers as the function does when it could not read the pauses: no `paused_until`, and
+   * `pauses_unknown: true`.
+   */
+  boots: { me: Row; boots: Row[]; properties: Row[]; agents: Row[]; admin: boolean; pausesUnknown?: boolean };
   /**
    * `enforcement_pauses` rows (backend contract C): `{id, property_id, starts_at, ends_at (planned), reason,
    * created_at, created_by_name, ended_early_at, ended_by_name, cancelled_at, cancelled_by_name}`. Status is
@@ -1203,7 +1208,13 @@ function answerBootPortal(world: World, method: string, route: string, q: URLSea
   const no = (status: number, error: string, message: string): Reply => ({ status, json: { ok: false, error, message } });
   if (method !== 'GET') return { reply: ok({}), handledBy: null };          // placing, opening and paying live in agent.spec.ts's own fake
   if (route === 'boots') return { reply: ok({ ok: true, me: b.me, boots: b.boots }), handledBy: 'boot-portal.boots' };
-  if (route === 'properties') return { reply: ok({ ok: true, properties: b.properties }), handledBy: 'boot-portal.properties' };
+  if (route === 'properties') {
+    // pause_gate.ts annotatePauses: the running pause's effective end, or null; a failed read says so instead.
+    const json = b.pausesUnknown
+      ? { ok: true, properties: b.properties, pauses_unknown: true }
+      : { ok: true, properties: b.properties.map((p) => ({ ...p, paused_until: activePauseFor(world, p.id)?.ends_at ?? null })) };
+    return { reply: ok(json), handledBy: 'boot-portal.properties' };
+  }
   if (route === 'agents') return { reply: b.admin ? ok({ ok: true, agents: b.agents, properties: b.properties }) : no(403, 'not_allowed', 'Managing agents is for LotLogic admins.'), handledBy: 'boot-portal.agents' };
   if (route === 'payments') return { reply: b.admin ? ok({ ok: true, rows: [], square_ok: true, since: '2026-11-15T05:00:00Z' }) : no(403, 'not_allowed', 'Payments are for LotLogic admins.'), handledBy: 'boot-portal.payments' };
   if (route === 'boot') {

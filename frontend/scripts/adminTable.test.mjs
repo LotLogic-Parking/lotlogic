@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   joinOps, statusFor, filterChips, applyFilter, residentLink, sortRows, towPartnerOf, needsFor, needDetail, managerName, numberOrDash, DASH,
+  pauseOffer, CLASSIC_PAUSE_LINE,
 } from '../src/lib/adminTable.js';
 
 const NOW = Date.parse('2026-11-16T19:30:00Z'); // Mon Nov 16, 2:30 PM in Charlotte
@@ -254,4 +255,14 @@ test('sortRows: a paused property sorts after the waiting ones and before Starts
 test('a paused property does not need attention (blue is not red or amber)', () => {
   const rows = joinOps([row('volaire', { active_pause: PAUSE })], OPS);
   assert.equal(filterChips(rows, NOW).find(c => c.id === 'attention').count, 0);
+});
+
+test('pauseOffer: Pause enforcement at an apartment; a line instead at a classic office page; nothing at a truck plaza', () => {
+  const STEVENSONS = 'af974dbe-5836-4a10-9dc8-d5f12e5cb9cc';   // CLASSIC_OFFICE_PROPERTY_IDS: no pause banner on its office page
+  assert.equal(pauseOffer({ id: 'p1', property_type: 'apartment' }), 'pause');
+  assert.equal(pauseOffer({ id: STEVENSONS, property_type: 'apartment' }), 'classic');
+  assert.equal(pauseOffer({ id: STEVENSONS.toUpperCase(), property_type: 'apartment' }), 'classic');
+  assert.equal(pauseOffer({ id: 'p2', property_type: 'truck_plaza' }), null);
+  assert.equal(pauseOffer({ id: 'p3', property_type: 'apartment', _partial: true }), null);   // admin-ops alone: the type is not the backend's
+  assert.equal(CLASSIC_PAUSE_LINE, "Pausing is not available for this property's office page yet.");
 });

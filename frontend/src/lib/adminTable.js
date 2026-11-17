@@ -18,6 +18,7 @@ import { displayPartnerName } from './towPartner.js';
 import { goLiveLabel, startsLater } from './officeToday.js';
 import { registrationLink } from './permitsQueue.js';
 import { fmtPauseTime } from './pause.js';
+import { isClassicOffice } from './features.js';
 
 export const DASH = '—';
 /** A registration is late after a day without an answer (plan Global Constraints). */
@@ -150,6 +151,20 @@ export function activePause(row, now = Date.now()) {
   if (!p) return null;
   const end = ms(p.ends_at);
   return Number.isFinite(end) && end > now ? p : null;
+}
+
+/** Said in the panel instead of Pause enforcement at a property that keeps the classic office page. */
+export const CLASSIC_PAUSE_LINE = "Pausing is not available for this property's office page yet.";
+
+/**
+ * What the panel offers for a pause: `'pause'` (the Pause enforcement button)
+ * at an apartment; `'classic'` (CLASSIC_PAUSE_LINE) at one that keeps the
+ * classic office page, which has no pause banner, so its office could not see
+ * or end the pause; null at a truck plaza or a row admin-ops alone built.
+ */
+export function pauseOffer(row) {
+  if (!row || row._partial || row.property_type === 'truck_plaza') return null;
+  return isClassicOffice(row) ? 'classic' : 'pause';
 }
 
 /** True when the oldest waiting registration has waited more than a day. */

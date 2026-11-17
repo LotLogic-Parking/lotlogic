@@ -157,7 +157,8 @@ test.describe('Enforcement pause @desktop-only', () => {
                 ends_local: etLocal(ACTIVE.ends_at), reason: 'Pool party', plate,
                 underlying: { verdict: 'not_registered', detail: { plate } },
               },
-              suggestions: [],
+              // Sent because the answer under the pause is not_registered (contract C): shown as for a plain one.
+              suggestions: [{ plate: 'ZZZ9989', source: 'guest', active_now: true, unit: '204', name: null }],
             }),
           },
         );
@@ -193,6 +194,8 @@ test.describe('Enforcement pause @desktop-only', () => {
         // The same words as the banner and the Requests line: "Wed 6:00 PM", no " ET" on one screen only.
         await expect(card).toContainText('Enforcement paused by The Volaire until Wed 6:00 PM · Pool party');
         await expect(page.getByTestId('lookup-after-pause')).toHaveText('After the pause: no parking pass here');
+        await expect(page.getByText('No exact match — closest registered plates')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Check plate ZZZ9989' })).toBeVisible();
         await shots(page, 'pause-lookup', world);
 
 
@@ -380,6 +383,92 @@ test.describe('Enforcement pause @desktop-only', () => {
       await expect(page.getByText('DO NOT TOW — PAUSED', { exact: true })).toHaveCount(0);   // no single headline
       await shots(page, 'pause-lookup-all', world);
       expectClean(world, [`403 (Forbidden) [${API_ORIGIN}/partner/properties?verification_status=pending]`]);
+    });
+
+    test('the open panel re-reads the pauses every minute, so it never disagrees with the row\'s pill', async ({ page }) => {
+      const world = withPauses('admin', ACTIVE);
+      await page.clock.install({ time: world.now });
+      await enter(page, server.origin, world, { clock: false });
+      await expect(page.locator('.ap-skel')).toHaveCount(0, { timeout: 30_000 });
+      const row = page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: V.name }) });
+      await row.click();
+      const panel = page.getByTestId('ap-panel');
+      await expect(panel.getByTestId('pause-banner-active')).toBeVisible();
+      const reads = () => world.calls.filter((c) => c.method === 'GET' && c.path === pausesPath).length;
+      const before = reads();
+
+      // Someone ends it elsewhere (the office, on Today). A minute on, the table and the panel both know.
+      world.pauses[0].ended_early_at = new Date(world.now.getTime() - 60_000).toISOString();
+      await page.clock.runFor(61_000);
+      await expect.poll(reads).toBeGreaterThan(before);
+      await expect(row.locator('td').last()).not.toHaveText(/Paused/);
+      await expect(panel.getByTestId('pause-banner-active')).toHaveCount(0);
+      expectClean(world);
+    });
+
+    test('Stevenson\'s keeps the classic office page, which has no pause banner: no Pause enforcement, a line instead', async ({ page }) => {
+      const S = PROPERTIES.stevensons;
+      const world = createWorld('admin');
+      await enter(page, server.origin, world);
+      await expect(page.locator('.ap-skel')).toHaveCount(0, { timeout: 30_000 });
+      await page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: S.name }) }).click();
+      const panel = page.getByTestId('ap-panel');
+      await expect(panel.getByTestId('ap-pause-classic')).toHaveText("Pausing is not available for this property's office page yet.");
+      await expect(panel.getByRole('button', { name: 'Pause enforcement' })).toHaveCount(0);
+      // Another apartment still offers it.
+      await page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: V.name }) }).click();
+      await expect(panel.getByRole('button', { name: 'Pause enforcement' })).toBeVisible();
+      await expect(panel.getByTestId('ap-pause-classic')).toHaveCount(0);
+      expectClean(world);
+    });
+
+    test.describe('the LotLogic agent placing a boot (390 px)', () => {
+      test.use({ viewport: PHONE });
+      const M = PROPERTIES.mayfield;
+      async function toStepOne(page: Page, world: World) {
+        await enter(page, server.origin, world);
+        await expect(page.getByTestId('enforcement-page')).toBeVisible({ timeout: 30_000 });
+        const boot = page.getByTestId('boot-row').filter({ hasText: 'Boot 01' });
+        await boot.locator('.enf-boot-head').click();
+        await boot.getByRole('button', { name: 'Place on a car' }).click();
+        await expect(page.getByTestId('place-step-1')).toBeVisible();
+        await page.getByLabel('Property').selectOption({ label: M.name });
+      }
+
+      test('a paused property: the blue "do not boot" notice before the photo and signature, and no way on', async ({ page }) => {
+        const world = createWorld('agent');
+        world.pauses.push(pauseRow({ property: M, ...ACTIVE, n: 1 }));
+        await toStepOne(page, world);
+        const notice = page.getByTestId('place-pause');
+        await expect(notice).toHaveText('Enforcement is paused here until Wed 6:00 PM — do not boot');
+        await expect(notice).toHaveClass(/is-active/);                                   // the blue of every running pause
+        await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+        await expect(page.getByTestId('place-missing')).toHaveText('Still needed: a property that is not paused');
+        await shots(page, 'pause-agent-place', world);
+        await expectNoMoney(page);
+        expectClean(world);
+      });
+
+      test('the pauses could not be read: a neutral line, and the agent may go on (the server decides at Lock boot)', async ({ page }) => {
+        const world = createWorld('agent');
+        world.boots.pausesUnknown = true;
+        await toStepOne(page, world);
+        const line = page.getByTestId('place-pause');
+        await expect(line).toHaveText('Could not check for a pause');
+        await expect(line).not.toHaveClass(/is-active/);
+        await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
+        await shots(page, 'pause-agent-unknown', world);
+        expectClean(world);
+      });
+
+      test('no pause: no line, and on to the vehicle', async ({ page }) => {
+        const world = createWorld('agent');
+        await toStepOne(page, world);
+        await expect(page.getByTestId('place-pause')).toHaveCount(0);
+        await page.getByRole('button', { name: 'Continue' }).click();
+        await expect(page.getByTestId('place-step-2')).toBeVisible();
+        expectClean(world);
+      });
     });
 
     test('a manager sees the banner but cannot pause, end or cancel', async ({ page }) => {

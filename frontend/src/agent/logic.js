@@ -9,6 +9,8 @@
 // Design: the "LotLogic Enforcement Agent (mockup)" artifact. Sentence case,
 // 12-hour times.
 
+import { fmtPauseTime } from '../lib/pause.js';
+
 export const OPEN_DEPLOYMENT = ['locking', 'active', 'release_authorized'];
 export const IN_FLIGHT = ['queued', 'delivered'];          // boot_commands.status still on its way
 export const LOW_BATTERY_PCT = 25;                          // boot-portal lock(): under 25 % refuses
@@ -232,10 +234,14 @@ export function signPlacement(f, pngDataUrl, at = new Date().toISOString()) {
 
 /**
  * What still stops a step from going on, in words for "Still needed: …".
- * ctx: {properties, boot (a GET /boots row or detail.boot), pending (a command), opening}
+ * ctx: {properties, pausesUnknown, boot (a GET /boots row or detail.boot), pending (a command), opening}
  */
 export function stepMissing(f, step, ctx = {}) {
   const m = [];
+  // A paused property stops every step, Lock boot included: the list may be
+  // re-read after step 1 (the server refuses the lock anyway).
+  const picked = f.property_id ? (ctx.properties || []).find(p => p.id === f.property_id) : null;
+  if (bootPauseNotice(picked, ctx.pausesUnknown)?.kind === 'paused') return ['a property that is not paused'];
   if (step === 1) {
     if (!(ctx.properties || []).length) m.push('a property assigned to you (ask LotLogic)');
     else if (!f.property_id) m.push('property');
@@ -260,6 +266,26 @@ export function stepMissing(f, step, ctx = {}) {
     if (!f.signature) m.push('signature');
   }
   return m;
+}
+
+/**
+ * The enforcement pause at the property picked in step 1, said before the
+ * photo and the signature (spec 2026-11-16 Part 3). boot-portal GET
+ * /properties gives each property `paused_until` (the running pause's end,
+ * ISO, or null), or, when it could not read the pauses, no field and a
+ * top-level `pauses_unknown: true`. The server refuses a lock at a paused
+ * property either way; this only says so first. The end is the server's, as
+ * it was when the list was read, never this device's clock.
+ * @returns {null | {kind: 'paused' | 'unknown', text: string}}
+ */
+export function bootPauseNotice(property, pausesUnknown = false, now = Date.now()) {
+  if (!property) return null;
+  if (property.paused_until) {
+    const until = fmtPauseTime(property.paused_until, now);
+    return { kind: 'paused', text: `Enforcement is paused here${until ? ` until ${until}` : ''} — do not boot` };
+  }
+  if (pausesUnknown) return { kind: 'unknown', text: 'Could not check for a pause' };
+  return null;
 }
 
 /**

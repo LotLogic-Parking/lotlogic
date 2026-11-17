@@ -7,7 +7,8 @@ import { opsFetch, REFRESH_MS } from '../../lib/ops.js';
 import { ago } from '../../lib/enforcement.js';
 import { goLiveLabel } from '../../lib/officeToday.js';
 import {
-  DASH, activePause, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
+  CLASSIC_PAUSE_LINE, DASH, activePause, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, pauseOffer, residentLink, sortRows, statusFor,
+  towPartnerOf, waitingLate,
 } from '../../lib/adminTable.js';
 import { pauseBanners } from '../../lib/pause.js';
 import { PauseBanners } from '../office/PauseBanners.jsx';
@@ -134,13 +135,18 @@ function Needs({ row, onShowBoot }) {
  * Part 3 for a platform admin: the property's pauses as the office sees them
  * on Today (running and scheduled, with End now and Cancel) and Pause
  * enforcement, which the backend allows a platform admin at any apartment
- * (same 72-hour rules). Read when the row opens; until then the row's own
- * running pause (/admin/clients' `active_pause`) shows without a button.
- * `onChanged` reloads the table, so the status pill follows.
+ * (same 72-hour rules). Read when the row opens and every 60 s while it is
+ * open and the page is visible (Today's cadence, and the table's), so the
+ * panel never disagrees with the row's status pill for long; until the first
+ * read the row's own running pause (/admin/clients' `active_pause`) shows
+ * without a button. `onChanged` reloads the table, so the pill follows.
+ * A property on the classic office page (lib/features.js), which shows the
+ * office no pause banner, gets a line instead of Pause enforcement.
  */
 function useAdminPauses(row, onChanged) {
   const now = useNowTick();
-  const apartment = row.property_type !== 'truck_plaza' && !row._partial;
+  const offer = pauseOffer(row);
+  const apartment = offer !== null;
   const [pauses, setPauses] = useState(null);
   const [sheet, setSheet] = useState(null);   // null | {kind: 'new'} | {kind: 'stop', banner}
   const [note, setNote] = useState('');
@@ -157,7 +163,13 @@ function useAdminPauses(row, onChanged) {
       if (mine === req.current) setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
     } catch { /* keep what was shown */ }
   }, [row.id, apartment]);
-  useEffect(() => { setPauses(null); setSheet(null); setNote(''); load(); }, [load]);
+  useEffect(() => {
+    setPauses(null); setSheet(null); setNote(''); load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
   useEffect(() => {
     if (!note) return undefined;
     const t = setTimeout(() => setNote(''), 20000);
@@ -185,9 +197,11 @@ function useAdminPauses(row, onChanged) {
         )}
       </div>
     ),
-    button: apartment && pauses
-      ? <button type="button" className="pq-btn" aria-haspopup="dialog" onClick={() => setSheet({ kind: 'new' })}>Pause enforcement</button>
-      : null,
+    button: offer === 'classic'
+      ? <p className="ap-hint" data-testid="ap-pause-classic">{CLASSIC_PAUSE_LINE}</p>
+      : offer === 'pause' && pauses
+        ? <button type="button" className="pq-btn" aria-haspopup="dialog" onClick={() => setSheet({ kind: 'new' })}>Pause enforcement</button>
+        : null,
   };
 }
 
