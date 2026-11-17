@@ -304,7 +304,7 @@ export function ALPRPropertiesPage({
                     </div>
                     <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
                       <span className={`lot-pill-paper ${verified ? 'green' : 'amber'}`}>
-                        <span className="dot"></span>{verified ? 'Confirmed' : `Waiting for ${towPartnerName(p)}`}
+                        <span className="dot"></span>{verified ? 'Confirmed' : `Waiting for ${towPartnerName(p, user)}`}
                       </span>
                       {canDelete && (
                       <button
