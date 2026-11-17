@@ -435,16 +435,21 @@ test.describe('Enforcement pause @desktop-only', () => {
         await page.getByLabel('Property').selectOption({ label: M.name });
       }
 
-      test('a paused property: the blue "do not boot" notice before the photo and signature, and no way on', async ({ page }) => {
+      test('a paused property: the blue "do not boot" notice with the pre-pause exception, and the agent may go on (the server decides at Lock boot)', async ({ page }) => {
+        // spec Part 3: a car LotLogic texted the drivers to boot before the pause started may still be
+        // booted (boot-portal pause_gate.ts dispatchedBeforePause); this screen cannot see the texts.
         const world = createWorld('agent');
         world.pauses.push(pauseRow({ property: M, ...ACTIVE, n: 1 }));
         await toStepOne(page, world);
         const notice = page.getByTestId('place-pause');
-        await expect(notice).toHaveText('Enforcement is paused here until Wed 6:00 PM — do not boot');
+        const text = 'Enforcement is paused here until Wed 6:00 PM — do not boot unless LotLogic texted you this car before the pause started';
+        await expect(notice).toHaveText(text);
         await expect(notice).toHaveClass(/is-active/);                                   // the blue of every running pause
-        await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
-        await expect(page.getByTestId('place-missing')).toHaveText('Still needed: a property that is not paused');
+        await expect(page.getByTestId('place-missing')).toHaveText('');                      // nothing still needed
         await shots(page, 'pause-agent-place', world);
+        await page.getByRole('button', { name: 'Continue' }).click();
+        await expect(page.getByTestId('place-step-2')).toBeVisible();
+        await expect(page.getByTestId('place-pause')).toHaveText(text);                  // said on every step
         await expectNoMoney(page);
         expectClean(world);
       });

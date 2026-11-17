@@ -124,29 +124,35 @@ test('stepMissing: each step names what is still needed', () => {
 // ── an enforcement pause (boot-portal GET /properties: paused_until per property, pauses_unknown) ──
 const PAUSED = { id: 'p1', name: 'Mayfield Memorial Apartments', paused_until: '2026-11-21T23:00:00+00:00' };
 
-test('stepMissing: a paused property cannot be booted at, so step 1 does not go on', () => {
+test('stepMissing: a paused property does not stop the steps; the server decides at Lock boot (a pre-pause text stands)', () => {
+  // spec Part 3: a car LotLogic texted the drivers to boot before the pause
+  // started may still be booted (boot-portal pause_gate.ts dispatchedBeforePause).
+  // This screen cannot see those texts, so it warns and lets the agent go on.
   const f = { ...newPlacement(), property_id: 'p1' };
-  assert.deepEqual(stepMissing(f, 1, { properties: [PAUSED] }), ['a property that is not paused']);
-  // A list re-read after step 1 found the pause: no step goes on, Lock boot included.
+  assert.deepEqual(stepMissing(f, 1, { properties: [PAUSED] }), []);
   const signed = signPlacement({ ...f, signed_name: 'Dana Reyes' }, PNG);
-  assert.deepEqual(stepMissing(signed, 4, { properties: [PAUSED] }), ['a property that is not paused']);
-  assert.deepEqual(stepMissing(signed, 4, { properties: [{ ...PAUSED, paused_until: null }] }), []);
+  assert.deepEqual(stepMissing(signed, 4, { properties: [PAUSED] }), []);
+  // The step's own needs still count at a paused property.
+  assert.deepEqual(stepMissing({ ...f, plate: '' }, 2, { properties: [PAUSED] }), ['plate']);
   assert.deepEqual(stepMissing(f, 1, { properties: [{ ...PAUSED, paused_until: null }] }), []);
   // The pauses could not be read: the server decides at Lock boot, so the agent may go on.
   assert.deepEqual(stepMissing(f, 1, { properties: [{ id: 'p1' }], pausesUnknown: true }), []);
-  // Another property's pause does not stop this one.
-  assert.deepEqual(stepMissing({ ...f, property_id: 'p2' }, 1, { properties: [PAUSED, { id: 'p2', paused_until: null }] }), []);
+  for (const step of [1, 2, 3, 4]) {
+    assert.ok(!stepMissing(f, step, { properties: [PAUSED] }).some((w) => /paused/.test(w)), `step ${step} names no pause`);
+  }
 });
 
-test('bootPauseNotice: blue "do not boot" for a paused property, a neutral line when unknown, nothing otherwise', () => {
-  assert.deepEqual(bootPauseNotice(PAUSED, false, NOW), { kind: 'paused', text: 'Enforcement is paused here until Sat 6:00 PM — do not boot' });
+test('bootPauseNotice: blue "do not boot" with the pre-pause exception for a paused property, a neutral line when unknown, nothing otherwise', () => {
+  assert.deepEqual(bootPauseNotice(PAUSED, false, NOW), {
+    kind: 'paused', text: 'Enforcement is paused here until Sat 6:00 PM — do not boot unless LotLogic texted you this car before the pause started',
+  });
   assert.deepEqual(bootPauseNotice({ id: 'p1' }, true, NOW), { kind: 'unknown', text: 'Could not check for a pause' });
   assert.equal(bootPauseNotice({ ...PAUSED, paused_until: null }, false, NOW), null);
   assert.equal(bootPauseNotice({ id: 'p1' }, false, NOW), null);   // a server before the pause: no field, no line
   assert.equal(bootPauseNotice(null, true, NOW), null);             // nothing picked yet
   // A pause further out than the week names its date.
   assert.equal(bootPauseNotice({ id: 'p1', paused_until: '2026-11-24T23:00:00+00:00' }, false, NOW).text,
-    'Enforcement is paused here until Tue Nov 24, 6:00 PM — do not boot');
+    'Enforcement is paused here until Tue Nov 24, 6:00 PM — do not boot unless LotLogic texted you this car before the pause started');
 });
 
 test('signature: any edit after signing clears it; an unchanged value or the step does not', () => {
