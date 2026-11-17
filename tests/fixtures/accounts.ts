@@ -52,11 +52,13 @@ export async function loginAs(page: Page, account: TestAccount): Promise<string>
   await page.getByLabel(/password/i).fill(account.password);
   await page.getByRole('button', { name: /sign in|log in/i }).click();
 
-  // The post-login shell is the registration-based tab bar (Lots / Analytics /
-  // Tow Truck / Earnings / Billing / Account) — these are rendered
-  // as role="tab", not role="button", and "Lots" is present for every owner
-  // regardless of whether they have any properties yet.
-  await expect(page.getByRole('tab', { name: /^lots$/i }).first()).toBeVisible({
+  // The post-login shell is the bottom tab bar, rendered as role="tab", not
+  // role="button". Which tabs it holds, and what the first one is called
+  // ("Lots", "Properties", "Home"), depends on the role and the account's
+  // properties (`navTabsFor` in frontend/src/lib/features.js, plus App.jsx's
+  // relabel), so this anchors on Account: the one tab every signed-in role
+  // has, under a label nothing rewrites.
+  await expect(page.getByRole('tab', { name: 'Account', exact: true }).first()).toBeVisible({
     timeout: 15_000,
   });
 
