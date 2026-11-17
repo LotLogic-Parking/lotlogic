@@ -3386,11 +3386,15 @@
     }
     .theme-light {
       --ll-surface: var(--ll-white);
-      --ll-surface-2: var(--ll-page);
-      --ll-line: var(--ll-hairline);
+      /* These three used to name --ll-page / --ll-hairline / --ll-ink-3, which
+         exist nowhere, so in the light theme every blue surface lost its
+         hairlines and insets and borders fell back to the ink colour (the
+         heavy outlines in Gabe's screenshot, 2026-11-16). */
+      --ll-surface-2: var(--ll-light-page);
+      --ll-line: var(--ll-light-line);
       --ll-text: var(--ll-ink);
       --ll-text-2: var(--ll-ink-2);
-      --ll-text-3: var(--ll-ink-3);
+      --ll-text-3: var(--text-muted);
       --ll-link: var(--ll-blue);
       --ll-red-text: var(--ll-red);
       --ll-green-text: var(--ll-green);
@@ -3449,6 +3453,12 @@
     .ls--blue .pq-tag--amber, .ls-blue .pq-tag--amber { background: var(--ll-blue-tint); color: var(--ll-link); border-color: rgba(37,99,235,.35); }
     .ls--blue .pq-tag--green, .ls-blue .pq-tag--green { background: rgba(22,163,74,.12); color: var(--ll-green-text); border-color: rgba(22,163,74,.35); }
     .ls--blue .pq-tag--red, .ls-blue .pq-tag--red { background: rgba(220,38,38,.10); color: var(--ll-red-text); border-color: rgba(220,38,38,.35); }
+    /* Light theme: the semantic inks above are 2.9 to 4.5:1 on their own tints;
+       these are 5.5:1 or better. */
+    .theme-light .ls--blue .pq-tag--info, .theme-light .ls-blue .pq-tag--info,
+    .theme-light .ls--blue .pq-tag--amber, .theme-light .ls-blue .pq-tag--amber { color: var(--ll-blue-deep); }
+    .theme-light .ls--blue .pq-tag--green, .theme-light .ls-blue .pq-tag--green { color: #166534; }
+    .theme-light .ls--blue .pq-tag--red, .theme-light .ls-blue .pq-tag--red { color: #B91C1C; }
 
     /* The photo frame: 72 × 54, rounded, a white plate badge when there is no picture. */
     .ls-thumb {
@@ -3459,7 +3469,7 @@
     .ls-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .ls-thumb--empty { background: var(--ll-white); }
     .ls-badge {
-      max-width: 100%; padding: 2px 6px; border: 1px solid var(--ll-hairline); border-radius: 4px; background: var(--ll-white);
+      max-width: 100%; padding: 2px 6px; border: 1px solid var(--ll-light-line); border-radius: 4px; background: var(--ll-white);
       font-family: 'DM Mono', ui-monospace, 'Courier New', monospace; font-size: 11px; font-weight: 600; letter-spacing: .06em;
       color: var(--ll-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
@@ -3474,9 +3484,16 @@
 
     /* Passes: residents on the property (left) and visitors here (right). One
        column on a phone. */
-    .ls-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-    @media (max-width: 760px) { .ls-cols { grid-template-columns: 1fr; } }
-    .ls-col { background: var(--ll-white, #fff); border: 1px solid var(--ll-line, #E2E8F0); border-radius: 14px; padding: 14px 16px; min-width: 0; }
+    /* Passes gets the room it needs (Gabe, 2026-11-16: "impossible to even see
+       it so small"): on a laptop or wider the page is 1200 px while Passes is
+       showing (every other tab keeps its own width), and the two columns are
+       decided by the section's own width, so a 640 px page gets one full-width
+       list instead of two 296 px columns. */
+    @media (min-width: 1024px) { .page-content:has(.ls-passes) { max-width: 1200px; } }
+    .ls-passes { container: passes / inline-size; }
+    .ls-cols { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+    @container passes (min-width: 860px) { .ls-cols { grid-template-columns: 1fr 1fr; } }
+    .ls-col { background: var(--ll-surface); border: 1px solid var(--ll-line, #E2E8F0); border-radius: 14px; padding: 14px 16px; min-width: 0; }
     .ls-col .ls-people { margin: 0; padding: 0; }
     .ls-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
     /* Traffic: the source line, a card per chart, the bar strip, the heat grid. */
@@ -3615,6 +3632,14 @@
     .ls-person-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
     .ls-person-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
     .ls-person-name { font-size: 16px; font-weight: 800; line-height: 1.25; color: var(--ll-text); overflow-wrap: anywhere; }
+    .ls-person-name--plate { font-family: 'DM Mono', ui-monospace, 'Courier New', monospace; font-size: 17px; font-weight: 500; letter-spacing: .05em; }
+    .ls-person-head .pq-tag { white-space: nowrap; }
+    .ls-person-btn .ls-thumb { width: 136px; height: 85px; border-radius: 10px; }
+    @media (max-width: 480px) {
+      .ls-person-btn .ls-thumb { width: 104px; height: 65px; }
+      .ls-col { padding: 12px 10px; }
+      .ls-person-btn { padding: 12px; gap: 12px; }
+    }
     .ls-person-sum { font-size: 13px; line-height: 1.45; color: var(--ll-text-2); overflow-wrap: anywhere; }
     .ls-person-caret { flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ll-line); border-radius: 999px; font-size: 16px; font-weight: 700; color: var(--ll-link); }
     .ls-person.is-open .ls-person-caret { background: var(--ll-blue); border-color: var(--ll-blue); color: var(--ll-white); }
@@ -3624,19 +3649,19 @@
        left the values 0 px wide (Victor, 2026-11-12). */
     .ls-panel { display: flex; flex-direction: column; gap: 16px; padding: 4px 16px 16px; border-top: 1px solid var(--ll-line); container-type: inline-size; }
     .ls-panel-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    @container (min-width: 560px) { .ls-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @container (min-width: 520px) { .ls-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .ls-panel-group { display: flex; flex-direction: column; gap: 8px; }
     .ls-panel-label { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); }
     .ls-panel-dl { margin: 0; border: 1px solid var(--ll-line); border-radius: 10px; overflow: hidden; }
     .ls-panel-item { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 12px; font-size: 13px; line-height: 1.45; }
     .ls-panel-item + .ls-panel-item { border-top: 1px solid var(--ll-line); }
     .ls-panel-item dt { margin: 0; color: var(--ll-text-2); }
-    .ls-panel-item dd { margin: 0; font-weight: 700; color: var(--ll-text); overflow-wrap: anywhere; }
+    .ls-panel-item dd { margin: 0; font-weight: 600; color: var(--ll-text); overflow-wrap: anywhere; }
     .ls-panel-evidence { margin-top: 0; }
     .ls-panel .ls-timeline { margin-top: 0; }
     .ls-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .ls-panel-actions:empty { display: none; }
-    .ls-thumb--wide { display: block; width: 100%; max-width: 360px; height: auto; aspect-ratio: 4 / 3; border-radius: 10px; }
+    .ls-thumb--wide { display: block; width: 100%; max-width: 480px; height: auto; aspect-ratio: 4 / 3; border-radius: 10px; }
     .ls-details { border: 1px solid var(--ll-line); border-radius: 12px; background: var(--ll-surface); margin-top: 16px; }
     .ls-details-summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 12px 16px; box-sizing: border-box; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ll-text-2); cursor: pointer; }
     .ls-details-summary::-webkit-details-marker { display: none; }
@@ -3657,7 +3682,10 @@
     .ls-blue .ls-event-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
     .ls-blue .ls-events { border-color: var(--ll-line); background: var(--ll-surface); }
     .ls-blue .ls-event + .ls-event { border-top-color: var(--ll-line); }
-    .ls-blue .ls-event-detail { color: var(--ll-text); }
+    .ls-blue .ls-event-detail { color: var(--ll-text); font-weight: 600; }
+    .ls-blue .ls-event--visit .ls-thumb { width: 96px; height: 60px; }
+    .ls-blue .ls-event--event:not(:has(.ls-thumb)) { padding-left: 122px; }
+    @media (max-width: 480px) { .ls-blue .ls-event--event { padding-left: 14px; } }
     .ls-blue .ls-event-when { color: var(--ll-text-2); }
     .ls-blue .ls-timeline-title { color: var(--ll-text-2); }
   </style>

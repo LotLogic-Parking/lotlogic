@@ -52,6 +52,17 @@ tow-company accounts never get the office screen.
 Commit: "Office screen: fix the details panel and trim owner-only controls for
 the leasing office" on branch `office-screen-cleanup`.
 
+## Changes on 2026-11-17 (Passes and the car details), and why
+
+Gabe, 2026-11-16, on the live Passes page: "that presentation is brutal … impossible to even see it so small", and on a car's details: "clean up this presentation, not easy to look at".
+
+| # | Change | Why |
+|---|---|---|
+| 1 | While Passes is showing, the page is up to 1200 px wide at 1024 px and wider (`.page-content:has(.ls-passes)`); every other tab keeps its width. The two columns are decided by the section's own width (860 px), not the window's. | An admin's Passes was a 640 px column: two 296 px lists with 99 px of text beside each photo. |
+| 2 | Row photos 136 × 85 (104 × 65 on a phone); a row titled by its plate is set in DM Mono; the status chip never wraps. | 72 × 54 night frames were unreadable; "Not registered" wrapped onto two lines. |
+| 3 | A car's history (`PlateTimeline` with `blue`) is one line per visit: the camera's in and out joined by their session id ("Mon Nov 16 · 9:56 AM – 11:17 AM", then "1 h 21 m · camera"), "– now" for the visit in progress, "– exit not seen" otherwise. Session ids are never shown (also not on Lookup); a human number (H-0012) shows only when the line does not already say it. `src/lib/visitHistory.js`. | Each visit showed a raw UUID and said "seen entering" three times, as two unrelated items. |
+| 4 | Light theme: `--ll-surface-2`, `--ll-line`, `--ll-text-3` now resolve (they named variables that exist nowhere); tag inks on the blue surfaces reach 5.5:1; dark-theme Passes columns are cards, not white. | The missing hairlines made borders fall back to ink (the heavy outlines); tags were 2.9–4.5:1. |
+
 ## Open questions
 
 - The office can no longer add a property itself. Confirm LotLogic adds
