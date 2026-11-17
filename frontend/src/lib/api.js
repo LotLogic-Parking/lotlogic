@@ -95,9 +95,44 @@ export async function authLogin(email, password) {
     const err = new Error(pretty);
     err.status = r.status;
     err.detail = detail;
+    err.body = body;
+    // A 429 (`rate_limited`, services/auth_throttle.py) says how long the
+    // sign-in window stays shut: `retry_after` seconds in the body, and the
+    // same in a Retry-After header (which CORS may hide, hence body first).
+    if (r.status === 429) err.retryAfter = retryAfterSeconds(body, r.headers);
     throw err;
   }
   return body;
+}
+
+// Seconds until a throttled request may be retried: the body's
+// `retry_after`, else a numeric Retry-After header, else null.
+export function retryAfterSeconds(body, headers) {
+  const fromBody = Number(body?.retry_after);
+  if (Number.isFinite(fromBody) && fromBody > 0) return Math.ceil(fromBody);
+  let raw = null;
+  try { raw = headers?.get?.('Retry-After') ?? null; } catch { raw = null; }
+  const fromHeader = Number(raw);
+  if (raw != null && raw !== '' && Number.isFinite(fromHeader) && fromHeader > 0) return Math.ceil(fromHeader);
+  return null;
+}
+
+// The line the sign-in form shows for an authLogin() failure. A 429 used to
+// fall through to `err.message`, which is the backend's bare code, so a
+// throttled user read "rate_limited".
+export function loginErrorMessage(err) {
+  const status = err?.status;
+  if (status === 401) return 'Invalid email or password.';
+  if (status === 403) return err.message || 'Password not set. Use "Email me a setup link" below.';
+  if (status === 429) {
+    const secs = err.retryAfter;
+    if (typeof secs === 'number' && secs > 0) {
+      const mins = Math.max(1, Math.ceil(secs / 60));
+      return `Too many sign-in attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`;
+    }
+    return 'Too many sign-in attempts. Try again in a few minutes.';
+  }
+  return err?.message || "Can't connect right now. Check your connection and try again.";
 }
 
 export async function authRequestPasswordReset(email) {

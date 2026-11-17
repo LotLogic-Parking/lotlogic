@@ -13,9 +13,10 @@
  * the same rule spreading to more nodes.
  */
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect, accounts, loginAs } from '../fixtures/accounts';
+import { test, expect, accounts, loginAs, API_URL } from '../fixtures/accounts';
 import { test as baseTest } from '@playwright/test';
 import { buildAndServeFrontend, type BuiltFrontendServer } from '../fixtures/buildAndServeFrontend';
+import { settle } from '../fixtures/settle';
 import path from 'node:path';
 import {
   PORTAL_E2E, pointAtLocalBackend, seedNStyle, frontendOrigin, randomPlate, uiLogin,
@@ -24,9 +25,6 @@ import {
 import {
   seedResidentApartment, openResidentFlow, toFirstVehicle, vehicleAndDocumentsToReview, fillVehicle, upload, photo, seedApartmentGroup,
 } from '../fixtures/aptFlow';
-import http from 'node:http';
-import fs from 'node:fs';
-import type { AddressInfo } from 'node:net';
 
 const BLOCKING = new Set(['serious', 'critical']);
 
@@ -72,21 +70,7 @@ const BLOCKING = new Set(['serious', 'critical']);
  */
 const WAIVED: Record<string, { rule: string; nodes: number }[]> = {};
 
-/**
- * Let finite CSS animations/transitions (fade-ins, the theme swap) finish
- * before axe samples colors: a scan mid-fade measures blended colors (seen as
- * #74756f for --text-muted on the partner Requests tab) and fails at random.
- * Infinite ones (spinners) are ignored; capped at 2 s.
- */
-async function settle(page: any) {
-  await page.evaluate(() => Promise.race([
-    Promise.all(document.getAnimations()
-      .filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity))
-      .map((a) => a.finished.catch(() => undefined))),
-    new Promise((r) => setTimeout(r, 2000)),
-  ]));
-}
-
+// `settle()` (fixtures/settle.ts): wait out finite animations before a scan.
 async function scan(page: any, label: string) {
   await settle(page);
   const results = await new AxeBuilder({ page })
@@ -150,6 +134,27 @@ async function scanIncluding(page: any, label: string, selector: string, exclude
   ).toEqual([]);
 }
 
+/**
+ * Lookup and Requests are the communication portal's tabs:
+ * `navTabsFor('partner')` (frontend/src/lib/features.js) shows them only
+ * when `/auth/me.properties` holds a property that is not a truck plaza
+ * (`onPortal`). Against a backend where TEST_PARTNER_A has no such property
+ * the product correctly hides both tabs, so a scan of them cannot run: skip
+ * with that reason rather than time out looking for a tab that should not be
+ * there. When the account IS on the portal the tab is required as before, so
+ * a portal partner losing it still fails.
+ */
+async function skipUnlessPartnerOnPortal(token: string) {
+  const res = await fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(res.ok, `GET /auth/me for TEST_PARTNER_A: ${res.status}`).toBe(true);
+  const me = await res.json();
+  const properties: Array<{ property_type?: string } | null> = Array.isArray(me?.properties) ? me.properties : [];
+  const onPortal = properties.some(p => !!p && p.property_type !== 'truck_plaza');
+  test.skip(!onPortal,
+    'TEST_PARTNER_A has no portal (non-truck-plaza) property on this backend, so Lookup and Requests '
+    + 'are not in its nav (features.js navTabsFor). Link it to an apartment test property to scan them.');
+}
+
 test.describe('accessibility @a11y', () => {
   // Under the portal suite (PORTAL_E2E=1, tests/README.md) BASE_URL is this
   // branch's local build: point every page at the local backend first, so no
@@ -180,7 +185,15 @@ test.describe('accessibility @a11y', () => {
   // verdict card went from a 12%-tint box to a solid-fill card with
   // role="status", so this is the first scan to ever touch it.
   test('lookup tab (partner) has no serious a11y violations @auth', async ({ page }) => {
-    await loginAs(page, accounts.partnerA());
+    if (PORTAL_E2E) {
+      // Against the local backend, put partner A on the portal: N Style with
+      // one office signed up from its link, as the Requests scan below does.
+      seedNStyle();
+      const office = await apiSignup();
+      await apiVerify(office.token);
+    }
+    const token = await loginAs(page, accounts.partnerA());
+    if (!PORTAL_E2E) await skipUnlessPartnerOnPortal(token);
     await page.getByRole('tab', { name: /^lookup$/i }).click();
     await scan(page, 'lookup-partner');
   });
@@ -257,7 +270,10 @@ test.describe('accessibility @a11y', () => {
       await apiVerify(office.token);
       await apiCreateRequest(office.token, { property_id: office.property_id, kind: 'hold', plate_text: randomPlate(), duration_hours: 24 });
     }
-    await loginAs(page, accounts.partnerA());
+    const token = await loginAs(page, accounts.partnerA());
+    // Under PORTAL_E2E the office above puts partner A on the portal, so the
+    // tab is required; against a deployed backend it depends on the account.
+    if (!PORTAL_E2E) await skipUnlessPartnerOnPortal(token);
     // The nav button's accessible name gains ", N pending" when the badge is
     // non-zero, so this anchors on the start of the label only.
     await page.getByRole('tab', { name: /^requests\b/i }).first().click();
@@ -480,36 +496,23 @@ baseTest.describe('accessibility — isolated mounts @a11y', () => {
  */
 test.describe('upsell chips @a11y', () => {
   // `frontend/dashboard.html` is the committed source; `dashboard.js` is an
-  // esbuild output that only exists under `dist/` (`npm run build` in
-  // `frontend/`) — so this harness serves the built directory, not the
-  // frontend root.
-  const FRONTEND_DIR = path.resolve(__dirname, '../../frontend/dist');
+  // esbuild output. This used to serve a prebuilt `frontend/dist/`, which
+  // only the jobs with a "Build frontend" step had: in "e2e + a11y" it was
+  // missing, dashboard.html 404'd and the test hooks never appeared. Like
+  // the other self-serving specs it now builds its own private copy
+  // (fixtures/buildAndServeFrontend.ts), so it runs the same in every job.
+  const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
   const PROPERTY_ID = '33333333-3333-4333-8333-333333333333';
-  let server: http.Server;
+  let server: BuiltFrontendServer;
   let origin: string;
 
   test.beforeAll(async () => {
-    server = http.createServer((req, res) => {
-      const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-      const file = path.join(FRONTEND_DIR, pathname.replace(/^\/+/, ''));
-      if (!file.startsWith(FRONTEND_DIR) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('not found');
-        return;
-      }
-      const type = file.endsWith('.html') ? 'text/html; charset=utf-8'
-        : file.endsWith('.js') ? 'text/javascript; charset=utf-8'
-        : file.endsWith('.css') ? 'text/css; charset=utf-8'
-        : 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type });
-      fs.createReadStream(file).pipe(res);
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    server = await buildAndServeFrontend(FRONTEND_DIR);
+    origin = server.origin;
   });
 
   test.afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await server?.close();
   });
 
   // Run the whole scan under BOTH themes. `App.jsx` wraps its root in
