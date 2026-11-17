@@ -114,7 +114,12 @@ export type BootContext = {
   enteredAt: string;
   minutesHere: number;
   violationId: string;
-  /** Set when an enforcement pause held this dispatch: the pause's end. */
+  /**
+   * Set when an enforcement pause held this dispatch: the pause's end. A pause
+   * holds only what was not yet sent (Gabe, 2026-11-17); a car texted before
+   * the pause was texted then, never again, so this line is only on texts the
+   * pause held, which go out once, at its end.
+   */
   pauseEndedAt?: string | null;
 };
 
@@ -126,7 +131,7 @@ export function bootMessage(c: BootContext): string {
     `[BOOT] ${c.propertyName}`,
     `Plate ${c.plate}`,
     `In since ${clockETFrom(c.enteredAt, now)} (${c.minutesHere}m). No parking pass.`,
-    ...(c.pauseEndedAt ? [`Enforcement was paused here until ${clockETFrom(c.pauseEndedAt, now)}. It may have left unseen.`] : []),
+    ...(c.pauseEndedAt ? [`Held by an enforcement pause that ended at ${clockETFrom(c.pauseEndedAt, now)}. It may have left unseen.`] : []),
     ...(c.address ? [c.address] : []),
     `Do not boot before ${clockETFrom(bootAllowedAfter(c.enteredAt), now)}. Check it is still there and still unregistered.`,
     `Reply DONE-${id} when booted, GONE-${id} if it left.`,

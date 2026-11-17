@@ -214,11 +214,11 @@ Deno.test("pending-dispatch candidates (index.ts query shape): a paused property
   assertEquals(violations.every(r => r.dispatch_attempts === 0 && r.status === "pending"), true); // nothing burned while held
 });
 
-Deno.test("boot text after a pause: a car from another day shows the day, and the pause that held it is named", () => {
+Deno.test("boot text after a pause: a car from another day shows the day, and says it waited for the pause to end", () => {
   // In Fri Nov 13, 7:00 PM ET; texted Mon Nov 16, 7:01 AM ET when the pause ended at 7:00 AM.
   const b = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-14T00:00:00Z",
     minutesHere: 3601, violationId: "3f2a9c1e-8b7d-4e6f-9a0b-1c2d3e4f5a6b", pauseEndedAt: "2026-11-16T12:00:00Z" });
-  assertMatch(b, /In since Fri 7:00 PM \(3601m\)\. No parking pass\.\nEnforcement was paused here until 7:00 AM\. It may have left unseen\.\n/);
+  assertMatch(b, /In since Fri 7:00 PM \(3601m\)\. No parking pass\.\nHeld by an enforcement pause that ended at 7:00 AM\. It may have left unseen\.\n/);
   assertMatch(b, /Do not boot before Fri 7:15 PM\./);
   // Same-day texts are unchanged.
   const today = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-11T20:12:00Z", minutesHere: 11, violationId: "x" });
@@ -234,6 +234,6 @@ Deno.test("bootDispatch after a pause: the text says the pause held it; a car th
   await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]),
     send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
   assertEquals(sent.length, 2);
-  assertMatch(sent[0], /Plate HELD1\n.*\nEnforcement was paused here until 4:00 PM\./);
-  assertEquals(/paused/.test(sent[1]), false);
+  assertMatch(sent[0], /Plate HELD1\n.*\nHeld by an enforcement pause that ended at 4:00 PM\./);
+  assertEquals(/pause/.test(sent[1]), false);
 });
