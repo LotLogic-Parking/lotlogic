@@ -196,9 +196,21 @@ jobs:
         with:
           node-version: '20'
           # tests/package-lock.json IS tracked (root .gitignore re-includes it via
-          # `!tests/package-lock.json`), so enable npm caching keyed on it.
+          # `!tests/package-lock.json`), so enable npm caching keyed on it --
+          # and on the frontend's, which this job installs from too.
           cache: 'npm'
-          cache-dependency-path: tests/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            tests/package-lock.json
+
+      # BASE_URL is the preview, but the self-serving specs do not use it:
+      # fixtures/buildAndServeFrontend.ts runs `npm run build` in frontend/ and
+      # serves the result, and that build needs frontend/node_modules (esbuild).
+      # Without this step every one of them fails in beforeAll with
+      # "Cannot find package 'esbuild'".
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
 
       - name: Install deps
         # Strict install from the committed lockfile — a broken/out-of-date
