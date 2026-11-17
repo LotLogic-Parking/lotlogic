@@ -940,7 +940,7 @@ export async function fontsReady(page: Page): Promise<boolean> {
   return page.evaluate(async () => {
     await document.fonts.ready;
     // Not `document.fonts.check()`: that is also true when the stylesheet never arrived and no face is declared.
-    const faces = (family: string) => Array.from(document.fonts).filter((f) => f.family.replace(/["']/g, '') === family);
+    const faces = (family: string) => Array.from(document.fonts as unknown as Iterable<FontFace>).filter((f) => f.family.replace(/["']/g, '') === family);
     const failed = (family: string) => faces(family).some((f) => f.status === 'error');
     return faces('Manrope').some((f) => f.status === 'loaded') && !failed('Manrope') && faces('DM Mono').length > 0 && !failed('DM Mono');
   });
