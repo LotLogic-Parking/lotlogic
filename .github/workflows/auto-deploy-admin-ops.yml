@@ -1,0 +1,37 @@
+# Auto-deploy the admin-ops edge function (Admin > Today on the dashboard) whenever
+# its source changes on main. It reads with the service role and writes only boot
+# assignments, so it deploys on its own, like boot-portal. It imports
+# _shared/boot.ts, so a change there redeploys it too.
+#
+# Required secret on the GitHub repo:
+#   SUPABASE_ACCESS_TOKEN — same token the other auto-deploy workflows use.
+
+name: Auto-deploy admin-ops
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/admin-ops/**'
+      - 'supabase/functions/_shared/boot.ts'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy admin-ops
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy admin-ops \
+            --project-ref nzdkoouoaedbbccraoti \
+            --no-verify-jwt \
+            --yes
