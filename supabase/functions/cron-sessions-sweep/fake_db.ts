@@ -2,10 +2,11 @@
 // the functions import pulls it in). Filters run in memory over the rows
 // given per table; update() patches the rows the chain has narrowed to.
 // Timestamps compare as strings, so tests use one ISO format throughout.
-// failUpdates names tables whose update() returns an error and changes nothing.
+// failUpdates names tables whose update() returns an error and changes nothing;
+// failReads, tables whose reads return an error.
 
 export type Row = Record<string, unknown>;
-export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: string[] } = {}) {
+export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: string[]; failReads?: string[] } = {}) {
   let seq = 0;
   return {
     from(table: string) {
@@ -16,6 +17,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
       const self = b as Record<string, (...a: unknown[]) => unknown>;
       const finish = () => {
         if (patch && opts.failUpdates?.includes(table)) return { data: null, error: { message: `fake update failed on ${table}` } };
+        if (!patch && opts.failReads?.includes(table)) return { data: null, error: { message: `fake read failed on ${table}` } };
         if (patch) for (const r of rows) Object.assign(r, patch);
         return { data: rows, error: null };
       };
@@ -38,8 +40,8 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
         rows = rows.filter(r => !list.includes(String(r[c as string]))); return b;
       };
       self.limit = (n: unknown) => { rows = rows.slice(0, Number(n)); return Promise.resolve(finish()); };
-      self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
-      self.single = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
+      self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data?.[0] ?? null, error: o.error }); };
+      self.single = () => { const o = finish(); return Promise.resolve({ data: o.data?.[0] ?? null, error: o.error }); };
       return b;
     },
   // deno-lint-ignore no-explicit-any
