@@ -16,6 +16,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { test, expect, accounts, loginAs } from '../fixtures/accounts';
 import { test as baseTest } from '@playwright/test';
 import { buildAndServeFrontend, type BuiltFrontendServer } from '../fixtures/buildAndServeFrontend';
+import { settle } from '../fixtures/settle';
 import path from 'node:path';
 import {
   PORTAL_E2E, pointAtLocalBackend, seedNStyle, frontendOrigin, randomPlate, uiLogin,
@@ -72,21 +73,7 @@ const BLOCKING = new Set(['serious', 'critical']);
  */
 const WAIVED: Record<string, { rule: string; nodes: number }[]> = {};
 
-/**
- * Let finite CSS animations/transitions (fade-ins, the theme swap) finish
- * before axe samples colors: a scan mid-fade measures blended colors (seen as
- * #74756f for --text-muted on the partner Requests tab) and fails at random.
- * Infinite ones (spinners) are ignored; capped at 2 s.
- */
-async function settle(page: any) {
-  await page.evaluate(() => Promise.race([
-    Promise.all(document.getAnimations()
-      .filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity))
-      .map((a) => a.finished.catch(() => undefined))),
-    new Promise((r) => setTimeout(r, 2000)),
-  ]));
-}
-
+// `settle()` (fixtures/settle.ts): wait out finite animations before a scan.
 async function scan(page: any, label: string) {
   await settle(page);
   const results = await new AxeBuilder({ page })
