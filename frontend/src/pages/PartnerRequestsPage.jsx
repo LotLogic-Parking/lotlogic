@@ -342,6 +342,7 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
                 now={now}
                 busy={busyId === item.id}
                 onAction={onRowAction}
+                pauseNote={group.notes?.[item.id] || ''}
               />
             ))}
           </ul>}

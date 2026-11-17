@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   MAX_HOURS, REASON_MAX, etWallToMs, fromInputValue, toInputValue, pausePresets, validatePause, cleanReason,
   pauseBody, pauseErrorText, pauseSummary, pauseBanner, pauseBanners, pauseLine, fmtPauseTime, durationText, withPauses,
+  towPauseNote, clashingPause, clashText, isSamePause, lotStatusPause, customWindow, quarterFloor, fmtFull,
 } from '../src/lib/pause.js';
 
 const HOUR = 3600_000;
@@ -112,8 +113,11 @@ test('validatePause: 72 hours is fine, 72 hours and a minute is too long', () =>
 test('the office copy for each refusal; 72 hours stated plainly', () => {
   assert.equal(pauseErrorText('too_long'), 'A pause can be at most 72 hours.');
   assert.equal(pauseErrorText('ends_before_start'), 'The end has to be after the start.');
+  // earliest_start is itself allowed (contract C), so "from"; said with its date, without " ET", like every pause time.
+  assert.equal(pauseErrorText('overlaps', { earliest_start: '2026-11-23T23:00:00+00:00', earliest_start_local: 'Mon Nov 23, 6:00 PM ET' }),
+    'There is already a pause then. You can pause again from Mon Nov 23, 6:00 PM.');
   assert.equal(pauseErrorText('overlaps', { earliest_start_local: 'Mon Nov 23, 6:00 PM ET' }),
-    'There is already a pause then. You can pause again after Mon Nov 23, 6:00 PM ET.');
+    'There is already a pause then. You can pause again from Mon Nov 23, 6:00 PM.');
   assert.equal(pauseErrorText('overlaps', {}), 'There is already a pause then.');
   assert.match(pauseErrorText('too_many_scheduled'), /3 pauses/);
   assert.match(pauseErrorText('reason_too_long'), /120/);
@@ -192,7 +196,8 @@ test('pauseBanner: active reads "paused until" with the reason, and can be ended
 test('pauseBanner: scheduled reads the window, and can be cancelled', () => {
   const now = at('2026-11-24T19:00:00Z');                           // Tue
   assert.deepEqual(pauseBanner([SCHEDULED], now), {
-    text: 'Enforcement pause scheduled Fri 6:00 PM – Sun 11:59 PM', pauseId: 'p2', canEnd: false,
+    // A scheduled start always has its date (brainstorm 2.11); the end is said from that start.
+    text: 'Enforcement pause scheduled Fri Nov 27, 6:00 PM – Sun 11:59 PM', pauseId: 'p2', canEnd: false,
   });
 });
 
@@ -201,16 +206,17 @@ test('pauseBanners: the active one first, then the scheduled; status comes from 
   assert.deepEqual(list.map(b => [b.pauseId, b.kind, b.action]), [['p1', 'active', 'end'], ['p2', 'scheduled', 'cancel']]);
   assert.equal(list[0].title, 'Enforcement paused until Sat 6:00 PM');
   assert.equal(list[0].reason, 'Pool party');
-  assert.equal(list[1].title, 'Enforcement pause scheduled Fri Nov 27, 6:00 PM – Sun Nov 29, 11:59 PM');
-  // The table was left open past the end: no banner claims a pause that is over.
-  assert.deepEqual(pauseBanners([ACTIVE], at('2026-11-21T23:00:00Z')), []);
+  assert.equal(list[1].title, 'Enforcement pause scheduled Fri Nov 27, 6:00 PM – Sun 11:59 PM');
+  // Not this device's clock: a phone hours fast still shows the pause the server says is running
+  // (the page re-reads every minute, and the server drops a pause that is over).
+  assert.deepEqual(pauseBanners([ACTIVE], at('2026-11-21T23:00:00Z')).map(b => b.kind), ['active']);
   // Ended and cancelled rows never make a banner.
   assert.deepEqual(pauseBanners([{ ...ACTIVE, status: 'ended' }, { ...SCHEDULED, status: 'cancelled' }], FRI_2PM), []);
 });
 
 test('pauseLine: the tow company\'s one line for a property', () => {
   assert.equal(pauseLine(ACTIVE, FRI_2PM), 'Enforcement paused until Sat 6:00 PM · Pool party');
-  assert.equal(pauseLine(SCHEDULED, at('2026-11-24T19:00:00Z')), 'Enforcement pause scheduled Fri 6:00 PM – Sun 11:59 PM');
+  assert.equal(pauseLine(SCHEDULED, at('2026-11-24T19:00:00Z')), 'Enforcement pause scheduled Fri Nov 27, 6:00 PM – Sun 11:59 PM');
 });
 
 test('no word for the pass but "parking pass", and no money', () => {
@@ -220,6 +226,10 @@ test('no word for the pass but "parking pass", and no money', () => {
       'not_apartment', 'reason_too_long', 'not_started', 'already_ended', 'already_cancelled', 'already_started', 'pause_not_found', 'missing']
       .map(c => pauseErrorText(c)),
     ...pausePresets(FRI_2PM).flatMap(p => [p.label, p.hint]),
+    towPauseNote({ kind: 'tow', created_at: '2026-11-20T18:30:00Z' }, ACTIVE),
+    towPauseNote({ kind: 'tow', created_at: '2026-11-20T17:00:00Z' }, ACTIVE),
+    clashText(SCHEDULED), clashText(ACTIVE),
+    lotStatusPause(ACTIVE, FRI_2PM).title,
   ];
   for (const t of texts) assert.doesNotMatch(t, BANNED, t);
 });
@@ -234,9 +244,99 @@ test('withPauses: each property\'s pause lines go on its group; a paused propert
   assert.deepEqual(out.map(g => g.propertyId), ['f', 'm', 'v']);
   assert.deepEqual(out[0].items, []);
   assert.equal(out[0].count, 0);
-  assert.deepEqual(out[0].pauses.map(p => p.text), ['Enforcement pause scheduled Sat 6:00 PM – Sun 7:00 AM']);
+  assert.deepEqual(out[0].pauses.map(p => p.text), ['Enforcement pause scheduled Sat Nov 21, 6:00 PM – Sun 7:00 AM']);
   assert.deepEqual(out[1].pauses, []);
   assert.deepEqual(out[2].pauses.map(p => p.kind), ['active', 'scheduled']);
   // No pauses: the groups as they were, each with an empty list.
   assert.deepEqual(withPauses(groups, null, FRI_2PM).map(g => g.pauses.length), [0, 0]);
+});
+
+test('withPauses: a tow request in a paused property\'s group says whether it stands', () => {
+  // ACTIVE started Fri 1:00 PM (18:00Z).
+  const items = [
+    { id: 'during', kind: 'tow', created_at: '2026-11-20T18:30:00+00:00' },
+    { id: 'before', kind: 'tow', created_at: '2026-11-20T17:00:00+00:00' },
+    { id: 'hold', kind: 'hold', created_at: '2026-11-20T18:30:00+00:00' },
+  ];
+  const groups = [{ propertyId: 'v', propertyName: 'The Volaire', propertyVerified: true, count: 3, items }];
+  const [g] = withPauses(groups, [ACTIVE], FRI_2PM);
+  assert.deepEqual(g.notes, {
+    during: 'Requested by the office during a pause',
+    before: 'Placed before the pause. Wait until the pause ends to tow.',
+  });
+  // Only a running pause: a scheduled one changes nothing yet.
+  assert.deepEqual(withPauses(groups, [SCHEDULED], FRI_2PM)[0].notes, {});
+  assert.deepEqual(withPauses(groups, null, FRI_2PM)[0].notes, {});
+  assert.equal(towPauseNote({ kind: 'photo', created_at: '2026-11-20T18:30:00+00:00' }, ACTIVE), '');
+});
+
+test('Tonight in the last half hour before 7 AM is this evening\'s, not a few minutes', () => {
+  // Tue Nov 17 2026, 6:59:40 AM in Charlotte.
+  const late = byId(pausePresets(at('2026-11-17T11:59:40Z')));
+  assert.equal(late.tonight.startsNow, false);
+  assert.equal(late.tonight.starts_at, '2026-11-17T23:00:00.000Z');
+  assert.equal(late.tonight.ends_at, '2026-11-18T12:00:00.000Z');
+  assert.equal(late.tonight.hint, '6:00 PM – 7:00 AM');
+  // 6:20 AM: still the rest of this night.
+  const early = byId(pausePresets(at('2026-11-17T11:20:00Z')));
+  assert.equal(early.tonight.startsNow, true);
+  assert.equal(early.tonight.ends_at, '2026-11-17T12:00:00.000Z');
+});
+
+test('customWindow: a start a moment ago is now; one further back is said to have passed', () => {
+  const now = at('2026-11-17T19:07:00Z');                      // Tue 2:07 PM
+  const justNow = customWindow('2026-11-17T14:05', '2026-11-17T20:00', now);
+  assert.equal(justNow.startsNow, true);
+  assert.equal(validatePause({ ...justNow, now }), null);
+  const passed = customWindow('2026-11-17T13:00', '2026-11-17T20:00', now);
+  assert.equal(passed.startsNow, false);
+  assert.equal(validatePause({ ...passed, now }), 'starts_in_past');
+  const yesterday = customWindow('2026-11-16T20:00', '2026-11-17T20:00', now);
+  assert.equal(validatePause({ ...yesterday, now }), 'starts_in_past');
+  assert.equal(customWindow('', '', now).starts_at, '');
+});
+
+test('quarterFloor keeps the picker\'s step on :00, :15, :30 and :45', () => {
+  assert.equal(toInputValue(quarterFloor(at('2026-11-17T19:07:30Z'))), '2026-11-17T14:00');
+  assert.equal(toInputValue(quarterFloor(at('2026-11-17T19:22:00Z'))), '2026-11-17T14:15');
+});
+
+test('clashingPause: a window within a day of another pause, either side, before Save', () => {
+  const now = at('2026-11-16T19:30:00Z');                      // Mon 2:30 PM
+  const weekend = { id: 'w', status: 'scheduled', starts_at: '2026-11-20T23:00:00+00:00', ends_at: '2026-11-23T04:59:00+00:00' };
+  const p = byId(pausePresets(now));
+  assert.equal(clashingPause(p.weekend, [weekend], now), weekend);
+  assert.equal(clashingPause(p.tonight, [weekend], now), null);          // Mon night ends Tue 7 AM, days before Fri
+  // Ends 23 h before the weekend starts: refused; 24 h before: fine.
+  const before = (h) => ({ startsNow: false, starts_at: '2026-11-18T23:00:00.000Z', ends_at: new Date(Date.parse(weekend.starts_at) - h * 3600_000).toISOString() });
+  assert.equal(clashingPause(before(23), [weekend], now), weekend);
+  assert.equal(clashingPause(before(24), [weekend], now), null);
+  // Starts 24 h after it ends: fine; a minute sooner: refused.
+  const after = (m) => ({ startsNow: false, starts_at: new Date(Date.parse(weekend.ends_at) + 24 * 3600_000 - m * 60_000).toISOString(), ends_at: '2026-11-25T12:00:00.000Z' });
+  assert.equal(clashingPause(after(0), [weekend], now), null);
+  assert.equal(clashingPause(after(1), [weekend], now), weekend);
+  // Ended and cancelled pauses are not in the way.
+  assert.equal(clashingPause(p.weekend, [{ ...weekend, status: 'cancelled' }], now), null);
+  assert.equal(clashText(weekend), 'Too close to the pause on Fri Nov 20');
+  assert.equal(clashText({ ...ACTIVE }), 'Too close to the pause running now');
+});
+
+test('isSamePause: a refused or lost Save whose pause is the one asked for', () => {
+  const body = { starts_at: null, ends_at: '2026-11-17T19:30:00.000Z', reason: null };
+  const mine = { ...ACTIVE, status: 'active', ends_at: '2026-11-17T19:30:00+00:00', planned_ends_at: '2026-11-17T19:30:00+00:00' };
+  assert.equal(isSamePause(mine, body), true);
+  assert.equal(isSamePause({ ...mine, planned_ends_at: '2026-11-17T20:30:00+00:00' }, body), false);
+  assert.equal(isSamePause(null, body), false);
+});
+
+test('lotStatusPause: the Lot status tab\'s DO NOT TOW line', () => {
+  const pause = { id: 'p', starts_at: '2026-11-20T18:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00', ends_local: 'Sat Nov 21, 6:00 PM ET', reason: ' Pool  party ' };
+  assert.deepEqual(lotStatusPause(pause, FRI_2PM), { title: 'DO NOT TOW — enforcement paused until Sat 6:00 PM', reason: 'Pool party' });
+  assert.equal(lotStatusPause({ ...pause, ends_at: null, reason: null }, FRI_2PM).title, 'DO NOT TOW — enforcement paused until Sat Nov 21, 6:00 PM');
+  assert.equal(lotStatusPause(null, FRI_2PM), null);
+});
+
+test('fmtFull: the date, always', () => {
+  assert.equal(fmtFull('2026-11-21T23:00:00+00:00'), 'Sat Nov 21, 6:00 PM');
+  assert.equal(fmtFull(''), '');
 });

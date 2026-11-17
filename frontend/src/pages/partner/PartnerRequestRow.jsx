@@ -58,7 +58,9 @@ const BUTTON_LABEL = {
   decline: 'Decline…',
 };
 
-export function PartnerRequestRow({ item, now, busy, onAction }) {
+// `pauseNote` (lib/pause.js towPauseNote): under a tow request at a paused
+// property, whether it stands, in the curb check's terms.
+export function PartnerRequestRow({ item, now, busy, onAction, pauseNote = '' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const chip = KIND_CHIP[item.kind] || KIND_CHIP.hold;
@@ -132,6 +134,13 @@ export function PartnerRequestRow({ item, now, busy, onAction }) {
 
       {/* line 3 — who asked, and when */}
       {placed && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{placed}</div>}
+
+      {/* line 3b — at a paused property: does this request stand? */}
+      {pauseNote && !ended && (
+        <div data-testid="partner-pause-note" style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-text)', marginTop: 3 }}>
+          <span aria-hidden="true">⏸ </span>{pauseNote}
+        </div>
+      )}
 
       {/* line 4 — the car, the note, the photo */}
       {(vehicle || (item.kind === 'hold' && note) || item.has_photo) && (

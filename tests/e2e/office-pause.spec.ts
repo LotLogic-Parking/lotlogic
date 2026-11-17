@@ -9,8 +9,9 @@
  * (a scheduled pause) and "Next 24 hours" starts now (an active one).
  *
  *   office   The Volaire's office admin: the sheet, the banners, End now and Cancel
- *   admin    the Properties table's Paused pill; View as NMLD Towing for the tow company's
- *            Requests line and the Lookup's DO NOT TOW — PAUSED
+ *   admin    the Properties table's Paused pill and the panel's pauses (End now, Cancel, Pause
+ *            enforcement); View as NMLD Towing for the tow company's Requests line and the
+ *            Lookup's DO NOT TOW — PAUSED (and, from another lot, the grouped card)
  *
  * Screenshots (1280 and 390 px, light and dark) land in tests/test-results/pause-screens/.
  */
@@ -19,7 +20,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { buildAndServeFrontend } from '../fixtures/buildAndServeFrontend';
 import {
   API_ORIGIN, DESKTOP, PHONE, PROPERTIES, WORLD_USE,
-  createWorld, enter, etLocal, pauseRow, problems, settle, shoot, type World,
+  createWorld, enter, etLocal, pauseJson, pauseRow, problems, settle, shoot, type World,
 } from '../fixtures/dashboardWorld';
 
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
@@ -78,6 +79,7 @@ test.describe('Enforcement pause @desktop-only', () => {
         await s.getByRole('radio', { name: /This weekend/ }).check();
         await s.getByLabel(/Reason/).fill('Pool party');
         await expect(s.locator('.ps-summary-time')).toHaveText('Fri 6:00 PM – Sun 11:59 PM');
+        await expect(s.locator('.ps-summary-tag')).toHaveText('Scheduled');               // nothing stops at Save
         await expect(s.locator('.ps-summary-len')).toHaveText('54 hours');
         await expect(s).toContainText('Enforcement resumes Sun Nov 22, 11:59 PM, right away. No grace period.');
         await expect(s).toContainText('We will tell NMLD Towing');
@@ -109,28 +111,34 @@ test.describe('Enforcement pause @desktop-only', () => {
         const world = withPauses('office', WEEKEND);
         await enter(page, server.origin, world);
         await expect(banner(page, 'scheduled')).toBeVisible({ timeout: 30_000 });
-        await expect(banner(page, 'scheduled')).toHaveText(/Enforcement pause scheduled Fri 6:00 PM – Sun 11:59 PM\s*Cancel/);
+        await expect(banner(page, 'scheduled')).toHaveText(/Enforcement pause scheduled Fri Nov 20, 6:00 PM – Sun 11:59 PM\s*Cancel/);
         await shots(page, 'pause-banner-scheduled', world);
         expectClean(world);
       });
 
-      test('admin table: the Paused pill, and the pause in the property\'s panel', async ({ page }) => {
+      test('admin table: the Paused pill, and the pause in the property\'s panel with End now', async ({ page }) => {
         const world = withPauses('admin', ACTIVE);
         await enter(page, server.origin, world);
         await expect(page.getByTestId('admin-properties')).toBeVisible({ timeout: 30_000 });
         await expect(page.locator('.ap-skel')).toHaveCount(0, { timeout: 15_000 });
         const label = 'Paused until Wed 6:00 PM';
+        let box;
         if (viewport.width >= 1024) {
           const row = page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: V.name }) });
           await expect(row.locator('td').last()).toHaveText(label);
           await row.click();
-          await expect(page.getByTestId('ap-panel').getByTestId('ap-pause')).toHaveText('Enforcement paused until Wed 6:00 PM · Pool party');
+          const panel = page.getByTestId('ap-panel');
+          box = panel.getByTestId('ap-pause');
+          // Said once: the pause box, not the pill as well.
+          await expect(panel.locator('.ap-panel-head')).not.toContainText('Paused until');
         } else {
           const card = page.getByTestId('ap-card').filter({ hasText: V.name });
           await expect(card).toContainText(label);
           await card.getByRole('button', { name: new RegExp(V.name) }).click();
-          await expect(card.getByTestId('ap-pause')).toHaveText('Enforcement paused until Wed 6:00 PM · Pool party');
+          box = card.getByTestId('ap-pause');
+          await expect(card.locator('.ap-card-top')).not.toContainText('Paused until');
         }
+        await expect(box.getByTestId('pause-banner-active')).toHaveText(/Enforcement paused until Wed 6:00 PM · Pool party\s*End now/);
         await shots(page, 'pause-admin-table', world);
         expectClean(world);
       });
@@ -171,6 +179,9 @@ test.describe('Enforcement pause @desktop-only', () => {
         const line = page.getByTestId('partner-pause-active');
         await expect(line).toBeVisible({ timeout: 30_000 });
         await expect(line).toHaveText('Enforcement paused until Wed 6:00 PM · Pool party');
+        // The open tow request under it says whether it stands: the office placed it during the pause.
+        const volaire = page.locator('section').filter({ has: line });
+        await expect(volaire.getByTestId('partner-pause-note')).toHaveText(/Requested by the office during a pause/);
         await shots(page, 'pause-partner-requests', world);
 
         await navTab('Lookup').click();
@@ -179,9 +190,12 @@ test.describe('Enforcement pause @desktop-only', () => {
         await page.getByRole('button', { name: 'Check', exact: true }).click();
         const card = page.getByRole('status').filter({ hasText: 'DO NOT TOW — PAUSED' });
         await expect(card).toBeVisible();
-        await expect(card).toContainText('Enforcement paused by The Volaire until Wed Nov 18, 6:00 PM ET · Pool party');
+        // The same words as the banner and the Requests line: "Wed 6:00 PM", no " ET" on one screen only.
+        await expect(card).toContainText('Enforcement paused by The Volaire until Wed 6:00 PM · Pool party');
         await expect(page.getByTestId('lookup-after-pause')).toHaveText('After the pause: no parking pass here');
         await shots(page, 'pause-lookup', world);
+
+
         await expectNoMoney(page);
         // The admin's token asking for the partner's own pending properties is refused, as before this page.
         expectClean(world, [`403 (Forbidden) [${API_ORIGIN}/partner/properties?verification_status=pending]`]);
@@ -204,7 +218,7 @@ test.describe('Enforcement pause @desktop-only', () => {
       await sheet(page).getByRole('button', { name: 'Pause enforcement' }).click();
       expect((await create).postDataJSON()).toEqual({ starts_at: '2026-11-16T23:00:00.000Z', ends_at: '2026-11-17T12:00:00.000Z', reason: 'Pool party' });
       await expect(sheet(page)).toHaveCount(0);
-      await expect(banner(page, 'scheduled')).toHaveText(/Enforcement pause scheduled Mon 6:00 PM – Tue 7:00 AM · Pool party/);
+      await expect(banner(page, 'scheduled')).toHaveText(/Enforcement pause scheduled Mon Nov 16, 6:00 PM – Tue 7:00 AM · Pool party/);
 
       await banner(page, 'scheduled').getByRole('button', { name: 'Cancel' }).click();
       const confirm = page.getByRole('dialog', { name: 'Cancel this pause?' });
@@ -240,19 +254,132 @@ test.describe('Enforcement pause @desktop-only', () => {
       expectClean(world);
     });
 
-    test('a 409 overlaps says there is already a pause then, and when the next one can start', async ({ page }) => {
+    test('with a pause scheduled, a window within a day of it is not offered, and the lead says why', async ({ page }) => {
       const world = withPauses('office', WEEKEND);
       await enter(page, server.origin, world);
       await expect(banner(page, 'scheduled')).toBeVisible({ timeout: 30_000 });
       await page.getByRole('button', { name: 'Pause enforcement' }).click();
-      await sheet(page).getByRole('radio', { name: /This weekend/ }).check();
+      const s = sheet(page);
+      await expect(s).toContainText('A pause can be at most 72 hours, and pauses need a full day (24 hours) between them.');
+      await expect(s.getByRole('radio', { name: /This weekend/ })).toBeDisabled();
+      await expect(s.locator('.ps-option').filter({ hasText: 'This weekend' })).toContainText('Too close to the pause on Fri Nov 20');
+      await expect(s.getByRole('radio', { name: /Tonight/ })).toBeEnabled();
+      // A custom window that ends less than a day before it: said before Save.
+      await s.getByRole('radio', { name: /Pick a time/ }).check();
+      await s.getByLabel('Start', { exact: true }).fill('2026-11-19T09:00');
+      await s.getByLabel('End', { exact: true }).fill('2026-11-20T09:00');
+      await expect(s.getByRole('alert')).toHaveText('Too close to the pause on Fri Nov 20. Pauses need a full day between them.');
+      await expect(s.getByRole('button', { name: 'Pause enforcement' })).toBeDisabled();
+      await shots(page, 'pause-sheet-gap', world, false);
+      expect(world.calls.some((c) => c.method === 'POST' && c.path === pausesPath)).toBe(false);
+      expectClean(world);
+    });
+
+    test('a 409 overlaps (a pause someone else just set) says when the next can start, re-reads the pauses, and keeps Save off', async ({ page }) => {
+      const world = withPauses('office', WEEKEND);
+      // This screen read the pauses before the weekend one was set.
+      let reads = 0;
+      world.overrides.push({ method: 'GET', url: `${API_ORIGIN}${pausesPath}`, respond: () => ({ pauses: reads++ === 0 ? [] : [pauseJson(world, world.pauses[0])] }) });
+      await enter(page, server.origin, world);
+      await expect(today(page)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('pause-banners')).toHaveCount(0);
+      await page.getByRole('button', { name: 'Pause enforcement' }).click();
+      await sheet(page).getByRole('radio', { name: /Pick a time/ }).check();
+      await sheet(page).getByLabel('Start', { exact: true }).fill('2026-11-21T09:00');
+      await sheet(page).getByLabel('End', { exact: true }).fill('2026-11-21T21:00');
       await sheet(page).getByRole('button', { name: 'Pause enforcement' }).click();
-      await expect(sheet(page).getByRole('alert')).toHaveText('There is already a pause then. You can pause again after Mon Nov 23, 11:59 PM ET.');
+      await expect(sheet(page).getByRole('alert')).toHaveText('There is already a pause then. You can pause again from Mon Nov 23, 11:59 PM.');
       await expect(sheet(page)).toBeVisible();                                          // kept open, choices kept
-      await expect(sheet(page).getByRole('radio', { name: /This weekend/ })).toBeChecked();
+      await expect(sheet(page).getByRole('button', { name: 'Pause enforcement' })).toBeDisabled();   // the same window would only be refused again
+      await expect(banner(page, 'scheduled')).toHaveCount(1);                          // re-read: the pause in the way shows behind the sheet
       await shots(page, 'pause-sheet-overlaps', world, false);
       await settle(page, world);
       expectClean(world, ['409 (Conflict)']);
+    });
+
+    test('a Save whose first answer was lost: the retry finds the same pause and shows it, not an overlap', async ({ page }) => {
+      const world = createWorld('office');
+      // The first Save went through 3 minutes ago (Next 24 hours, ending Tue 2:27 PM)... but this screen never heard back.
+      world.pauses.push(pauseRow({ property: V, starts_at: '2026-11-16T19:27:00.000Z', ends_at: '2026-11-17T19:30:00.000Z', reason: null, created_at: '2026-11-16T19:27:00.000Z' }));
+      let reads = 0;
+      world.overrides.push({ method: 'GET', url: `${API_ORIGIN}${pausesPath}`, respond: () => ({ pauses: reads++ === 0 ? [] : [pauseJson(world, world.pauses[0])] }) });
+      await enter(page, server.origin, world);
+      await expect(today(page)).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Pause enforcement' }).click();
+      await sheet(page).getByRole('radio', { name: /Next 24 hours/ }).check();
+      await sheet(page).getByRole('button', { name: 'Pause enforcement' }).click();
+      await expect(sheet(page)).toHaveCount(0);
+      await expect(banner(page, 'active')).toHaveText(/Enforcement paused until Tue 2:30 PM\s*End now/);
+      await expect(today(page)).toContainText('That pause is already set.');
+      await settle(page, world);
+      expectClean(world, ['409 (Conflict)']);
+    });
+
+    test('a platform admin pauses, ends and cancels from the Properties panel', async ({ page }) => {
+      const world = withPauses('admin', WEEKEND);
+      await enter(page, server.origin, world);
+      await expect(page.locator('.ap-skel')).toHaveCount(0, { timeout: 30_000 });
+      await page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: V.name }) }).click();
+      const panel = page.getByTestId('ap-panel');
+      await expect(panel.getByTestId('pause-banner-scheduled')).toHaveText(/Enforcement pause scheduled Fri Nov 20, 6:00 PM – Sun 11:59 PM\s*Cancel/);
+
+      await panel.getByRole('button', { name: 'Pause enforcement' }).click();
+      await sheet(page).getByRole('radio', { name: /Tonight/ }).check();
+      const create = page.waitForRequest((r) => r.method() === 'POST' && r.url() === `${API_ORIGIN}${pausesPath}`);
+      await sheet(page).getByRole('button', { name: 'Pause enforcement' }).click();
+      expect((await create).postDataJSON()).toEqual({ starts_at: '2026-11-16T23:00:00.000Z', ends_at: '2026-11-17T12:00:00.000Z', reason: null });
+      await expect(panel.getByTestId('pause-banner-scheduled')).toHaveCount(2);
+
+      await panel.getByTestId('pause-banner-scheduled').first().getByRole('button', { name: 'Cancel' }).click();
+      const cancel = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/cancel'));
+      await page.getByRole('dialog', { name: 'Cancel this pause?' }).getByRole('button', { name: 'Cancel the pause' }).click();
+      await cancel;
+      await expect(panel.getByTestId('pause-banner-scheduled')).toHaveCount(1);
+      await shots(page, 'pause-admin-panel', world, false);
+      await settle(page, world);
+      expectClean(world);
+    });
+
+    test('company-wide Lookup from another lot: the pause elsewhere is a line on the grouped card, not this lot\'s DO NOT TOW', async ({ page }) => {
+      const M = PROPERTIES.mayfield;
+      const world = createWorld('admin');
+      world.pauses.push(pauseRow({ property: M, ...ACTIVE, n: 1 }));
+      const plate = 'ZZZ9999';
+      world.overrides.push({
+        method: 'GET', url: `${API_ORIGIN}/partner/lookup?`, respond: ({ url }) => (url.searchParams.get('plate') === 'PROBE0'
+          ? { verdict: 'not_registered', matches: [] }
+          // Mayfield is paused, the plate is on file nowhere (contract C: top-level `paused`, one match).
+          : {
+            verdict: 'paused',
+            matches: [{
+              property_id: M.id, property_name: M.name, property_verified: true, verdict: 'paused',
+              detail: {
+                pause_id: world.pauses[0].id, property_name: M.name, starts_at: '2026-11-16T14:00:00+00:00', ends_at: '2026-11-18T23:00:00+00:00',
+                ends_local: etLocal(ACTIVE.ends_at), reason: 'Pool party', underlying: { verdict: 'not_registered', detail: { plate } },
+              },
+            }],
+          }),
+      });
+      await enter(page, server.origin, world);
+      await expect(page.locator('.ap-skel')).toHaveCount(0, { timeout: 30_000 });
+      await page.getByTestId('ap-row').filter({ has: page.locator('td.ap-name', { hasText: M.name }) }).click();
+      await page.getByTestId('ap-panel').getByRole('button', { name: /^View as N Style/ }).click();
+      await expect(page.getByText('Viewing as Partner')).toBeVisible();
+      await page.getByRole('tablist', { name: 'Main navigation' }).getByRole('tab', { name: 'Lookup' }).click();
+      // The driver's lot is Fort Mill; then the company-wide check.
+      await page.locator('#lookup-scope').selectOption({ label: PROPERTIES.fortMill.name });
+      const all = (await page.locator('#lookup-scope option', { hasText: /^All / }).textContent()) ?? '';
+      await page.locator('#lookup-scope').selectOption({ label: all });
+      await page.locator('#lookup-plate').fill(plate);
+      await page.getByRole('button', { name: 'Check', exact: true }).click();
+      const grouped = page.getByRole('status').filter({ hasText: `At ${M.name}` });
+      await expect(grouped.getByRole('button')).toHaveText([
+        `At ${M.name}: DO NOT TOW — PAUSED until Wed 6:00 PM`,
+        `At ${PROPERTIES.fortMill.name}: no parking pass or hold`,
+      ]);
+      await expect(page.getByText('DO NOT TOW — PAUSED', { exact: true })).toHaveCount(0);   // no single headline
+      await shots(page, 'pause-lookup-all', world);
+      expectClean(world, [`403 (Forbidden) [${API_ORIGIN}/partner/properties?verification_status=pending]`]);
     });
 
     test('a manager sees the banner but cannot pause, end or cancel', async ({ page }) => {

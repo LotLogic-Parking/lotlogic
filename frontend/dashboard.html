@@ -3324,6 +3324,8 @@
       font-family: inherit; font-size: 13px; font-weight: 800; text-decoration: underline; cursor: pointer;
     }
     .ls-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+    /* Enforcement paused (Part 3): the DO NOT TOW line above the counts. */
+    .ls-pause { margin: 12px 0; }
     @media (min-width: 640px) { .ls-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
     .ls-tile {
       display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 2px; padding: 10px 12px;
@@ -3982,7 +3984,13 @@
       transition: border-color .15s, background-color .15s;
     }
     .ps-option:hover { border-color: var(--text-faint); }
-    .ps-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+    .ps-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); color-scheme: dark; }
+    /* The native radio follows the theme: an unchecked one is a ring, never a white disc on the dark row. */
+    .theme-light .ps-option input { color-scheme: light; }
+    /* A quick window that runs into another pause: offered, but not choosable, and its hint says why. */
+    .ps-option.is-off { cursor: not-allowed; background: var(--bg-inset); }
+    .ps-option.is-off:hover { border-color: var(--border); }
+    .ps-option.is-off .ps-option-label { color: var(--text-secondary); }
     .ps-option-label { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
     .ps-option-hint { font-size: 13px; line-height: 1.3; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
     .ps-option.is-on {
@@ -4138,14 +4146,12 @@
        --amber, which is the blue slot); "Starts <date>" is .pq-tag--neutral;
        "All good" is not a pill: a green dot and the words. */
     .ap-tag-strong { font-weight: 800; }
-    /* Part 3: the pause running now, at the top of the side panel and the card. */
-    .ap-pause-sep { display: none; }
-    .ap-pause-reason { display: block; font-weight: 500; color: var(--text-secondary); }
-    .ap-pause {
-      margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
-      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card); border: 1px solid var(--accent-line);
-      font-size: 13px; font-weight: 700; line-height: 1.45; color: var(--text-primary);
-    }
+    /* Part 3: the property's pauses (the Today banners, compact) at the top of the side panel and the card. */
+    .ap-pauses .ot-pauses { margin-bottom: 12px; }
+    /* The panel is narrow: the reason on its own line under the time, without the dot. */
+    .ap-pauses .ot-pause-sep { display: none; }
+    .ap-pauses .ot-pause-reason { display: block; }
+    .ap-pauses > .ap-hint { margin: 0 0 12px; }
     /* A long need title ends in "…" inside its cell (the full title is the tag's title). */
     .ap-table td .pq-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .ap-ok { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }

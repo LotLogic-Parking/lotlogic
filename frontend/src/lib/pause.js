@@ -13,9 +13,10 @@
 //     are real hours, as the server counts them.
 //   * A start of "now" is sent as `starts_at: null`: the server uses its own
 //     clock (contract C), so a slow phone clock never moves the start.
-//   * Whether a pause is active or scheduled comes from the server's
-//     `status`, never from this device's clock. The one local check is that
-//     a pause whose `ends_at` has passed is no longer shown as running.
+//   * Whether a pause is active, scheduled or over comes from the server's
+//     `status`, never from this device's clock (a phone hours fast must not
+//     hide a running pause). The pages re-read the pauses every minute, so
+//     a pause that ended drops off at the next read.
 //
 // No fee or amount appears here (CLAUDE.md boot rules).
 
@@ -28,6 +29,8 @@ const DAY = 24 * HOUR;
 const PAST_SLACK_MS = 5 * MIN;
 /** …and at most 30 days ahead. */
 const AHEAD_MS = 30 * DAY;
+/** "Tonight" before 7 AM needs at least this much night left. */
+const TONIGHT_MIN_MS = 30 * MIN;
 /** Up to this many days after today, a time is named by its weekday alone ("Sat 6:00 PM"). */
 const WEEKDAY_DAYS = 6;
 
@@ -87,8 +90,10 @@ export function fmtPauseTime(value, now = Date.now()) {
   return `${WEEKDAYS[p.wd]} ${MONTHS[p.mo - 1]} ${p.d}, ${clock(p)}`;
 }
 
-/** "Sat Nov 21, 7:00 AM": the full day, for the one line that says when enforcement resumes. */
-function fmtFull(t) {
+/** "Sat Nov 21, 7:00 AM": the full day, for a time that may be weeks out (a scheduled start, the resume line). */
+export function fmtFull(value) {
+  const t = typeof value === 'number' ? value : ms(value);
+  if (!Number.isFinite(t)) return '';
   const p = etParts(t);
   return `${WEEKDAYS[p.wd]} ${MONTHS[p.mo - 1]} ${p.d}, ${clock(p)}`;
 }
@@ -109,7 +114,7 @@ export function durationText(span) {
 /**
  * The three quick windows, worked out in Charlotte at `now`:
  *   * Tonight: 6 PM to 7 AM. After 6 PM, or before 7 AM, it is the rest of
- *     the night still running (now to 7 AM).
+ *     the night still running (now to 7 AM); from 6:30 AM, this evening's.
  *   * Next 24 hours: now to now + 24 h.
  *   * This weekend: Friday 6 PM to Sunday 11:59 PM of this week; during the
  *     weekend it starts now. Gone from Sunday 6 PM (that evening is Tonight).
@@ -123,7 +128,11 @@ export function pausePresets(now = Date.now()) {
 
   let start;
   let end;
-  if (p.h < 7) { start = now; end = at(0, 7); }
+  // Before 7 AM it is the rest of this night, unless under half an hour of it
+  // is left: a pause of a few minutes is no use, and could reach the server
+  // after 7:00 and be refused. Then Tonight is this evening's.
+  if (p.h < 7 && at(0, 7) - now >= TONIGHT_MIN_MS) { start = now; end = at(0, 7); }
+  else if (p.h < 7) { start = at(0, 18); end = at(1, 7); }
   else if (p.h < 18) { start = at(0, 18); end = at(1, 7); }
   else { start = now; end = at(1, 7); }
   out.push(windowOf('tonight', 'Tonight', start, end, now, (s, e, nowStart) => `${nowStart ? 'Now' : clock(etParts(s))} – ${clock(etParts(e))}`));
@@ -211,10 +220,15 @@ const COPY = {
   forbidden: 'Only an admin of this property can pause enforcement.',
 };
 
-/** The office's sentence for a refusal code (`extra` = the error body, for `overlaps`). */
+/**
+ * The office's sentence for a refusal code (`extra` = the error body, for
+ * `overlaps`). `earliest_start` is itself an allowed start, so "from", and
+ * it is said with its date, as every pause time that may be days out is.
+ */
 export function pauseErrorText(code, extra = {}) {
-  if (code === 'overlaps' && extra?.earliest_start_local) {
-    return `${COPY.overlaps} You can pause again after ${extra.earliest_start_local}.`;
+  if (code === 'overlaps') {
+    const from = fmtFull(extra?.earliest_start) || String(extra?.earliest_start_local || '').replace(/ ET$/, '');
+    if (from) return `${COPY.overlaps} You can pause again from ${from}.`;
   }
   return COPY[code] || 'That did not go through. Try again.';
 }
@@ -234,6 +248,27 @@ export function fromInputValue(value) {
   return etWallToMs(Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]));
 }
 
+/**
+ * The window "Pick a time" describes. A start a moment ago (within the
+ * server's 5 minutes) is "now" and is sent as null; one further back is kept
+ * as typed, so validatePause says it has passed instead of quietly starting
+ * the pause now.
+ */
+export function customWindow(startValue, endValue, now = Date.now()) {
+  const s = fromInputValue(startValue);
+  const e = fromInputValue(endValue);
+  return {
+    startsNow: Number.isFinite(s) && s <= now && s >= now - PAST_SLACK_MS,
+    starts_at: Number.isFinite(s) ? iso(s) : '',
+    ends_at: Number.isFinite(e) ? iso(e) : '',
+  };
+}
+
+/** `t` rounded down to the quarter hour (Charlotte's offset is whole hours), for a picker's `min`. */
+export function quarterFloor(t) {
+  return Math.floor(t / (15 * MIN)) * 15 * MIN;
+}
+
 /** The `datetime-local` value for an instant, in Charlotte time. */
 export function toInputValue(t) {
   const p = etParts(t);
@@ -245,20 +280,29 @@ export function toInputValue(t) {
 
 const LIVE = new Set(['active', 'scheduled']);
 
-/** Still worth a banner: the server says active or scheduled, and its end is ahead. */
-function showing(p, now) {
-  return p && LIVE.has(p.status) && !(ms(p.ends_at) <= now);
+/**
+ * Worth a banner: the server said active or scheduled when it was last read.
+ * Not this device's clock, which may be hours off (brainstorm 2.10): the
+ * pages re-read every minute, and the server drops a pause that is over.
+ */
+function showing(p) {
+  return !!p && LIVE.has(p.status);
 }
 
+/**
+ * A running pause says its end the short way ("until Wed 6:00 PM"); a
+ * scheduled one always says its start with the date, since it can be weeks
+ * out, and its end relative to that start (brainstorm 2.11).
+ */
 function titleOf(p, now) {
   return p.status === 'active'
     ? `Enforcement paused until ${fmtPauseTime(p.ends_at, now)}`
-    : `Enforcement pause scheduled ${fmtPauseTime(p.starts_at, now)} – ${fmtPauseTime(p.ends_at, now)}`;
+    : `Enforcement pause scheduled ${fmtFull(p.starts_at)} – ${fmtPauseTime(p.ends_at, ms(p.starts_at))}`;
 }
 
 /** One line for a pause: the title, then the reason when there is one. */
 export function pauseLine(p, now = Date.now()) {
-  if (!showing(p, now)) return '';
+  if (!showing(p)) return '';
   const reason = cleanReason(p.reason);
   return reason ? `${titleOf(p, now)} · ${reason}` : titleOf(p, now);
 }
@@ -271,7 +315,7 @@ export function pauseLine(p, now = Date.now()) {
  */
 export function pauseBanners(pauses, now = Date.now()) {
   return (Array.isArray(pauses) ? pauses : [])
-    .filter(p => showing(p, now))
+    .filter(p => showing(p))
     .sort((a, b) => (a.status === b.status ? ms(a.starts_at) - ms(b.starts_at) : a.status === 'active' ? -1 : 1))
     .map(p => ({
       pauseId: p.id,
@@ -290,15 +334,34 @@ export function pauseBanner(pauses, now = Date.now()) {
 }
 
 /**
+ * The line under a tow request in a paused property's group, so the card
+ * never reads as an order the pause has taken back, or the other way round.
+ * It says what the curb check says (backend contract C): a request the office
+ * placed during the pause still stands; one placed before it reads DO NOT
+ * TOW — PAUSED until the pause ends. '' for anything but a tow request, or
+ * with no running pause.
+ */
+export function towPauseNote(item, pause) {
+  if (item?.kind !== 'tow' || !pause || pause.status !== 'active') return '';
+  const made = ms(item.created_at);
+  const start = ms(pause.starts_at);
+  if (!Number.isFinite(made) || !Number.isFinite(start)) return '';
+  return made >= start
+    ? 'Requested by the office during a pause'
+    : 'Placed before the pause. Wait until the pause ends to tow.';
+}
+
+/**
  * The tow company's Requests tab: each property group gains `pauses` (its
- * banners, the running one first). A property that is paused but has no open
- * request still gets a group, at the top, so the pause is never missed.
+ * banners, the running one first) and `notes` (request id → towPauseNote).
+ * A property that is paused but has no open request still gets a group, at
+ * the top, so the pause is never missed.
  */
 export function withPauses(groups, pauses, now = Date.now()) {
   const list = Array.isArray(pauses) ? pauses : [];
   const byProperty = new Map();
   for (const p of list) {
-    if (!showing(p, now)) continue;
+    if (!showing(p)) continue;
     const id = p.property_id || '';
     if (!byProperty.has(id)) byProperty.set(id, []);
     byProperty.get(id).push(p);
@@ -308,5 +371,73 @@ export function withPauses(groups, pauses, now = Date.now()) {
     .filter(([id]) => !known.has(id))
     .map(([id, ps]) => ({ propertyId: id, propertyName: ps[0].property_name || id, propertyVerified: true, count: 0, items: [] }))
     .sort((a, b) => a.propertyName.localeCompare(b.propertyName));
-  return [...extra, ...(groups || [])].map(g => ({ ...g, pauses: pauseBanners(byProperty.get(g.propertyId) || [], now) }));
+  return [...extra, ...(groups || [])].map(g => {
+    const mine = byProperty.get(g.propertyId) || [];
+    const running = mine.find(p => p.status === 'active') || null;
+    const notes = {};
+    for (const item of g.items || []) {
+      const note = towPauseNote(item, running);
+      if (note && item?.id != null) notes[item.id] = note;
+    }
+    return { ...g, pauses: pauseBanners(mine, now), notes };
+  });
+}
+
+// ── The gap rule, before Save ─────────────────────────────────
+
+/** Pauses at one property need a full day between them (the server's `overlaps`). */
+export const GAP_HOURS = 24;
+
+/**
+ * The live pause a window would run into, or null: the server refuses a
+ * window that starts within a day after a pause ends, or ends within a day
+ * before one starts (its exclusion `[start, end + 24 h)` on both sides).
+ * `pauses` are the property's pauses as last read.
+ */
+export function clashingPause(win, pauses, now = Date.now()) {
+  if (!win) return null;
+  const start = Math.max(win.startsNow ? now : ms(win.starts_at), now);
+  const end = ms(win.ends_at);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  for (const p of Array.isArray(pauses) ? pauses : []) {
+    if (!showing(p)) continue;
+    const ps = ms(p.starts_at);
+    const pe = ms(p.ends_at);
+    if (!Number.isFinite(ps) || !Number.isFinite(pe)) continue;
+    if (start < pe + GAP_HOURS * HOUR && ps < end + GAP_HOURS * HOUR) return p;
+  }
+  return null;
+}
+
+/** The hint on a quick window that runs into another pause. */
+export function clashText(p) {
+  return p?.status === 'active' ? 'Too close to the pause running now' : `Too close to the pause on ${fmtFull(p?.starts_at).replace(/,.*$/, '')}`;
+}
+
+/**
+ * After a refused or lost Save: is the pause in the way the one this Save
+ * asked for? Same planned end (the window the office chose), so the pause
+ * they wanted is there, whoever made it; the sheet closes onto its banner
+ * instead of saying there is a pause in the way.
+ */
+export function isSamePause(conflict, body) {
+  if (!conflict || !body) return false;
+  const a = ms(conflict.planned_ends_at ?? conflict.ends_at);
+  const b = ms(body.ends_at);
+  return Number.isFinite(a) && a === b && (conflict.status === 'active' || conflict.status === 'scheduled');
+}
+
+// ── Lot status (contract C: `pause` on GET /apartment/passes/lot-status) ──
+
+/**
+ * The line at the top of the Lot status tab, and in place of the towable
+ * list, while the property is paused: `{title, reason}` or null.
+ */
+export function lotStatusPause(pause, now = Date.now()) {
+  if (!pause) return null;
+  const until = fmtPauseTime(pause.ends_at, now) || String(pause.ends_local || '').replace(/ ET$/, '');
+  return {
+    title: until ? `DO NOT TOW — enforcement paused until ${until}` : 'DO NOT TOW — enforcement paused',
+    reason: cleanReason(pause.reason),
+  };
 }

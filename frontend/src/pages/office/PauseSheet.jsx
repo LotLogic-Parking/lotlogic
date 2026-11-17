@@ -6,8 +6,8 @@ import { NoBreakTimes } from '../../ui/NoBreakTimes.jsx';
 import { cancelPause, createPause, endPause } from '../../lib/requestsApi.js';
 import { towPartnerName } from '../../lib/towPartner.js';
 import {
-  MAX_HOURS, REASON_MAX, cleanReason, fromInputValue, pauseApiError, pauseBody, pauseErrorText, pausePresets,
-  pauseSummary, toInputValue, validatePause,
+  GAP_HOURS, MAX_HOURS, REASON_MAX, clashText, clashingPause, cleanReason, customWindow, isSamePause, pauseApiError, pauseBody,
+  pauseErrorText, pausePresets, pauseSummary, quarterFloor, toInputValue, validatePause,
 } from '../../lib/pause.js';
 
 // ── Pause enforcement: the sheet, and End now / Cancel ────────
@@ -16,10 +16,13 @@ import {
 // clutter, easy to interpret"). One question at a time, top to bottom: when
 // (three quick windows or a start and an end), why (optional), then one box
 // that says exactly what will happen before anything is saved. The 72-hour
-// limit is in the first sentence, so nobody meets it as an error first.
+// limit is in the first sentence, so nobody meets it as an error first; when
+// the property already has a pause, so is the day-between-pauses rule, and a
+// quick window that would run into it says so instead of being offered.
 // The rules and the words live in lib/pause.js; the server checks them all
 // again (backend contract C).
 //
+// Used by the office's Today and the platform admin's Properties panel.
 // Styles: .ps-* in dashboard.html, inside the shared .req-sheet.
 
 const HOUR = 3600_000;
@@ -40,7 +43,12 @@ function nextHour(now) {
   return Math.ceil((now + 60_000) / HOUR) * HOUR;
 }
 
-export function PauseSheet({ property, onClose, onSaved }) {
+/**
+ * `pauses` are the property's pauses as last read (for the gap rule);
+ * `onRefresh` re-reads them after a refusal or a lost answer, so the banner
+ * behind the sheet shows what is true; `onSaved(pause, note)` closes it.
+ */
+export function PauseSheet({ property, pauses = null, onClose, onSaved, onRefresh }) {
   const now = useNowTick();
   const [choice, setChoice] = useState('');
   const [start, setStart] = useState(() => toInputValue(nextHour(Date.now())));
@@ -48,7 +56,14 @@ export function PauseSheet({ property, onClose, onSaved }) {
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
   const [serverError, setServerError] = useState('');
+  // Save stays off after an overlap until the window changes: the same
+  // window would only be refused again.
+  const [refused, setRefused] = useState(false);
   const busy = useRef(false);
+  // A window that starts now is sent with the end worked out at the first
+  // try, so a retry after a lost answer is the same Save (the server answers
+  // it with the pause it already made, and tells nobody twice).
+  const sent = useRef(null);
   const close = useStableClose(onClose, busy);
   const groupName = useUid('ps-when');
   const reasonId = useUid('ps-reason');
@@ -56,27 +71,24 @@ export function PauseSheet({ property, onClose, onSaved }) {
   const endId = useUid('ps-end');
   const summaryId = useUid('ps-summary');
 
-  const presets = pausePresets(now);
+  const live = (Array.isArray(pauses) ? pauses : []).filter(p => p?.status === 'active' || p?.status === 'scheduled');
+  const presets = pausePresets(now).map(p => {
+    const clash = clashingPause(p, live, now);
+    return clash ? { ...p, clash, hint: clashText(clash) } : p;
+  });
   const preset = presets.find(p => p.id === choice) || null;
   let win = null;
   if (preset) win = preset;
-  else if (choice === 'custom') {
-    const s = fromInputValue(start);
-    const e = fromInputValue(end);
-    const startsNow = Number.isFinite(s) && s <= now;
-    win = {
-      startsNow,
-      starts_at: Number.isFinite(s) ? new Date(s).toISOString() : '',
-      ends_at: Number.isFinite(e) ? new Date(e).toISOString() : '',
-    };
-  }
-  const problem = win ? validatePause({ starts_at: win.starts_at, ends_at: win.ends_at, startsNow: win.startsNow, now }) : null;
+  else if (choice === 'custom') win = customWindow(start, end, now);
+  const clash = win ? clashingPause(win, live, now) : null;
+  const problem = win ? validatePause({ starts_at: win.starts_at, ends_at: win.ends_at, startsNow: win.startsNow, now }) || (clash ? 'overlaps' : null) : null;
   const summary = win && !problem ? pauseSummary(win, now) : null;
   const tooLong = cleanReason(reason).length > REASON_MAX;
-  const ready = !!summary && !tooLong;
+  const ready = !!summary && !tooLong && !refused;
   const partner = towPartnerName(property);
 
-  const pick = (id) => { setChoice(id); setServerError(''); };
+  const changed = () => { setServerError(''); setRefused(false); sent.current = null; };
+  const pick = (id) => { setChoice(id); changed(); };
 
   async function submit(e) {
     e.preventDefault();
@@ -84,14 +96,30 @@ export function PauseSheet({ property, onClose, onSaved }) {
     busy.current = true;
     setSending(true);
     setServerError('');
+    let body = pauseBody(win, reason);
+    if (win.startsNow && sent.current && sent.current.choice === choice && sent.current.reason === body.reason
+      && !validatePause({ starts_at: null, ends_at: sent.current.ends_at, now })) {
+      body = { ...body, ends_at: sent.current.ends_at };
+    }
+    sent.current = { choice, reason: body.reason, ends_at: body.ends_at };
     try {
-      const out = await createPause(property.id, pauseBody(win, reason));
+      const out = await createPause(property.id, body);
       busy.current = false;
       onSaved(out?.pause || null);
     } catch (err) {
       busy.current = false;
       setSending(false);
-      setServerError(pauseApiError(err).text);
+      const { code, text } = pauseApiError(err);
+      onRefresh?.();
+      // The pause asked for is already there (an earlier try went through and
+      // its answer was lost, or someone set the same one): show it.
+      const conflict = err?.body?.conflict;
+      if (code === 'overlaps' && isSamePause(conflict, body)) {
+        onSaved(conflict, 'That pause is already set.');
+        return;
+      }
+      if (code === 'overlaps') setRefused(true);
+      setServerError(text);
     }
   }
 
@@ -99,14 +127,15 @@ export function PauseSheet({ property, onClose, onSaved }) {
     <Sheet title="Pause enforcement" onClose={close}>
       <form className="ps" onSubmit={submit} noValidate>
         <p className="pq-sheet-copy ps-lead">
-          No tows or boots at {property?.name || 'this property'} while it is paused. A pause can be at most {MAX_HOURS} hours.
+          No tows or boots at {property?.name || 'this property'} while it is paused. A pause can be at most {MAX_HOURS} hours
+          {live.length ? `, and pauses need a full day (${GAP_HOURS} hours) between them.` : '.'}
         </p>
 
         <fieldset className="ps-when">
           <legend className="pq-label">When</legend>
           {[...presets, { id: 'custom', label: 'Pick a time', hint: 'Choose a start and an end' }].map(p => (
-            <label key={p.id} className={`ps-option${choice === p.id ? ' is-on' : ''}`}>
-              <input type="radio" name={groupName} value={p.id} checked={choice === p.id} onChange={() => pick(p.id)} />
+            <label key={p.id} className={`ps-option${choice === p.id ? ' is-on' : ''}${p.clash ? ' is-off' : ''}`}>
+              <input type="radio" name={groupName} value={p.id} checked={choice === p.id} disabled={!!p.clash} onChange={() => pick(p.id)} />
               <span className="ps-option-label">{p.label}</span>
               <span className="ps-option-hint">{p.hint}</span>
             </label>
@@ -117,13 +146,15 @@ export function PauseSheet({ property, onClose, onSaved }) {
           <div className="ps-custom">
             <div className="pq-field">
               <label className="pq-label" htmlFor={startId}>Start</label>
-              <input id={startId} type="datetime-local" className="req-input" value={start} min={toInputValue(now)} step={900}
-                onChange={e => { setStart(e.target.value); setServerError(''); }} />
+              {/* min on a quarter hour: it is also the step's base, so the picker steps :00, :15, :30, :45. */}
+              <input id={startId} type="datetime-local" className="req-input" value={start} min={toInputValue(quarterFloor(now))} step={900}
+                onChange={e => { setStart(e.target.value); changed(); }} />
             </div>
             <div className="pq-field">
               <label className="pq-label" htmlFor={endId}>End</label>
-              <input id={endId} type="datetime-local" className="req-input" value={end} min={start || undefined} step={900}
-                onChange={e => { setEnd(e.target.value); setServerError(''); }} />
+              <input id={endId} type="datetime-local" className="req-input" value={end} step={900}
+                min={win?.starts_at ? toInputValue(quarterFloor(Date.parse(win.starts_at))) : undefined}
+                onChange={e => { setEnd(e.target.value); changed(); }} />
             </div>
           </div>
         )}
@@ -131,7 +162,7 @@ export function PauseSheet({ property, onClose, onSaved }) {
         <div className="pq-field">
           <label className="pq-label" htmlFor={reasonId}>Reason <span className="ps-optional">(optional)</span></label>
           <input id={reasonId} className="req-input" value={reason} maxLength={REASON_MAX + 20} placeholder="Pool party, move-in day…"
-            autoComplete="off" onChange={e => setReason(e.target.value)} aria-invalid={tooLong ? 'true' : undefined} />
+            autoComplete="off" onChange={e => { setReason(e.target.value); sent.current = null; }} aria-invalid={tooLong ? 'true' : undefined} />
           {cleanReason(reason).length > REASON_MAX - 20 && (
             <p className={`pq-hint${tooLong ? ' is-error' : ''}`}>{cleanReason(reason).length} of {REASON_MAX} characters</p>
           )}
@@ -141,7 +172,8 @@ export function PauseSheet({ property, onClose, onSaved }) {
           {summary ? (
             <>
               <div className="ps-summary-when">
-                <span className="ps-summary-tag">Paused</span>
+                {/* "Scheduled" for a window that starts later: nothing stops when Save is pressed. */}
+                <span className="ps-summary-tag">{win.startsNow ? 'Paused' : 'Scheduled'}</span>
                 <span className="ps-summary-time"><NoBreakTimes text={summary.when} /></span>
                 <span className="ps-summary-len">{summary.length}</span>
               </div>
@@ -158,7 +190,11 @@ export function PauseSheet({ property, onClose, onSaved }) {
         {/* What stops Save sits with the buttons, which stay on screen while the sheet scrolls. */}
         <div className="pq-sheet-actions">
           {serverError && <p className="req-error" role="alert">{serverError}</p>}
-          {!serverError && problem && <p className="req-error" role="alert">{pauseErrorText(problem)}</p>}
+          {!serverError && problem && (
+            <p className="req-error" role="alert">
+              {problem === 'overlaps' ? `${clashText(clash)}. Pauses need a full day between them.` : pauseErrorText(problem)}
+            </p>
+          )}
           {!serverError && !problem && tooLong && <p className="req-error" role="alert">{pauseErrorText('reason_too_long')}</p>}
           <button type="submit" className="pq-btn pq-btn--primary" disabled={!ready || sending} aria-describedby={summaryId}>
             {sending ? <><Spinner />Pausing…</> : 'Pause enforcement'}

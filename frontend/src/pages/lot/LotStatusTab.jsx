@@ -3,6 +3,9 @@ import { getLotStatus } from '../../lib/requestsApi.js';
 import { fmtPassRemaining } from '../../lib/time.js';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
 import { Tag } from '../permits/parts.jsx';
+import { lotStatusPause } from '../../lib/pause.js';
+import { PauseIcon } from '../office/PauseBanners.jsx';
+import { NoBreakTimes } from '../../ui/NoBreakTimes.jsx';
 import {
   EMPTY_COPY,
   LIST_SEGMENTS,
@@ -142,6 +145,10 @@ export function LotStatusTab({ propertyId, propertyName = '', onOpenRow = () => 
   const list = data && Array.isArray(data[segment]) ? data[segment] : [];
   const shown = useMemo(() => filterByPlate(list, q), [list, q]);
   const name = data?.property?.name || propertyName;
+  // Enforcement paused now (backend contract C: `pause`, and `towable` is
+  // empty): said at the top and in place of the towable list, so an empty
+  // list never reads as "nothing to tow" or missing data.
+  const pause = lotStatusPause(data?.pause, asOf ? Date.parse(asOf) : Date.now());
 
   const exportCsv = useCallback(() => {
     if (!data) return;
@@ -168,7 +175,9 @@ export function LotStatusTab({ propertyId, propertyName = '', onOpenRow = () => 
           <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={() => setQ('')}>Clear search</button>
         </div>
       ) : (
-        <div className="pq-empty"><p className="pq-empty-title">{EMPTY_COPY[segment]}</p></div>
+        <div className="pq-empty"><p className="pq-empty-title">
+          {segment === 'towable' && pause ? <NoBreakTimes text={pause.title} /> : EMPTY_COPY[segment]}
+        </p></div>
       );
     } else {
       rows = (
@@ -199,6 +208,16 @@ export function LotStatusTab({ propertyId, propertyName = '', onOpenRow = () => 
           <button type="button" className="ls-refresh" onClick={refresh}>{loading && data ? 'Refreshing…' : 'Refresh'}</button>
         </div>
       </div>
+
+      {pause && (
+        <div className="ot-pause is-active is-compact ls-pause" role="status" data-testid="ls-pause">
+          <PauseIcon size={18} />
+          <p className="ot-pause-text">
+            <span className="ot-pause-title"><NoBreakTimes text={pause.title} /></span>
+            {pause.reason && <><span className="ot-pause-sep"> · </span><span className="ot-pause-reason">{pause.reason}</span></>}
+          </p>
+        </div>
+      )}
 
       {data && loadErr && (
         <div className="pq-banner" role="status">
