@@ -2,7 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { pausesFromRows, readPauses, type PauseRead } from "../_shared/pause.ts";
 import { fakeDb, type Row } from "./fake_db.ts";
 import {
-  closeCoveredViolation, heldOverstayCover, overstayCandidates, pendingDecision, pendingDispatchCandidates, repointSession,
+  closeCoveredViolation, coverCloseHealth, heldOverstayCover, overstayCandidates, pendingDecision, pendingDispatchCandidates, repointSession,
   type OverstaySession, type PendingViolation,
 } from "./pause_hold.ts";
 
@@ -97,7 +97,7 @@ Deno.test("tow email: a held car that got a parking pass during the pause is clo
   const d = await pendingDecision(db, rows[0], pauses, AFTER);
   assertEquals(d, { kind: "covered", cover: { kind: "pass", id: "new1" }, sessionId: "s1" });
   if (d.kind !== "covered") throw new Error("unreachable");
-  assertEquals(await closeCoveredViolation(db, rows[0], d, AFTER), true);
+  assertEquals(await closeCoveredViolation(db, rows[0], d, AFTER), "closed");
   assertEquals([violations[0].status, violations[0].action_taken, violations[0].action_channel, violations[0].dispatched_at], ["dismissed", "no_tow", "auto_registered", null]);
   assertEquals([sessions[0].state, (sessions[0] as Row).visitor_pass_id], ["registered", "new1"]);
   assertEquals((await pendingAt(db, AFTER)).rows, []);
@@ -116,4 +116,37 @@ Deno.test("tow email: a held car whose visit an exit closed is not towed; the sa
   // An exit hint still stops any row, paused or not.
   const hinted = fakeDb({ plate_sessions: [{ ...sessions[0], exit_hinted_at: "2026-11-11T20:58:00Z", exited_at: null }], visitor_passes: [] });
   assertEquals(await pendingDecision(hinted, p2, readAt(AFTER), AFTER), { kind: "left", left: { signal: "session_exit", at: "2026-11-11T20:58:00Z" } });
+});
+
+Deno.test("tow email: a held car with a parking pass whose dismiss fails is left as it was (no re-point), retried next tick, never sent", async () => {
+  const violations = [violation("v1", "p1", "s1", "2026-11-11T19:00:00Z")];
+  const sessions = [{ id: "s1", property_id: "p1", state: "expired", visitor_pass_id: "old1", exit_hinted_at: null, exited_at: null, normalized_plate: "ABC1234", plate_text: "ABC1234" }];
+  const passes = [{ id: "new1", property_id: "p1", plate_text: "ABC1234", back_plate: null, valid_from: "2026-11-11T20:00:00Z", valid_until: "2026-11-12T20:00:00Z", cancelled_at: null, status: "active" }];
+  const tables = { alpr_violations: violations, plate_sessions: sessions, visitor_passes: passes, resident_plates: [] as Row[], enforcement_pauses: [PAUSE as Row] };
+  const broken = fakeDb(tables, { failUpdates: ["alpr_violations"] });
+  const { rows, pauses } = await pendingAt(broken, AFTER);
+  const d = await pendingDecision(broken, rows[0], pauses, AFTER);
+  if (d.kind !== "covered") throw new Error(`expected covered, got ${d.kind}`);
+  assertEquals(await closeCoveredViolation(broken, rows[0], d, AFTER), "failed");
+  // Nothing moved: the session is still the expired one the violation hangs off.
+  assertEquals([sessions[0].state, sessions[0].visitor_pass_id], ["expired", "old1"]);
+  assertEquals([violations[0].status, violations[0].dispatched_at], ["pending", null]);
+  // The next tick decides "covered" again, never "send".
+  const next = await pendingAt(fakeDb(tables), new Date("2026-11-11T21:04:00Z"));
+  assertEquals(await pendingDecision(fakeDb(tables), next.rows[0], next.pauses, new Date("2026-11-11T21:04:00Z")),
+    { kind: "covered", cover: { kind: "pass", id: "new1" }, sessionId: "s1" });
+});
+
+Deno.test("tow email: a covered row already dispatched elsewhere is not re-pointed and is not a failure", async () => {
+  const violations = [{ ...violation("v1", "p1", "s1", "2026-11-11T19:00:00Z"), dispatched_at: "2026-11-11T21:00:30Z" }];
+  const sessions = [{ id: "s1", property_id: "p1", state: "expired", visitor_pass_id: "old1" }];
+  const db = fakeDb({ alpr_violations: violations, plate_sessions: sessions });
+  const r = await closeCoveredViolation(db, violations[0] as unknown as PendingViolation, { cover: { kind: "pass", id: "new1" }, sessionId: "s1" }, AFTER);
+  assertEquals(r, "not_pending");
+  assertEquals([sessions[0].state, sessions[0].visitor_pass_id], ["expired", "old1"]);
+});
+
+Deno.test("coverCloseHealth: a failed dismiss of a covered car fails the heartbeat; none passes", () => {
+  assertEquals(coverCloseHealth(0), null);
+  assertEquals(coverCloseHealth(2), "covered_close_failed: 2 held violations with a parking pass could not be closed; retrying next tick");
 });

@@ -158,12 +158,22 @@ export async function pendingDecision(db: SupabaseClient, v: PendingViolation, p
 }
 
 /**
- * A held violation whose car is now covered: the session goes back to
- * registered / resident, and the violation is closed with no tow and nothing
- * sent (it was never dispatched, so there is nothing to stand down).
+ * A held violation whose car is now covered: the violation is closed with no
+ * tow and nothing sent (it was never dispatched, so there is nothing to stand
+ * down), and only then does the session go back to registered / resident.
+ *
+ * The order matters. The "covered" decision reads the session in `expired`;
+ * a session re-pointed first, under a violation whose dismiss then failed,
+ * would read `registered` on the next tick, the decision would be "send", and
+ * the tow email would go out for a car with a parking pass. So a failed
+ * dismiss leaves everything as it was ("failed", counted into the heartbeat)
+ * and the next tick decides "covered" again. "not_pending": the row was
+ * dispatched by someone else in between; it is left alone, and so is the
+ * session.
  */
-export async function closeCoveredViolation(db: SupabaseClient, v: PendingViolation, d: { cover: Cover; sessionId: string }, now: Date): Promise<boolean> {
-  await repointSession(db, d.sessionId, "expired", d.cover, now);
+export type CloseResult = "closed" | "not_pending" | "failed";
+
+export async function closeCoveredViolation(db: SupabaseClient, v: PendingViolation, d: { cover: Cover; sessionId: string }, now: Date): Promise<CloseResult> {
   const nowIso = now.toISOString();
   const upd = await db.from("alpr_violations")
     .update({
@@ -179,8 +189,17 @@ export async function closeCoveredViolation(db: SupabaseClient, v: PendingViolat
     .eq("id", v.id)
     .is("dispatched_at", null)
     .select("id");
-  if (upd.error) { console.warn(`auto-registered update failed for ${v.id}: ${upd.error.message}`); return false; }
-  const ok = !!upd.data && upd.data.length > 0;
-  if (ok) console.log(`auto_registered violation=${v.id} session=${d.sessionId} cover=${d.cover.kind} id=${d.cover.id}`);
-  return ok;
+  if (upd.error) { console.error(`covered_close_failed violation=${v.id}: ${upd.error.message} (left as is; retried next tick)`); return "failed"; }
+  if (!upd.data || upd.data.length === 0) return "not_pending";
+  // The violation is closed, so no tow can follow whatever happens here. A
+  // failed re-point leaves the session expired under a dismissed violation,
+  // which closeExpired closes like any other.
+  await repointSession(db, d.sessionId, "expired", d.cover, now);
+  console.log(`auto_registered violation=${v.id} session=${d.sessionId} cover=${d.cover.kind} id=${d.cover.id}`);
+  return "closed";
+}
+
+/** Heartbeat error for the covered-car closes this tick: null when none failed. */
+export function coverCloseHealth(failed: number): string | null {
+  return failed > 0 ? `covered_close_failed: ${failed} held violations with a parking pass could not be closed; retrying next tick` : null;
 }

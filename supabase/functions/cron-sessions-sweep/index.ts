@@ -38,7 +38,7 @@ import { handleSystemPaused, heartbeat, redactError } from "./heartbeat.ts";
 import { APARTMENT_GRACE_STALE_HOURS_DEFAULT, graceDecision, holdGraceForPause } from "./grace_policy.ts";
 import { BOOT_CHANNEL, GRACE_DISPATCH_MINUTES_DEFAULT, BOOT_STALE_HOURS_DEFAULT, bootDispatch, bootRegistrations, bootStandDowns, exitCameraProperties, parsePhoneList, type BootDeps } from "./boot_dispatch.ts";
 import { EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT, EXIT_SWEEP_MIN_SCORE_DEFAULT, sweepStrayApartmentExits } from "./exit_sweep.ts";
-import { closeCoveredViolation, heldOverstayCover, overstayCandidates, pendingDecision, pendingDispatchCandidates, repointSession } from "./pause_hold.ts";
+import { closeCoveredViolation, coverCloseHealth, heldOverstayCover, overstayCandidates, pendingDecision, pendingDispatchCandidates, repointSession } from "./pause_hold.ts";
 import { pauseHealth, readPauses, type PauseRead } from "../_shared/pause.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -129,7 +129,9 @@ Deno.serve(async (_req: Request) => {
     const closedResident = await closeResident();
     const closedExpired = await closeExpired();
 
-    const pauseError = pauseHealth(pauses, dispatch.pauses);
+    // A failed pause read, or a held car with a parking pass whose violation
+    // could not be closed (left as is, retried next tick), fails the heartbeat.
+    const pauseError = pauseHealth(pauses, dispatch.pauses) ?? coverCloseHealth(dispatch.covered_close_failed);
     await heartbeat(db, pauseError === null, pauseError === null ? null : redactError(pauseError));
     return json(200, {
       ok: true,
@@ -151,6 +153,7 @@ Deno.serve(async (_req: Request) => {
       dispatched: dispatch.dispatched,
       dispatch_rate_limited: dispatch.rate_limited,
       auto_no_tow_left_before_tow: dispatch.left_before_tow,
+      covered_close_failed: dispatch.covered_close_failed,
       stand_downs_sent: standDowns.sent,
       stand_downs_failed: standDowns.failed,
       closed_registered: closedRegistered,
@@ -706,7 +709,7 @@ function isRateLimit(status: number, errMsg: string): boolean {
   return /rate.?limit/i.test(errMsg) || /retry.?after/i.test(errMsg);
 }
 
-async function dispatchPendingViolations(budget: { remaining: number }): Promise<{ dispatched: number; left_before_tow: number; rate_limited: number; pauses: PauseRead }> {
+async function dispatchPendingViolations(budget: { remaining: number }): Promise<{ dispatched: number; left_before_tow: number; rate_limited: number; covered_close_failed: number; pauses: PauseRead }> {
   const cutoff = new Date(Date.now() - DISPATCH_HOLD_MINUTES * 60 * 1000).toISOString();
   // Queue signal is dispatched_at IS NULL — NOT sms_sent_at IS NULL (audit C1).
   // failDispatch used to stamp a sentinel sms_sent_at on cap-hit, so a
@@ -725,11 +728,12 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
   const { rows: pending, pauses } = await pendingDispatchCandidates(db, {
     now: new Date(), cutoffIso: cutoff, maxAttempts: MAX_DISPATCH_ATTEMPTS, limit: 50, recentHours: APARTMENT_GRACE_STALE_HOURS,
   });
-  if (pending.length === 0) return { dispatched: 0, left_before_tow: 0, rate_limited: 0, pauses };
+  if (pending.length === 0) return { dispatched: 0, left_before_tow: 0, rate_limited: 0, covered_close_failed: 0, pauses };
 
   let dispatched = 0;
   let leftBeforeTow = 0;
   let rateLimited = 0;
+  let coveredCloseFailed = 0;
   const internalToken = Deno.env.get("INTERNAL_TOKEN") ?? "";
 
   for (const v of pending) {
@@ -749,7 +753,8 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
     if (decision.kind === "skip") continue;
     if (decision.kind === "covered") {
       // Local DB writes only, no send: does not consume the send budget.
-      await closeCoveredViolation(db, v, decision, new Date());
+      // Never falls through to the send: a failed close is retried next tick.
+      if (await closeCoveredViolation(db, v, decision, new Date()) === "failed") coveredCloseFailed++;
       continue;
     }
     if (decision.kind === "left") {
@@ -831,7 +836,7 @@ async function dispatchPendingViolations(budget: { remaining: number }): Promise
     if (budget.remaining > 0 && DISPATCH_FANOUT_DELAY_MS > 0) await sleep(DISPATCH_FANOUT_DELAY_MS);
   }
 
-  return { dispatched, left_before_tow: leftBeforeTow, rate_limited: rateLimited, pauses };
+  return { dispatched, left_before_tow: leftBeforeTow, rate_limited: rateLimited, covered_close_failed: coveredCloseFailed, pauses };
 }
 
 // Increment dispatch_attempts; on cap-hit, stamp a sentinel sms_sent_at

@@ -2,9 +2,10 @@
 // the functions import pulls it in). Filters run in memory over the rows
 // given per table; update() patches the rows the chain has narrowed to.
 // Timestamps compare as strings, so tests use one ISO format throughout.
+// failUpdates names tables whose update() returns an error and changes nothing.
 
 export type Row = Record<string, unknown>;
-export function fakeDb(tables: Record<string, Row[]>) {
+export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: string[] } = {}) {
   let seq = 0;
   return {
     from(table: string) {
@@ -13,7 +14,11 @@ export function fakeDb(tables: Record<string, Row[]>) {
       let patch: Row | null = null;
       const b: Record<string, unknown> = {};
       const self = b as Record<string, (...a: unknown[]) => unknown>;
-      const finish = () => { if (patch) for (const r of rows) Object.assign(r, patch); return { data: rows, error: null }; };
+      const finish = () => {
+        if (patch && opts.failUpdates?.includes(table)) return { data: null, error: { message: `fake update failed on ${table}` } };
+        if (patch) for (const r of rows) Object.assign(r, patch);
+        return { data: rows, error: null };
+      };
       // Any point in the chain can be awaited, as with supabase-js.
       self.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise.resolve(finish()).then(res, rej);
       self.select = () => Object.assign(Object.create(b), { then: (res: (v: unknown) => unknown) => Promise.resolve(finish()).then(res) });
