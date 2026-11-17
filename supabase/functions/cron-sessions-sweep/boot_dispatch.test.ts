@@ -1,6 +1,7 @@
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { pausesFromRows, type PauseRead } from "../_shared/pause.ts";
 import {
-  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
+  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, findCoveringPass, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
 } from "./boot_dispatch.ts";
 
 Deno.test("phones: normalised to E.164, de-duplicated, junk dropped", () => {
@@ -59,7 +60,14 @@ function fakeDb(tables: Record<string, Row[]>) {
       self.is = (c: unknown, _v: unknown) => { rows = rows.filter(r => r[c as string] == null); return b; };
       self.in = (c: unknown, v: unknown) => { rows = rows.filter(r => (v as unknown[]).includes(r[c as string])); return b; };
       self.lt = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) < String(v)); return b; };
-      self.limit = () => Promise.resolve(finish());
+      const col = (r: Row, c: string) => (c.startsWith("properties.") ? (r.properties as Row)?.[c.slice(11)] : r[c]);
+      self.neq = (c: unknown, v: unknown) => { rows = rows.filter(r => col(r, c as string) !== v); return b; };
+      self.not = (c: unknown, op: unknown, v: unknown) => {
+        if (op !== "in") throw new Error(`fake not(${String(op)})`);
+        const list = String(v).replace(/^\(|\)$/g, "").split(",");
+        rows = rows.filter(r => !list.includes(String(r[c as string]))); return b;
+      };
+      self.limit = (n: unknown) => { rows = rows.slice(0, Number(n)); return Promise.resolve(finish()); };
       self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
       self.single = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
       return b;
@@ -166,4 +174,60 @@ Deno.test("bootRegistrations: a resident plate one confusable character off stil
   assertEquals(n, 1);
   assertEquals(sessions[0].state, "resident");
   assertEquals((sessions[0] as Row).resident_plate_id, "r1");
+});
+
+// ── enforcement pause ────────────────────────────────────────────────────
+const pausedAt = (now: Date, rows: Array<{ property_id: string; starts_at: string; ends_at: string }>): PauseRead =>
+  ({ ok: true, missing: false, ...pausesFromRows(rows.map((r, i) => ({ id: `pz${i}`, ended_early_at: null, cancelled_at: null, reason: null, ...r })), now, 24) });
+const PAUSE_P1 = { property_id: "p1", starts_at: "2026-11-11T18:00:00Z", ends_at: "2026-11-11T21:00:00Z" };
+
+Deno.test("bootDispatch during a pause: the paused property is left out in SQL (before the limit), others still dispatch", async () => {
+  const grace = (id: string, property_id: string) => ({ id, property_id, normalized_plate: id.toUpperCase(), plate_text: id.toUpperCase(), entered_at: "2026-11-11T20:00:00Z", entry_plate_event_id: "e", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT });
+  // Twelve waiting cars at the paused property would fill BOOT_MAX_PER_TICK (10) if filtered after the select.
+  const sessions = [...Array.from({ length: 12 }, (_, i) => grace(`held${i}`, "p1")), grace("due1", "p2")];
+  const cams = [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }, { property_id: "p2", active: true, orientation: "exit", exit_order: 2 }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: cams };
+  const sent: string[] = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: NOW, pauses: pausedAt(NOW, [PAUSE_P1]),
+    send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions.filter(s => s.state === "expired").map(s => s.id), ["due1"]);
+  assertEquals(sessions.filter(s => s.property_id === "p1").every(s => s.state === "grace" && s.violation_id === null), true);
+  assertEquals(tables.alpr_violations.length, 1);
+  assertMatch(sent[0], /Plate DUE1/);
+});
+
+Deno.test("bootDispatch after a pause: the held car is picked up on the first run after ends_at, once", async () => {
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T19:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const send = async (_to: string, body: string) => { sent.push(body); return { ok: true, status: 201 }; };
+  const during = new Date("2026-11-11T20:59:59Z");
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: during, pauses: pausedAt(during, [PAUSE_P1]), send }), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions[0].state, "grace");
+  const after = new Date("2026-11-11T21:00:00Z"); // at == ends_at: enforcement is back
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: after, pauses: pausedAt(after, [PAUSE_P1]), send }), { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: after, pauses: pausedAt(after, [PAUSE_P1]), send }), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sent.length, 1);
+  assertEquals(tables.alpr_violations.length, 1);
+});
+
+Deno.test("bootDispatch with an unknown pause state: nothing is claimed or sent this tick", async () => {
+  const sessions = [{ id: "s1", property_id: "p2", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p2", active: true, orientation: "exit", exit_order: 2 }] };
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: NOW, pauses: { ok: false, error: "timeout" }, send: async () => ({ ok: true, status: 201 }) });
+  assertEquals(out, { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions[0].state, "grace");
+  assertEquals(tables.alpr_violations.length, 0);
+});
+
+Deno.test("findCoveringPass: a live pass or approved resident plate at the property, by the entry's fuzzy rule", async () => {
+  const passes = [
+    { id: "old", property_id: "p1", plate_text: "ABC1234", valid_from: "2026-11-10T00:00:00Z", valid_until: "2026-11-11T00:00:00Z", cancelled_at: null, status: "active" },
+    { id: "new", property_id: "p1", plate_text: "abc-1234", valid_from: "2026-11-11T00:00:00Z", valid_until: "2026-11-12T00:00:00Z", cancelled_at: null, status: "active" },
+  ];
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: passes, resident_plates: [] }), "p1", "ABC1234", NOW), { kind: "pass", id: "new" });
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [passes[0]], resident_plates: [] }), "p1", "ABC1234", NOW), null);
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "approved", active: true }] }), "p1", "ABC1234", NOW), { kind: "resident", id: "r1" });
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "pending", active: true }] }), "p1", "ABC1234", NOW), null);
 });

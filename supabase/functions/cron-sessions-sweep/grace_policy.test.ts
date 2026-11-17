@@ -22,3 +22,15 @@ Deno.test("apartment: closed only once nobody has seen it for the stale window",
   assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(25 * 60), lastDetectedAt: null, now, expiryMinutes: 15, staleHours: 30 }), "keep");
   assertEquals(graceDecision({ propertyType: "apartment", enteredAt: "junk", lastDetectedAt: null, now, expiryMinutes: 15 }), "keep");
 });
+
+Deno.test("apartment after a pause: the stale clock starts no earlier than the pause's end (contrarian P1-2)", () => {
+  // Entered 50 h into a 72 h pause, never seen again; the pause ended 1 min ago.
+  const pauseEnd = min(1);
+  assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(23 * 60), lastDetectedAt: null, now, expiryMinutes: 15 }), "keep");
+  assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(51 * 60), lastDetectedAt: min(51 * 60), now, expiryMinutes: 15 }), "close");
+  assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(51 * 60), lastDetectedAt: min(51 * 60), now, expiryMinutes: 15, seenFloor: pauseEnd }), "keep");
+  // 24 h after the pause ended the normal rule applies again.
+  assertEquals(graceDecision({ propertyType: "apartment", enteredAt: min(80 * 60), lastDetectedAt: null, now, expiryMinutes: 15, seenFloor: min(24 * 60) }), "close");
+  // The floor never touches a truck plaza.
+  assertEquals(graceDecision({ propertyType: "truck_plaza", enteredAt: min(16), lastDetectedAt: null, now, expiryMinutes: 15, seenFloor: pauseEnd }), "close");
+});
