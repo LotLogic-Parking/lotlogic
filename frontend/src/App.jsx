@@ -12,7 +12,7 @@ import { readDeepLink, cleanDeepLink, readPublicRoute, readJoinSlug, emptyDeepLi
 import { NATIVE, nativeSession, nativeSignedOut, onNativeOpen, nativeDeepLink } from './lib/native.js';
 import { readActionToken, hideActionToken } from './lib/requestAction.js';
 import { navTabsFor, partnerRequestsReady, isKnownTab, homeTabFor, isClassicOffice } from './lib/features.js';
-import { canSeeEnforcement } from './lib/enforcement.js';
+import { canSeeEnforcement, isLotLogicAgent } from './lib/enforcement.js';
 import { verifyState, secondsUntilResend, cooldownRetryAfter, sentAtForRetryAfter } from './lib/verifyState.js';
 import { requestsApi } from './lib/requestsApi.js';
 import { VerifyBanner } from './ui/VerifyBanner.jsx';
@@ -388,6 +388,12 @@ export function App() {
   // extras — money surfaces, the platform-admin console
   // — splice in ahead of Account, which stays last.
   const enforcementAllowed = canSeeEnforcement(owner, viewAs);
+  // A LotLogic boot agent (a team member of the "LotLogic" company): their
+  // work is the Enforcement tab, so it is their whole nav with Account
+  // (Gabe, 2026-11-16: "merge the lotlogic agent into the enforcement tab").
+  // LotLogic is no property's tow company, so Lookup and Requests would be
+  // empty for them; the properties they cover are listed in the tab instead.
+  const agentMode = !viewAs && isLotLogicAgent(owner);
   const navExtras = isOwner
     ? [
       // SaaS (all-apartment) owners have no per-tow money flow — see showMoney.
@@ -409,6 +415,7 @@ export function App() {
     ]
     : [];
   const navTabs = (() => {
+    if (agentMode) return [{ id: 'enforcement', label: 'Enforcement' }, { id: 'account', label: 'Account' }];
     const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
     const account = base.filter(t => t.id === 'account');
     // One property: the tab opens it, so "Properties" (a list of one) reads "Home".
@@ -433,11 +440,11 @@ export function App() {
     // `?property=` link) goes to Requests.
     if (!lotsLoaded && !truck) return;
     if (!validTabs.includes(tab)) {
-      const home = homeTabFor(truck ? 'driver' : null);
+      const home = agentMode ? 'enforcement' : homeTabFor(truck ? 'driver' : null);
       setTab(validTabs.includes(home) ? home : (validTabs[0] || 'account'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, validTabs.join(',')]);
+  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, agentMode, validTabs.join(',')]);
 
   // Apply the deep link, once, as soon as there is a session. Deliberately not
   // while signed out: the query has to survive the sign-in (LoginPage replays
@@ -1182,7 +1189,7 @@ export function App() {
           {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} />}
           {tab === 'invoices' && isOwner && showMoney && <InvoicesPage lots={lots} partners={partners} user={owner} isOwner={isOwner} isPlatformAdmin={isPlatformAdmin} />}
           {tab === 'admin' && isPlatformAdmin && <AdminConsolePage user={owner} />}
-          {tab === 'enforcement' && enforcementAllowed && <EnforcementPage />}
+          {tab === 'enforcement' && enforcementAllowed && <EnforcementPage agent={agentMode} />}
           {tab === 'requests' && isOperator && <PartnerRequestsPage
             pendingJoins={pendingJoins}
             propertyNames={propertyNames}

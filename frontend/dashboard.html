@@ -3546,6 +3546,40 @@
     .enf-agent-props { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
     .enf-check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
     .enf-form .enf-check input { width: 20px; min-height: 0; height: 20px; flex: none; }
+    /* The boot page's notices and the four-step placement (agent/logic.js) */
+    .enf-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 10px; border-left: 4px solid var(--ll-text-3, #64748B); background: var(--bg-inset); }
+    .enf-notice b { display: block; font-size: 14px; }
+    .enf-notice span:not(.enf-spin) { display: block; font-size: 13px; margin-top: 2px; color: var(--ll-text-2, #475569); }
+    .enf-notice--wait { border-left-color: #D97706; }
+    .enf-notice--on { border-left-color: var(--ll-blue, #2563EB); }
+    .enf-notice--done { border-left-color: #16A34A; }
+    .enf-notice--ready { border-left-color: #DC2626; }
+    .enf-spin { flex: none; width: 16px; height: 16px; margin-top: 2px; border: 2px solid var(--border); border-top-color: var(--ll-blue, #2563EB); border-radius: 50%; animation: enf-spin .8s linear infinite; }
+    @keyframes enf-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .enf-spin { animation: none; } }
+    .enf-back { align-self: flex-start; min-height: 44px; padding: 0 4px; background: none; border: 0; color: var(--ll-blue, #2563EB); font: inherit; font-weight: 700; cursor: pointer; }
+    .enf-place { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+    .enf-place-title { margin: 0; font-size: 20px; font-weight: 800; }
+    .enf-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .enf-steps li { padding: 6px 0 0; border-top: 3px solid var(--border); font-size: 12px; font-weight: 700; color: var(--ll-text-3, #64748B); }
+    .enf-steps li.is-done { border-top-color: var(--ll-blue, #2563EB); }
+    .enf-steps li.is-on { border-top-color: var(--ll-blue, #2563EB); color: inherit; }
+    .enf-bootpick { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+    .enf-bootpick .is-off { opacity: .55; }
+    .enf-shot-img { display: flex; align-items: center; gap: 10px; }
+    .enf-shot-img img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+    .enf-sig-pad { position: relative; width: 100%; max-width: 600px; }
+    .enf-sig-pad .enf-sig-canvas { display: block; }
+    .enf-sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ll-text-3, #64748B); font-weight: 600; pointer-events: none; }
+    .enf-sig-meta { display: flex; justify-content: space-between; gap: 12px; width: 100%; max-width: 600px; font-size: 12px; color: var(--ll-text-3, #64748B); }
+    .enf-attest { margin: 0; padding: 12px; border-radius: 8px; background: var(--ll-surface, #fff); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+    .enf-place-foot { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 0; background: var(--bg-inset); }
+    .enf-place-foot .enf-actions { justify-content: flex-end; }
+    .enf-notes { white-space: pre-line; margin-top: 8px; }
+    .enf-props { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .enf-prop-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    .enf-prop { padding: 12px 14px; border: 1px solid var(--ll-line, #E2E8F0); border-radius: 10px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+    .enf-prop a { align-self: flex-start; font-weight: 700; min-height: 32px; display: inline-flex; align-items: center; }
     .ls-source { margin: 0; font-size: 13px; color: var(--ll-text-2); }
     .ls-source-main { font-weight: 800; color: var(--ll-text); }
     .ls-card { padding: 16px; background: var(--ll-surface); border: 1px solid var(--ll-line); border-radius: 12px; }

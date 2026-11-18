@@ -2,8 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ACTION_LABEL, actionsFor, ago, batteryTone, bootFlags, canSeeEnforcement, commandLabel, deploymentLabel,
-  fleetSummary, isOnCar, mapUrl, money, stateLabel,
+  addressMapUrl, ago, batteryTone, bootFlags, canSeeEnforcement, commandLabel, dataUrlToBlob, deploymentLabel,
+  fleetSummary, isEnforcementAdmin, isLotLogicAgent, isOnCar, mapUrl, money, stateLabel,
 } from '../src/lib/enforcement.js';
 
 const NOW = new Date('2026-11-15T15:00:00Z').getTime();
@@ -15,6 +15,32 @@ test('canSeeEnforcement: exactly the two LotLogic emails, any case; never while 
   assert.equal(canSeeEnforcement({ email: 'manager@property.com' }), false);
   assert.equal(canSeeEnforcement({ email: 'gabriel@lotlogicparking.com' }, { id: 'p1' }), false);
   assert.equal(canSeeEnforcement(null), false);
+});
+
+test('canSeeEnforcement: LotLogic agents too, signed in as themselves; no other company', () => {
+  const agent = { _role: 'partner', email: 'dana@example.com', company_name: 'LotLogic', member_id: 'm1', member_role: 'driver' };
+  assert.equal(isLotLogicAgent(agent), true);
+  assert.equal(canSeeEnforcement(agent), true);
+  assert.equal(canSeeEnforcement({ ...agent, member_role: 'dispatcher' }), true);
+  assert.equal(isEnforcementAdmin(agent), false);
+  // another tow company's team, and LotLogic's company login that names no person
+  assert.equal(canSeeEnforcement({ ...agent, company_name: 'N Style Towing' }), false);
+  assert.equal(canSeeEnforcement({ ...agent, member_id: null }), false);
+  // before /auth/me has said which company it is
+  assert.equal(canSeeEnforcement({ ...agent, company_name: undefined }), false);
+  assert.equal(canSeeEnforcement(agent, { id: 'p1' }), false);
+  // an admin's email on a partner session is not the admin
+  assert.equal(isEnforcementAdmin({ _role: 'partner', email: 'gabriel@lotlogicparking.com' }), false);
+  assert.equal(isEnforcementAdmin({ _role: 'owner', email: 'gabriel@lotlogicparking.com' }), true);
+});
+
+test('addressMapUrl and dataUrlToBlob', () => {
+  assert.equal(addressMapUrl('4912 Daybreak Dr, Charlotte, NC'), 'https://www.google.com/maps/search/?api=1&query=4912%20Daybreak%20Dr%2C%20Charlotte%2C%20NC');
+  assert.equal(addressMapUrl('  '), null);
+  assert.equal(addressMapUrl(null), null);
+  const b = dataUrlToBlob('data:image/png;base64,iVBORw==');
+  assert.equal(b.type, 'image/png');
+  assert.equal(b.size, 4);
 });
 
 test('stateLabel and commandLabel', () => {
@@ -61,18 +87,6 @@ test('fleetSummary: totals, on a car, needing attention, online', () => {
   ]);
   assert.deepEqual(s, { total: 3, onCar: 1, attention: 2, online: 1 });
   assert.deepEqual(fleetSummary(null), { total: 0, onCar: 0, attention: 0, online: 0 });
-});
-
-test('actionsFor: the buttons that make sense for the boot right now', () => {
-  // free, closed boot: open it to fit, or set up Wi-Fi; emergency is always there
-  assert.deepEqual(actionsFor({ state: 0 }, null), ['open', 'wifi', 'emergency']);
-  // free, open boot: place it on a car or close it for storage
-  assert.deepEqual(actionsFor({ state: 1 }, { status: 'unlocked' }), ['place', 'store', 'wifi', 'emergency']);
-  // on a car, unpaid: waive (admin) or emergency; a queued lock can still be cancelled
-  assert.deepEqual(actionsFor({ state: 0 }, { status: 'locking' }, [{ cmd: 2, status: 'queued' }]), ['waive', 'cancel', 'emergency']);
-  // paid: send the release
-  assert.deepEqual(actionsFor({ state: 0 }, { status: 'release_authorized' }), ['release', 'emergency']);
-  for (const k of ['open', 'place', 'store', 'release', 'waive', 'cancel', 'emergency', 'wifi']) assert.ok(ACTION_LABEL[k]);
 });
 
 import { meters, paymentFlags, paymentsSummary, placeLine } from '../src/lib/enforcement.js';

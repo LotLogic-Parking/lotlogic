@@ -4,23 +4,42 @@
 // victor and i at the emails of victor@lotlogicparking.com and
 // gabriel@lotlogicparking.com, it needs to be on the main dashboard".
 //
+// Gabe, 2026-11-16: "merge the lotlogic agent into the enforcement tab" and
+// "we want them to be able to view the properties that they are scoped into".
+// LotLogic's boot agents (partner_members of the "LotLogic" company) sign in
+// to the same dashboard and get the tab too, with their own boots and
+// properties; /agent now redirects here.
+//
 // The page talks to the boot-portal edge function with the dashboard session
-// token. The function asks the backend who that token is and refuses anyone
-// not on its own BOOT_ADMIN_EMAILS list, so the email check below only decides
-// whether the tab shows; it is not the security boundary.
+// token. The function asks the backend who that token is: an admin on its own
+// BOOT_ADMIN_EMAILS list sees every boot, a team member sees what the portal's
+// own sign-in gives them. The checks below only decide whether the tab shows;
+// they are not the security boundary.
 // `scripts/enforcement.test.mjs` covers the pure half.
 
 import { getSessionToken } from './api.js';
 import { SUPABASE_URL } from './supabase.js';
 
 export const ENFORCEMENT_EMAILS = ['gabriel@lotlogicparking.com', 'victor@lotlogicparking.com'];
+export const LOTLOGIC_COMPANY = 'LotLogic';
 export const BOOT_PORTAL_URL = `${SUPABASE_URL}/functions/v1/boot-portal`;
 
-/** The tab shows for exactly the two LotLogic emails, never while viewing as a partner. */
+/** One of the two LotLogic admins: every boot, the agents and the payments. */
+export function isEnforcementAdmin(owner) {
+  const email = typeof owner?.email === 'string' ? owner.email.trim().toLowerCase() : '';
+  return owner?._role !== 'partner' && ENFORCEMENT_EMAILS.includes(email);
+}
+
+/** A LotLogic boot agent: a team member of the "LotLogic" company, signed in as themselves. */
+export function isLotLogicAgent(owner) {
+  return owner?._role === 'partner' && !!owner.member_id
+    && String(owner.company_name || '').trim().toLowerCase() === LOTLOGIC_COMPANY.toLowerCase();
+}
+
+/** The tab shows for the two admins and for LotLogic's agents, never while viewing as a partner. */
 export function canSeeEnforcement(owner, viewAs = null) {
   if (viewAs) return false;
-  const email = typeof owner?.email === 'string' ? owner.email.trim().toLowerCase() : '';
-  return ENFORCEMENT_EMAILS.includes(email);
+  return isEnforcementAdmin(owner) || isLotLogicAgent(owner);
 }
 
 // What the boot reports (boot-report: 0 locked, 1 and 2 open, 3 stuck).
@@ -98,34 +117,11 @@ export function fleetSummary(boots) {
   };
 }
 
-/**
- * Which actions make sense for this boot right now. The server enforces every
- * rule again; this only decides which buttons show.
- */
-export function actionsFor(boot, deployment, commands = []) {
-  const onCar = isOnCar(deployment);
-  const pending = (commands || []).find(c => c.status === 'queued' || c.status === 'delivered');
-  const queuedLock = pending && pending.cmd === 2 && pending.status === 'queued';
-  const state = boot?.state;
-  const a = [];
-  if (onCar) {
-    if (deployment.status === 'release_authorized') a.push('release');
-    else a.push('waive');
-    if (queuedLock) a.push('cancel');
-    a.push('emergency');
-    return a;
-  }
-  if (queuedLock) a.push('cancel');
-  if (state === 1 || state === 2) a.push('place', 'store');
-  else a.push('open');
-  a.push('wifi', 'emergency');
-  return a;
+/** A property's address on Google Maps, or null without one. */
+export function addressMapUrl(address) {
+  const a = String(address || '').trim();
+  return a ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}` : null;
 }
-
-export const ACTION_LABEL = {
-  open: 'Open to fit', place: 'Place on a car', store: 'Close for storage', release: 'Send release',
-  waive: 'Waive fee and release', cancel: 'Cancel lock', emergency: 'Emergency unlock', wifi: 'Setup Wi-Fi',
-};
 
 // ── API ──────────────────────────────────────────────────────
 
@@ -153,6 +149,16 @@ export async function uploadBootFile(bootId, blob, kind) {
   const res = await fetch(upload_url, { method: 'PUT', headers: { 'Content-Type': contentType, 'x-upsert': 'false' }, body: blob });
   if (!res.ok) throw new PortalError(res.status, 'upload_failed', 'The photo did not upload. Try again.');
   return photo_path;
+}
+
+/** A data: URL (the signature pad) as a Blob. */
+export function dataUrlToBlob(url) {
+  const [head, b64] = String(url).split(',');
+  const type = /data:([^;]+)/.exec(head)?.[1] || 'image/png';
+  const bin = atob(b64 || '');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
 }
 
 // ── Payments log (GET /boot-portal/payments) ─────────────────
