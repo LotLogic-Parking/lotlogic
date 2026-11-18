@@ -41,6 +41,20 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
         const list = String(v).replace(/^\(|\)$/g, "").split(",");
         rows = rows.filter(r => !list.includes(String(r[c as string]))); return b;
       };
+      // PostgREST or(): "col.op.val,col.op.val" with op eq or ilike (* is the wildcard).
+      self.or = (expr: unknown) => {
+        const terms = String(expr).split(",").map((t) => {
+          const [c, op, ...rest] = t.split(".");
+          const v = rest.join(".");
+          if (op === "eq") return (r: Row) => String(r[c] ?? "") === v && r[c] != null;
+          if (op === "ilike") {
+            const re = new RegExp(`^${v.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "i");
+            return (r: Row) => r[c] != null && re.test(String(r[c]));
+          }
+          throw new Error(`fake or(${op})`);
+        });
+        rows = rows.filter((r) => terms.some((f) => f(r))); return b;
+      };
       self.limit = (n: unknown) => { rows = rows.slice(0, Number(n)); return Promise.resolve(finish()); };
       self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data?.[0] ?? null, error: o.error }); };
       self.single = () => { const o = finish(); return Promise.resolve({ data: o.data?.[0] ?? null, error: o.error }); };

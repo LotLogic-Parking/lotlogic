@@ -33,13 +33,13 @@ Deno.test("lock wiring: a paused property refuses 409 enforcement_paused; an unp
   const db = () => fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [] });
   assertEquals(await refusal(run(db(), "mayfield").p), {
     status: 409, code: "enforcement_paused",
-    message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
+    message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
   await run(db(), "plaza").p;
 });
 
 Deno.test("lock wiring: no pause anywhere reads nothing else (no property list, no points, no dispatch query)", async () => {
-  const r = run(fakeDb({ enforcement_pauses: [], properties: PROPS }, { failReads: ["alpr_violations"] }), "mayfield");
+  const r = run(fakeDb({ enforcement_pauses: [], properties: PROPS }, { failReads: ["alpr_violations", "tow_requests", "plate_sessions"] }), "mayfield");
   await r.p;
   assertEquals(r.calls, { mine: 0, points: 0 });
 });
@@ -86,13 +86,14 @@ Deno.test("lock wiring: a pre-pause dispatch is found even with a long history o
   await run(db, "mayfield").p;
 });
 
-Deno.test("lock wiring: the dispatch does not stand if sent after the start, closed, another channel, another plate or another property", async () => {
+Deno.test("lock wiring: the dispatch does not stand if sent after the start, closed, another plate or another property", async () => {
   const refused = async (v: Row) =>
     (await refusal(run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [v] }), "mayfield").p)).code;
   assertEquals(await refused(bootSms({ dispatched_at: "2026-11-20T23:05:00.000Z" })), "enforcement_paused");
   assertEquals(await refused(bootSms({ status: "dismissed", action_taken: "no_tow" })), "enforcement_paused"); // stood down, GONE, or stale
   assertEquals(await refused(bootSms({ status: "dispatch_failed" })), "enforcement_paused"); // the text never went out
-  assertEquals(await refused(bootSms({ action_channel: "email" })), "enforcement_paused");
+  // A tow email sent before the pause now stands too (Gabe 2026-11-18): see the camera-flag tests below.
+  assertEquals(await refused(bootSms({ action_channel: "email", status: "dismissed", action_taken: "no_tow" })), "enforcement_paused");
   assertEquals(await refused(bootSms({ plate_text: "XYZ9876" })), "enforcement_paused");
   assertEquals(await refused(bootSms({ property_id: "plaza" })), "enforcement_paused");
 });
@@ -100,6 +101,143 @@ Deno.test("lock wiring: the dispatch does not stand if sent after the start, clo
 Deno.test("lock wiring: a failed standing-dispatch read still refuses at a paused property", async () => {
   const db = fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [bootSms({})] }, { failReads: ["alpr_violations"] });
   assertEquals((await refusal(run(db, "mayfield").p)).code, "enforcement_paused");
+});
+
+// ── In motion before the pause (Gabe, 2026-11-18) ───────────────────────────
+// Besides a boot text sent before the pause, the backend's curb verdict lets
+// these through a pause (plate_verdict.decide_for_property): an open office
+// tow request, placed before the pause or during it, and an open camera flag
+// whose tow email or boot text went out before the pause began.
+
+const towRequest = (o: Partial<Row>): Row => ({
+  id: "tr1", property_id: "mayfield", kind: "tow", status: "active", normalized_plate: "ABC1234", normalized_back_plate: null,
+  created_at: "2026-11-20T21:00:00.000Z", expires_at: "2026-11-22T21:00:00.000Z", ...o,
+});
+const towEmail = (o: Partial<Row>): Row => ({
+  id: "av1", property_id: "mayfield", plate_text: "ABC-1234", action_channel: "email", status: "dispatched", action_taken: null,
+  dispatched_at: "2026-11-20T20:00:00.000Z", left_before_tow_at: null, tow_confirmed_at: null, session_id: "s1", ...o,
+});
+const VISIT = { id: "s1", exited_at: null };
+/** A fake that records which tables were read. */
+function tracked(tables: Record<string, Row[]>, opts: Parameters<typeof fakeDb>[1] = {}) {
+  const db = fakeDb(tables, opts);
+  const reads: string[] = [];
+  return { reads, db: { from: (t: string) => { reads.push(t); return db.from(t); } } };
+}
+const at = (tables: Record<string, Row[]>, plate = "ABC1234", opts: Parameters<typeof fakeDb>[1] = {}) =>
+  run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [], plate_sessions: [VISIT], ...tables }, opts), "mayfield", plate).p;
+const codeOf = async (p: Promise<void>) => (await refusal(p)).code;
+
+Deno.test("lock wiring: an office tow request placed before the pause, still open, lets the boot go ahead", async () => {
+  await at({ tow_requests: [towRequest({})] }, "abc 1234");
+  // On the back plate too, as the backend matches it.
+  await at({ tow_requests: [towRequest({ normalized_plate: "ZZZ0000", normalized_back_plate: "ABC1234" })] });
+});
+
+Deno.test("lock wiring: an office tow request placed during the pause lets the boot go ahead", async () => {
+  await at({ tow_requests: [towRequest({ created_at: "2026-11-21T01:00:00.000Z" })] });
+});
+
+Deno.test("lock wiring: a tow request that is no longer open (fulfilled, declined, removed, expired, or past expires_at) is refused", async () => {
+  for (const status of ["fulfilled", "declined", "removed", "expired"]) {
+    assertEquals(await codeOf(at({ tow_requests: [towRequest({ status })] })), "enforcement_paused", status);
+  }
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({ expires_at: "2026-11-21T01:00:00.000Z" })] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: a photo-only request (or a hold) is not a request to enforce: refused", async () => {
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({ kind: "photo" })] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({ kind: "hold" })] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: a tow email sent before the pause began, still open, lets the boot go ahead", async () => {
+  await at({ alpr_violations: [towEmail({})] });
+  // A visit with no session row read still stands; the plate's separators do not matter.
+  await at({ alpr_violations: [towEmail({ session_id: null, plate_text: "abc1234" })] });
+});
+
+Deno.test("lock wiring: a tow email sent after the pause began is refused (the pause held it)", async () => {
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({ dispatched_at: "2026-11-20T23:00:00.000Z" })] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({ dispatched_at: "2026-11-21T01:00:00.000Z" })] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: a dismissed or closed camera flag is refused", async () => {
+  const refused = async (o: Partial<Row>) => await codeOf(at({ alpr_violations: [towEmail(o)] }));
+  assertEquals(await refused({ status: "dismissed", action_taken: "no_tow" }), "enforcement_paused");
+  assertEquals(await refused({ status: "resolved", action_taken: "tow" }), "enforcement_paused");
+  assertEquals(await refused({ action_taken: "tow" }), "enforcement_paused");
+  assertEquals(await refused({ left_before_tow_at: "2026-11-20T21:00:00.000Z" }), "enforcement_paused");
+  assertEquals(await refused({ tow_confirmed_at: "2026-11-20T22:00:00.000Z" }), "enforcement_paused");
+  assertEquals(await refused({ status: "dispatch_failed" }), "enforcement_paused");
+  // Sent more than FLAG_STANDING_DAYS before the pause: the car at the curb now is new enforcement.
+  assertEquals(await refused({ dispatched_at: "2026-11-13T22:59:00.000Z" }), "enforcement_paused");
+  // Its visit ended (the car left and came back).
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})], plate_sessions: [{ id: "s1", exited_at: "2026-11-20T21:30:00.000Z" }] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: the existing case still stands: a boot text sent before the pause", async () => {
+  await at({ alpr_violations: [bootSms({})], tow_requests: [] });
+});
+
+Deno.test("lock wiring: a request or a flag on another plate, or at another property, does not let this plate through", async () => {
+  const other = { tow_requests: [towRequest({ normalized_plate: "XYZ9876" })], alpr_violations: [towEmail({ plate_text: "XYZ9876" }), bootSms({ plate_text: "XYZ9876" })] };
+  assertEquals(await codeOf(at(other)), "enforcement_paused");
+  const elsewhere = { tow_requests: [towRequest({ property_id: "plaza" })], alpr_violations: [towEmail({ property_id: "plaza" })] };
+  assertEquals(await codeOf(at(elsewhere)), "enforcement_paused");
+});
+
+Deno.test("lock wiring: failed reads of tow requests, flags or visits refuse; they never allow", async () => {
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({})] }, "ABC1234", { failReads: ["tow_requests"] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})] }, "ABC1234", { failReads: ["alpr_violations"] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})] }, "ABC1234", { failReads: ["plate_sessions"] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: with no pause, nothing changes: requests and flags are not read and the boot goes ahead", async () => {
+  const t = tracked({ enforcement_pauses: [], properties: PROPS, alpr_violations: [towEmail({})], tow_requests: [towRequest({})], plate_sessions: [VISIT] });
+  const r = run(t.db as ReturnType<typeof fakeDb>, "mayfield");
+  await r.p;
+  assertEquals(t.reads, ["enforcement_pauses"]);
+  assertEquals(r.calls, { mine: 0, points: 0 });
+  // A pause elsewhere: this property's boot goes ahead with no request or flag at all.
+  await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [] }), "plaza", "XYZ9876").p;
+});
+
+// ── A hold or a parking pass keeps DO NOT TOW (backend _TOW_OVERRIDES_PAUSE) ──
+
+const longTerm = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "abc-1234", normalized_back_plate: null, status: "approved", active: true, created_at: "2026-01-01T00:00:00.000Z", ...o });
+const shortTerm = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "ABC 1234", normalized_back_plate: null, status: "active", valid_until: "2026-11-21T05:00:00.000Z", ...o });
+
+Deno.test("lock wiring: an open tow request with a live hold on the same plate is refused", async () => {
+  const r = await refusal(at({ tow_requests: [towRequest({}), towRequest({ id: "tr2", kind: "hold" })] }));
+  assertEquals(r.code, "enforcement_paused");
+  assertEquals(r.message.includes("This car has a hold or a parking pass on file"), true);
+  // A hold that has expired does not protect.
+  await at({ tow_requests: [towRequest({}), towRequest({ id: "tr2", kind: "hold", expires_at: "2026-11-21T01:00:00.000Z" })] });
+});
+
+Deno.test("lock wiring: a tow email sent before the pause, then a parking pass registered, is refused", async () => {
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({})] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})], resident_plates: [longTerm({})] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ plate_text: "ZZZ0000", normalized_back_plate: "ABC1234" })] })), "enforcement_paused");
+  // A pending request inside its protection window protects too.
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", created_at: "2026-11-20T12:00:00.000Z" })] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: a pass that no longer protects (ended, pending too long, withdrawn, another plate or property) leaves the request or flag standing", async () => {
+  await at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({ valid_until: "2026-11-21T01:00:00.000Z" })] });
+  await at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({ status: "expired" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", created_at: "2026-11-17T12:00:00.000Z" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", active: false, created_at: "2026-11-20T12:00:00.000Z" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "rejected" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ plate_text: "ABC12345" }), longTerm({ property_id: "plaza" })] });
+});
+
+Deno.test("lock wiring: a failed read of passes refuses a request or flag; a boot text sent before the pause still stands", async () => {
+  for (const t of ["resident_plates", "visitor_passes"]) {
+    assertEquals(await codeOf(at({ tow_requests: [towRequest({})], alpr_violations: [towEmail({})] }, "ABC1234", { failReads: [t] })), "enforcement_paused", t);
+  }
+  await at({ alpr_violations: [bootSms({})] }, "ABC1234", { failReads: ["resident_plates", "visitor_passes"] });
+  await at({ alpr_violations: [bootSms({})], resident_plates: [longTerm({})], tow_requests: [towRequest({ kind: "hold" })] });
 });
 
 // ── release, open, cancel: untouched by a pause ─────────────────────────────
