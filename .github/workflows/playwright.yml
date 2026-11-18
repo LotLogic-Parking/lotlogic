@@ -95,6 +95,23 @@ jobs:
         working-directory: tests
         run: npm run test:unit
 
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          # Hosted runners read their mirrors from apt-mirrors.txt (sources say mirror+file:...).
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\tpriority:2\n' \
+              | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+            fi
+          done
+          grep -h -E '^(URIs:|deb |http)' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -5 || true
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+
       - name: Install browsers
         working-directory: tests
         run: npx playwright install --with-deps chromium webkit
@@ -219,6 +236,23 @@ jobs:
         # lockfile should FAIL, not silently fall back to a floating install.
         run: npm ci
 
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          # Hosted runners read their mirrors from apt-mirrors.txt (sources say mirror+file:...).
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\tpriority:2\n' \
+              | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+            fi
+          done
+          grep -h -E '^(URIs:|deb |http)' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -5 || true
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+
       - name: Install browsers
         run: npx playwright install --with-deps chromium webkit
 
@@ -327,6 +361,23 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             tests/package-lock.json
+
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          # Hosted runners read their mirrors from apt-mirrors.txt (sources say mirror+file:...).
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\tpriority:2\n' \
+              | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+            fi
+          done
+          grep -h -E '^(URIs:|deb |http)' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -5 || true
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
 
       # Same PGDG snippet the backend's own CI uses: psql 17 for the fixture's
       # harness reads/writes and the PostgREST stand-in.
