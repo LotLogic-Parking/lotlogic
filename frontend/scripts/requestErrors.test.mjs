@@ -43,10 +43,10 @@ test('every §8.3 code has a sentence, and none of them is the code', () => {
 
 test('the three codes the spec writes out are verbatim', () => {
   assert.equal(
-    requestErrorMessage(apiError('pending_hold_limit')),
+    requestErrorMessage(apiError('pending_hold_limit'), undefined, 'N Style'),
     'Unconfirmed properties can keep 3 holds at a time. N Style usually confirms the same day.',
   );
-  assert.equal(requestErrorMessage(apiError('note_required')), 'Tell N Style why — they act on this.');
+  assert.equal(requestErrorMessage(apiError('note_required'), undefined, 'N Style'), 'Tell N Style why — they act on this.');
   assert.equal(
     requestErrorMessage(apiError('extension_limit', 409)),
     'All 4 extensions used. Place a new hold after this one ends, or ask about parking passes.',
@@ -123,4 +123,18 @@ test('every Requests component that reports a failure imports the map', () => {
     if (!/\bcatch\s*\(/.test(src)) continue;
     assert.match(src, /requestErrorMessage/, `${rel} reports failures without the code → copy map`);
   }
+});
+
+test('the sentences that name the tow company use the property\'s own (NMLD at The Volaire)', () => {
+  assert.equal(
+    requestErrorMessage(apiError('pending_hold_limit'), undefined, 'NMLD Towing'),
+    'Unconfirmed properties can keep 3 holds at a time. NMLD Towing usually confirms the same day.',
+  );
+  assert.equal(requestErrorMessage(apiError('note_required'), undefined, 'NMLD Towing'), 'Tell NMLD Towing why — they act on this.');
+  // No name known: never N Style, and the sentence still starts with a capital.
+  assert.equal(
+    requestErrorMessage(apiError('pending_hold_limit')),
+    'Unconfirmed properties can keep 3 holds at a time. Your tow company usually confirms the same day.',
+  );
+  assert.equal(requestErrorMessage(apiError('note_required')), 'Tell your tow company why — they act on this.');
 });
