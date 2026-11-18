@@ -581,9 +581,10 @@ test.describe('upsell chips @a11y', () => {
 
       const harness = page.locator('#upsell-harness');
       await expect(harness).toContainText('Sunset Ridge Apartments');
-      // A manager's chip row sits behind the header's "More" button
-      // (2026-11-11: Passes is the office's whole page); the locked chips
-      // are what it opens to.
+      // A manager's chip row sits behind the header's "More" button, which
+      // Vehicles shows (the office opens on Today, 2026-11-17); the locked
+      // chips are what it opens to.
+      await harness.getByRole('button', { name: 'Vehicles', exact: true }).click();
       await harness.getByRole('button', { name: 'More', exact: true }).click();
 
       const lockedParkingPasses = harness.getByRole('button', { name: 'Visitor passes', exact: true });

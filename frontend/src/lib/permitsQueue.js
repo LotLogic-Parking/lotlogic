@@ -577,6 +577,22 @@ export function readQueueQuery(search) {
   };
 }
 
+/**
+ * The queue's starting segment and search, and whether it keeps them in the
+ * URL. The full queue reads `?status=&q=`; the office's Today card
+ * (`pendingOnly`) is always "Needs review", unsearched, and leaves the URL
+ * alone (it shares the page with other sections); `segment` opens an embedded
+ * queue on that segment, also leaving the URL alone.
+ */
+export function queueStateFor({ pendingOnly = false, search = '', segment = null } = {}) {
+  if (pendingOnly) return { segment: 'pending', q: '', syncUrl: false };
+  // Embedded on another screen (Vehicles at a property with no camera): its
+  // own segment, and the URL left alone, like the Today card.
+  if (segment && SEGMENT_IDS.includes(segment)) return { segment, q: '', syncUrl: false };
+  const { status, q } = readQueueQuery(search);
+  return { segment: status, q, syncUrl: true };
+}
+
 /** The new `location.search`: every other parameter kept, defaults left out. */
 export function writeQueueQuery(search, { status = 'pending', q = '' } = {}) {
   const params = new URLSearchParams(String(search ?? '').replace(/^\?/, ''));
@@ -827,3 +843,40 @@ export function historyWhenLine(entry) {
 }
 
 export const UNIT_HISTORY_EMPTY = 'No earlier parking passes at this unit.';
+
+// ── The office's Today card (pending only) ────────────────────
+
+/** Requests waiting for a decision, the one that has waited longest first. */
+export function pendingOldestFirst(rows, nowMs = Date.now()) {
+  return (rows || [])
+    .filter(r => segmentOf(r, nowMs) === 'pending')
+    .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+}
+
+const ET_KEY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+const ET_TIME = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+const ET_WEEKDAY_DAY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
+
+/** When a request came in, short: "today 9:12 AM", "yesterday 6:05 PM", else "Mon Nov 9" (Charlotte time). */
+export function submittedShort(createdAt, nowMs = Date.now()) {
+  const t = Date.parse(createdAt ?? '');
+  if (!Number.isFinite(t)) return '';
+  const day = ET_KEY.format(new Date(t));
+  if (day === ET_KEY.format(new Date(nowMs))) return `today ${ET_TIME.format(new Date(t))}`;
+  // The calendar day before today, by date arithmetic on the key (a day is
+  // not always 24 hours in Charlotte).
+  const [y, m, d] = ET_KEY.format(new Date(nowMs)).split('-').map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  if (day === yesterday) return `yesterday ${ET_TIME.format(new Date(t))}`;
+  return ET_WEEKDAY_DAY.format(new Date(t)).replace(',', '');
+}
+
+/**
+ * The review-window chip, only when it needs the office: the last 24 hours of
+ * a long-term request's protection, or past it. A fresh request says nothing
+ * beyond when it came in.
+ */
+export function attentionChip(row, nowMs = Date.now()) {
+  const chip = ageChip(row, nowMs);
+  return chip && isLongTerm(row) && chip.tone !== 'green' ? chip : null;
+}

@@ -25,9 +25,10 @@ import {
   normalizeUnit,
   overLimitKeys,
   patchRows,
+  pendingOldestFirst,
   plateText,
   queueRows,
-  readQueueQuery,
+  queueStateFor,
   registrationLink,
   reviewGroups,
   segmentCounts,
@@ -41,6 +42,7 @@ import {
 import { DocCacheContext, fetchDocBlob, useMediaQuery } from './permits/docs.js';
 import { DocViewerModal } from './permits/DocViewerModal.jsx';
 import { QueueRow } from './permits/QueueRow.jsx';
+import { PendingRow } from './permits/PendingRow.jsx';
 import { RequestDetail } from './permits/RequestDetail.jsx';
 import { DenySheet, ExtendPassSheet, VoidSheet } from './permits/sheets.jsx';
 import { Tag } from './permits/parts.jsx';
@@ -66,6 +68,16 @@ import { Tag } from './permits/parts.jsx';
 // that the detail replaces the list, pushed onto history so the browser or
 // hardware Back closes it. `?status=&q=` keep the segment and search across a
 // refresh.
+//
+// `pendingOnly` (the office's Today screen, spec 2026-11-16 Part 1): one card
+// titled `title`, the requests waiting for a decision oldest first, Approve
+// and Deny on each row (same routes, same Deny sheet), no segments, no search,
+// and the URL left alone. A row's photo opens its detail in place of the card,
+// at every width. `onCounts(counts)` hears `segmentCounts` after every load
+// and every decision, in both modes.
+//
+// `initialSegment` ('approved' on Vehicles at a property with no camera): the
+// full queue opened on that segment, with the URL left alone.
 
 const WIDE_QUERY = '(min-width: 1024px)';
 
@@ -91,7 +103,7 @@ function replaceQuery(state) {
   } catch { /* history blocked: the view still works, it just will not survive a refresh */ }
 }
 
-export function ApartmentPermits({ property, onRequestTow, title = 'Visitor passes' }) {
+export function ApartmentPermits({ property, onRequestTow, title = 'Visitor passes', pendingOnly = false, initialSegment = null, onCounts }) {
   const propertyId = property?.id;
   const propertyName = property?.name || '';
   const cap = capOf(property);
@@ -99,10 +111,12 @@ export function ApartmentPermits({ property, onRequestTow, title = 'Visitor pass
   const requireLease = property?.require_lease !== false;
   const { addToast } = useToast();
   const now = useNowTick();
-  const isWide = useMediaQuery(WIDE_QUERY);
+  const wideScreen = useMediaQuery(WIDE_QUERY);
+  // The Today card has no side pane: a detail opens in place of the card.
+  const isWide = wideScreen && !pendingOnly;
 
-  const initialQuery = useMemo(() => readQueueQuery(window.location.search), []);
-  const [segment, setSegment] = useState(initialQuery.status);
+  const initialQuery = useMemo(() => queueStateFor({ pendingOnly, search: window.location.search, segment: initialSegment }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [segment, setSegment] = useState(initialQuery.segment);
   const [q, setQ] = useState(initialQuery.q);
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -178,8 +192,17 @@ export function ApartmentPermits({ property, onRequestTow, title = 'Visitor pass
   }, [refresh]);
 
   // ?status=&q= follow the view; leaving the queue takes them out again.
-  useEffect(() => { replaceQuery({ status: segment, q }); }, [segment, q]);
-  useEffect(() => () => replaceQuery({}), []);
+  // The Today card never touches them.
+  const syncUrl = initialQuery.syncUrl;
+  useEffect(() => { if (syncUrl) replaceQuery({ status: segment, q }); }, [segment, q, syncUrl]);
+  useEffect(() => () => { if (syncUrl) replaceQuery({}); }, [syncUrl]);
+
+  // The page's tiles hear the counts after every load and every decision.
+  const onCountsRef = useRef(onCounts);
+  onCountsRef.current = onCounts;
+  useEffect(() => {
+    if (loaded) onCountsRef.current?.(segmentCounts(rows, '', Date.now()));
+  }, [rows, loaded]);
 
   const say = useCallback((text, type) => {
     addToast(text, type);
@@ -477,6 +500,84 @@ export function ApartmentPermits({ property, onRequestTow, title = 'Visitor pass
   })() : null;
 
   const showPane = isWide && loaded && (visible.length > 0 || !!selectedRow);
+
+  if (pendingOnly) {
+    const waiting = loaded ? pendingOldestFirst(rows, now) : [];
+    let body;
+    if (!loaded && loadErr) {
+      body = (
+        <div className="pq-empty pq-empty--error">
+          <p>Couldn't load the registrations waiting for you.</p>
+          <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={refresh}>Retry</button>
+        </div>
+      );
+    } else if (!loaded) {
+      body = (
+        <ul className="ot-regs" aria-hidden="true">
+          {[0, 1].map(i => (
+            <li key={i} className="ot-reg">
+              <span className="ot-skel ot-skel--thumb" />
+              <span className="ot-reg-main"><span className="ot-skel ot-skel--name" /><span className="ot-skel ot-skel--car" /></span>
+            </li>
+          ))}
+        </ul>
+      );
+    } else if (waiting.length === 0) {
+      body = <p className="ot-empty">Nothing waiting.</p>;
+    } else {
+      body = (
+        <ul className="ot-regs">
+          {waiting.map(row => (
+            <PendingRow
+              key={row.key}
+              row={row}
+              now={now}
+              overLimit={overKeys.has(row.key)}
+              cap={cap}
+              saving={savingKeys.has(row.key)}
+              onOpen={openRow}
+              onApprove={approve}
+              onDeny={openDeny}
+            />
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <DocCacheContext.Provider value={docCache}>
+        <div className="pq ot-pq" ref={rootRef}>
+          {docView && overlay(<DocViewerModal blob={docView.blob} label={docView.label} filename={docView.filename} onClose={closeDocView} />)}
+          {sheet && sheetRow && sheet.type === 'deny' && overlay(
+            <DenySheet
+              row={sheetRow}
+              propertyName={propertyName}
+              cap={cap}
+              towNote={property?.reject_tow_disclaimer === true}
+              initialReason={sheet.initialReason}
+              onClose={closeSheet}
+              onDone={onDenied}
+              onStale={onStale}
+            />,
+          )}
+          <div className="pq-sr" role="status" aria-live="polite">{announcement}</div>
+          {phoneDetail ? detail : (
+            <section className="ot-card" aria-labelledby="ot-regs-title" data-testid="today-registrations">
+              <div className="ot-card-head">
+                <h2 id="ot-regs-title" className="ot-card-title">{title}</h2>
+              </div>
+              {loaded && loadErr && (
+                <div className="pq-banner" role="status">
+                  Couldn't refresh the list — what's shown may be out of date.
+                  <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={refresh}>Retry</button>
+                </div>
+              )}
+              {body}
+            </section>
+          )}
+        </div>
+      </DocCacheContext.Provider>
+    );
+  }
 
   return (
     <DocCacheContext.Provider value={docCache}>

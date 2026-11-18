@@ -33,7 +33,7 @@ export function isPortalOnly(property) {
 // the coercion effect in App.jsx against the nav it actually gets.
 export const KNOWN_TAB_IDS = [
   'overview', 'lots', 'requests', 'analytics', 'towactivity',
-  'earnings', 'invoices', 'admin', 'lookup', 'activity', 'account',
+  'earnings', 'invoices', 'admin', 'lookup', 'activity', 'account', 'money',
 ];
 
 export function isKnownTab(id) {
@@ -62,6 +62,18 @@ export function isClassicOffice(property) {
   return !!id && CLASSIC_OFFICE_PROPERTY_IDS.has(String(id).toLowerCase());
 }
 
+// A platform admin (Gabe, Victor): the portfolio table, the money, the console
+// (spec 2026-11-16 Part 2). Analytics and Tow truck leave the bottom nav and
+// are reached from links at the top of Properties; Earnings and Billing are the
+// two sections of Money. App.jsx adds Enforcement before Account for the
+// logins that see it.
+const ADMIN_TABS = [
+  { id: 'lots', label: 'Properties' },
+  { id: 'money', label: 'Money' },
+  { id: 'admin', label: 'Admin' },
+  { id: 'account', label: 'Account' },
+];
+
 const OWNER_PORTAL_ONLY_TABS = [
   { id: 'lots', label: 'Properties' },
   { id: 'account', label: 'Account' },
@@ -73,9 +85,11 @@ const OWNER_PORTAL_ONLY_TABS = [
  *
  * @param {'owner'|'partner'} role
  * @param {Array<object>|null|undefined} properties `/auth/me.properties`
- * @param {{partnerRequestsReady?: boolean, memberRole?: string|null}} [opts]
+ * @param {{partnerRequestsReady?: boolean, memberRole?: string|null, managerOnly?: boolean, platformAdmin?: boolean}} [opts]
  *   `memberRole` is the partner member's role (`admin` | `dispatcher` |
- *   `driver`); `driver` is a Truck. Ignored for an owner.
+ *   `driver`); `driver` is a Truck. Ignored for an owner. `platformAdmin`
+ *   (an owner signed in as a platform admin, not in View as Partner) gets the
+ *   admin nav; ignored for a partner.
  * @returns {Array<{id: string, label: string}>}
  */
 export function navTabsFor(role, properties, opts = {}) {
@@ -116,6 +130,7 @@ export function navTabsFor(role, properties, opts = {}) {
   // property and their account, nothing else: no Analytics, no Tow truck
   // (Gabe, 2026-11-11: "Managers see only their property"). Money surfaces
   // are App.jsx's extras and still follow showMoney.
+  if (opts.platformAdmin) return ADMIN_TABS.map(t => ({ ...t }));
   if (opts.managerOnly) return OWNER_PORTAL_ONLY_TABS.map(t => ({ ...t }));
   const list = Array.isArray(properties) ? properties : [];
   const portalOnly = list.length > 0 && list.every(isPortalOnly);

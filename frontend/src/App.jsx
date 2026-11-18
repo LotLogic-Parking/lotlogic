@@ -39,6 +39,9 @@ const JobsPage         = lazyPage(() => import('./pages/JobsPage.jsx'));
 const AnalyticsPage    = lazyPage(() => import('./pages/AnalyticsPage.jsx'));
 const TowActivityPage  = lazyPage(() => import('./pages/TowActivityPage.jsx'));
 const AdminConsolePage = lazyPage(() => import('./pages/AdminConsolePage.jsx'));
+// The platform admin's Properties table and Money tab (spec 2026-11-16 Part 2).
+const AdminPropertiesPage = lazyPage(() => import('./pages/admin/AdminPropertiesPage.jsx'));
+const MoneyPage        = lazyPage(() => import('./pages/MoneyPage.jsx'));
 const EnforcementPage  = lazyPage(() => import('./pages/EnforcementPage.jsx'));
 const PartnerRequestsPage = lazyPage(() => import('./pages/PartnerRequestsPage.jsx'));
 
@@ -328,8 +331,8 @@ export function App() {
   // Platform-admin (Gabe / Victor / Standard Vending) — gets admin-only surfaces.
   // Sourced from the JWT claim issued by /auth/login. Never set this from
   // partner-controlled state.
-  const isPlatformAdmin = (() => {
-    if (viewAs) return false;
+  // The signed-in account itself, whether or not it is viewing as a partner.
+  const signedInAdmin = (() => {
     // Prefer the in-memory owner object (server-fresh from /auth/login or
     // the /auth/me self-heal above). Fall back to JWT-decode for the
     // first render before the owner state is hydrated.
@@ -342,6 +345,7 @@ export function App() {
       return !!p.is_platform_admin;
     } catch { return false; }
   })();
+  const isPlatformAdmin = !viewAs && signedInAdmin;
 
   // The leasing office (Victor, 2026-11-12): an owner who is not a platform
   // admin and whose every property uses the office screen (not Stevenson's
@@ -394,17 +398,18 @@ export function App() {
   // LotLogic is no property's tow company, so Lookup and Requests would be
   // empty for them; the properties they cover are listed in the tab instead.
   const agentMode = !viewAs && isLotLogicAgent(owner);
+  // A platform admin, signed in as themselves (isPlatformAdmin is false in
+  // View as Partner): Properties · Money · Admin (+ Enforcement) · Account,
+  // the Properties tab is the portfolio table, and Money is Earnings + Billing
+  // (spec 2026-11-16 Part 2). The base nav (features.js ADMIN_TABS) carries
+  // Money and Admin, so the extras below add only Enforcement for them.
+  const adminTable = isOwner && isPlatformAdmin;
   const navExtras = isOwner
     ? [
       // SaaS (all-apartment) owners have no per-tow money flow — see showMoney.
-      ...(showMoney ? [
+      ...(showMoney && !adminTable ? [
         { id: 'earnings', label: 'Earnings' },
         { id: 'invoices', label: 'Billing' },
-      ] : []),
-      // Platform-admin only: the internal console (clients / onboard /
-      // feedback) folded in from admin.html. Gated again at render.
-      ...(isPlatformAdmin ? [
-        { id: 'admin', label: 'Admin' },
       ] : []),
       // The Smart Boot fleet: gabriel@ and victor@lotlogicparking.com only
       // (lib/enforcement.js). The boot-portal function checks the email
@@ -416,16 +421,24 @@ export function App() {
     : [];
   const navTabs = (() => {
     if (agentMode) return [{ id: 'enforcement', label: 'Enforcement' }, { id: 'account', label: 'Account' }];
-    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice) });
+    const base = navTabsFor(isOwner ? 'owner' : 'partner', properties, { partnerRequestsReady, memberRole: truck ? 'driver' : null, managerOnly: isOwner && !isPlatformAdmin && !(properties || []).some(isClassicOffice), platformAdmin: adminTable });
     const account = base.filter(t => t.id === 'account');
-    // One property: the tab opens it, so "Properties" (a list of one) reads "Home".
+    // One property: the tab opens it on Today (spec 2026-11-16 Part 1), so
+    // "Properties" (a list of one) reads "Home". Not "Today": the page's own
+    // Today | Vehicles switch says which of the two is showing, and a bottom
+    // tab reading "Today" stayed lit on Vehicles (review 2026-11-17).
     const rest = base.filter(t => t.id !== 'account')
       .map(t => (officeSingle && t.id === 'lots' ? { ...t, label: 'Home' } : t));
     return [...rest, ...navExtras, ...account];
   })();
   // Overview has no nav button (it is reached from the cards) but is a real
-  // owner tab, so it stays valid.
-  const validTabs = isOwner ? ['overview', ...navTabs.map(t => t.id)] : navTabs.map(t => t.id);
+  // owner tab, so it stays valid. Not for a platform admin: the Properties
+  // table replaced it, and a remembered 'overview' lands on the table.
+  // A platform admin also reaches Analytics and Tow truck from the links at
+  // the top of Properties; they left the bottom nav, not the app.
+  const validTabs = isOwner
+    ? [...(adminTable ? ['analytics', 'towactivity'] : ['overview']), ...navTabs.map(t => t.id)]
+    : navTabs.map(t => t.id);
 
   useEffect(() => {
     if (!owner) return;
@@ -440,11 +453,14 @@ export function App() {
     // `?property=` link) goes to Requests.
     if (!lotsLoaded && !truck) return;
     if (!validTabs.includes(tab)) {
-      const home = agentMode ? 'enforcement' : homeTabFor(truck ? 'driver' : null);
+      // An admin's remembered Earnings or Billing tab is now a section of Money.
+      const home = agentMode ? 'enforcement'
+        : (adminTable && (tab === 'earnings' || tab === 'invoices')) ? 'money'
+        : homeTabFor(truck ? 'driver' : null);
       setTab(validTabs.includes(home) ? home : (validTabs[0] || 'account'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, agentMode, validTabs.join(',')]);
+  }, [owner, viewAs, isOwner, isPlatformAdmin, tab, showMoney, lotsLoaded, truck, agentMode, adminTable, validTabs.join(',')]);
 
   // Apply the deep link, once, as soon as there is a session. Deliberately not
   // while signed out: the query has to survive the sign-in (LoginPage replays
@@ -985,14 +1001,17 @@ export function App() {
   function exitViewAs() {
     setViewAs(null);
     setPartnerSwitcherOpen(false);
-    setTab('overview');
+    // A platform admin goes back to the Properties table they left from.
+    setTab(signedInAdmin ? 'lots' : 'overview');
     haptic('light');
   }
 
   // Owner-side partners list — `partners` is already scoped to this owner
   // by getPartnersForOwner (covers both lots.partner_id and
-  // properties.tow_company_id assignments). Just gate on role.
-  const ownPartners = isOwner ? partners : [];
+  // properties.tow_company_id assignments). Just gate on role. A leasing
+  // office never gets the switcher: acting as its tow company is not an
+  // office task (spec 2026-11-16 keeps an office preview out of scope).
+  const ownPartners = isOwner && !officeMode ? partners : [];
 
   // Role-based navigation:
   // Owner:    Overview + Jobs + Lots + Earnings + Invoices + Account
@@ -1003,7 +1022,7 @@ export function App() {
   const NavIconAdmin = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('path', {d:'M12 2l7 4v6c0 4.4-3 7.5-7 9-4-1.5-7-4.6-7-9V6z'}));
   const NavIconLookup = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'11',cy:'11',r:'7'}), React.createElement('line', {x1:'21',y1:'21',x2:'16.65',y2:'16.65'}));
   const NavIconEnforce = () => React.createElement('svg', {width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'}, React.createElement('circle', {cx:'12',cy:'12',r:'8'}), React.createElement('circle', {cx:'12',cy:'12',r:'3'}), React.createElement('path', {d:'M12 4v5M12 15v5M4 12h5M15 12h5'}));
-  const navIcons = { enforcement: NavIconEnforce, overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
+  const navIcons = { enforcement: NavIconEnforce, overview: NavIconOverview, jobs: NavIconJobs, lots: NavIconLots, earnings: NavIconEarnings, money: NavIconEarnings, invoices: NavIconInvoices, activity: NavIconActivity, account: NavIconAccount, analytics: NavIconAnalytics, towactivity: NavIconTow, admin: NavIconAdmin, lookup: NavIconLookup, requests: NavIconRequests };
   // Tab roles (kept intentionally narrow so each surface has one meaning):
   //   Jobs     → every violation needing action (enforcement + ALPR unified)
   //   Lots     → register + manage properties (plates, passes, cameras, plate detections)
@@ -1017,7 +1036,7 @@ export function App() {
   }));
 
   const lastRefreshLabel = lastRefresh ? (
-    Math.floor((Date.now() - lastRefresh) / 1000) < 10 ? 'Just now' :
+    Math.floor((Date.now() - lastRefresh) / 1000) < 10 ? 'just now' :
     Math.floor((Date.now() - lastRefresh) / 1000) < 60 ? `${Math.floor((Date.now() - lastRefresh) / 1000)}s ago` :
     `${Math.floor((Date.now() - lastRefresh) / 60000)}m ago`
   ) : null;
@@ -1051,22 +1070,17 @@ export function App() {
             </div>
           )}
           {isOwner && ownPartners.length > 0 && (
-            <div style={{position:'relative'}}>
+            <div className="header-switch" style={{position:'relative'}}>
               <button
+                type="button"
+                className="pq-btn pq-btn--small header-switch-btn"
                 onClick={() => setPartnerSwitcherOpen(o => !o)}
                 aria-haspopup="menu"
                 aria-expanded={partnerSwitcherOpen}
                 title="Open one of your partners' portals"
-                style={{
-                  background:'rgba(167,139,250,.12)', color: theme === 'dark' ? '#a78bfa' : '#6d28d9',
-                  border:'1px solid rgba(167,139,250,.3)', borderRadius:8,
-                  padding:'6px 10px', fontSize:12, fontWeight:700,
-                  cursor:'pointer', whiteSpace:'nowrap',
-                  display:'inline-flex', alignItems:'center', gap:6,
-                }}
               >
                 View as Partner
-                <span style={{fontSize:10, opacity:.7}}>▾</span>
+                <span aria-hidden="true" className="header-switch-caret">▾</span>
               </button>
               {partnerSwitcherOpen && (
                 <>
@@ -1114,7 +1128,8 @@ export function App() {
               )}
             </div>
           )}
-          <div className="header-name" title={headerName(owner)}>{headerName(owner)}</div>
+          {/* A one-property office: the property card right below names it. */}
+          {!officeSingle && <div className="header-name" title={headerName(owner)}>{headerName(owner)}</div>}
         </div>
       </header>
 
@@ -1162,8 +1177,10 @@ export function App() {
           </div>
         )}
         {/* Last updated. The office's Passes screen carries its own
-            "As of … · Refresh" line, so it does not get a second one. */}
-        {lastRefresh && !loading && !officeMode && (
+            "As of … · Refresh" line, so it does not get a second one. The
+            admin's Properties and Money refresh on their own clock, which
+            this line does not report. */}
+        {lastRefresh && !loading && !officeMode && !(adminTable && (tab === 'lots' || tab === 'money')) && (
           <div className="last-updated" aria-live="polite">Updated {lastRefreshLabel}</div>
         )}
 
@@ -1171,7 +1188,26 @@ export function App() {
           <React.Suspense fallback={<SkeletonCards />}>
           {tab === 'overview' && isOwner && !viewAs && <OverviewPage violations={violations} lots={lots} partners={partners} lotStates={lotStates} onViewAs={handleViewAs} />}
           {tab === 'jobs' && !truck && <JobsPage lots={effectiveLots} violations={effectiveViolations} alprViolations={alprViolations} loading={loading} lotStates={effectiveLotStates} onAction={() => loadData(owner, true)} isOwner={isOwner} deepLinkViolationId={deepLinkViolationId} user={effectiveUser} onNavigate={setTab} />}
-          {tab === 'lots' && !truck && <ALPRPropertiesPage
+          {tab === 'lots' && adminTable && <AdminPropertiesPage
+            user={effectiveUser}
+            properties={properties}
+            partners={partners}
+            onViewAs={handleViewAs}
+            onNavigate={setTab}
+            initialOpenId={deepLink.property || null}
+            initialSection={deepLink.section}
+            request={deepLink.request}
+            upload={deepLink.upload}
+            firstrun={deepLink.firstrun}
+            verify={deepLink.verify}
+            onNeedVerify={onNeedVerify}
+          />}
+          {tab === 'money' && adminTable && <MoneyPage
+            earnings={{ violations: effectiveViolations, lots: effectiveLots, isOwner, user: effectiveUser }}
+            invoices={{ lots, partners, user: owner, isOwner, isPlatformAdmin }}
+            onNavigate={setTab}
+          />}
+          {tab === 'lots' && !truck && !adminTable && <ALPRPropertiesPage
             user={effectiveUser}
             impersonating={!!viewAs}
             initialSelectedId={deepLink.property || ((isOwner && !isPlatformAdmin && (properties || []).length === 1 && !isClassicOffice(properties[0])) ? properties[0].id : undefined)}
@@ -1186,7 +1222,7 @@ export function App() {
           />}
           {tab === 'towactivity' && isOwner && <TowActivityPage user={effectiveUser} />}
           {tab === 'earnings' && isOwner && showMoney && <EarningsPage violations={effectiveViolations} lots={effectiveLots} isOwner={isOwner} user={effectiveUser} onNavigate={setTab} />}
-          {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} />}
+          {tab === 'analytics' && isOwner && <AnalyticsPage lots={lots} violations={violations} partners={partners} isOwner={isOwner} onNavigate={setTab} showOverview={!adminTable} />}
           {tab === 'invoices' && isOwner && showMoney && <InvoicesPage lots={lots} partners={partners} user={owner} isOwner={isOwner} isPlatformAdmin={isPlatformAdmin} />}
           {tab === 'admin' && isPlatformAdmin && <AdminConsolePage user={owner} />}
           {tab === 'enforcement' && enforcementAllowed && <EnforcementPage agent={agentMode} />}

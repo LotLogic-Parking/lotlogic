@@ -2,7 +2,7 @@
 
 **Read this before changing what a property manager sees in `/app`.** It says
 who the office screen is for, which code decides it, and why it looks the way
-it does. Last changed 2026-11-12 (Victor). The same write-up, with comments,
+it does. Last changed 2026-11-17 (Today at a glance). The same write-up, with comments,
 is at <https://claude.ai/artifact/TcavLLM82kDvUqWJfpe7qm>.
 
 ## Who sees it
@@ -24,16 +24,47 @@ tow-company accounts never get the office screen.
 
 ## What the office gets
 
-- **Passes** is the home screen (`src/pages/lot/PassesTab.jsx`): residents on
-  the left, visitors on the right, each with an entry photo. Tapping a person
-  opens the details panel (`PersonRow` in `src/pages/lot/LiveTab.jsx`). The
-  week's numbers sit under the columns.
-- **More** opens Requests (hold / tow / photo), Registrations (the approval
-  queue, `src/pages/ApartmentPermits.jsx`) and Settings (parking rules and the
-  two QR codes).
+At an apartment, the property's header shows its name, "Towing by" and its tow company
+(`towPartnerName`, e.g. "Towing by NMLD Towing"; no line when the name is not known) and a
+**Today | Vehicles** switch. Truck plazas keep their page as it was.
+
+- **Today** is the home screen (`src/pages/office/OfficeToday.jsx`, pure half
+  `src/lib/officeToday.js`), top to bottom:
+  - three tiles: *Cars on the property now* (residents · visitors, from the
+    same presence data as Passes) or, at a property with no camera,
+    *Registered vehicles* (a button that opens them on Vehicles); *Waiting for you* (registrations to approve, the
+    blue wash when above 0); *Towed or booted this week* (Monday 00:00 in
+    Charlotte to now, a count only; "Enforcement starts Jan 1, 2027" before the
+    property's go-live, from the property itself when the summary fails). A
+    number that did not load is "—", never 0.
+  - **Approve these registrations**: the requests waiting, oldest first, with
+    Approve and Deny on each row (`ApartmentPermits` with `pendingOnly`: same
+    routes, same Deny sheet). The plate photo opens the request with its
+    documents. Empty: "Nothing waiting."
+  - **Hold a car** and **Request a tow** (the Requests composer, on that kind;
+    admin and manager roles only) and **Check a plate**: one answer in words
+    (Registered, Visitor pass, Waiting for approval, On hold, Not registered),
+    with "Request a tow" beside a Not registered answer.
+  - "2 open requests · See all" when there are any.
+- **Vehicles** is the Passes screen (`src/pages/lot/PassesTab.jsx`): residents
+  on the left, visitors on the right, each with an entry photo. Tapping a
+  person opens the details panel (`PersonRow` in `src/pages/lot/LiveTab.jsx`).
+  The week's numbers sit under the columns. At a property with no camera it
+  says so in one muted line and lists the registered vehicles under it
+  (`ApartmentPermits` with `initialSegment="approved"`, URL left alone). Its
+  **More** button opens Requests
+  (hold / tow / photo), Registrations (the approval queue,
+  `src/pages/ApartmentPermits.jsx`) and Settings (parking rules and the two QR
+  codes).
+- The office opens on Today. Where it last was is remembered for the browser
+  tab only (`sessionStorage`), so a refresh keeps its place and a new visit
+  lands on Today.
 - **Account** shows the badge "Leasing office", the team, Dark mode, Change
   password and Sign out.
-- Bottom nav: **Home** (one property) or **Properties**, and **Account**.
+- Bottom nav: **Home** (one property) or **Properties**, and **Account**. The
+  header has no "View as Partner" and, with one property, no account name
+  (the property card names it).
+- No fee or amount appears anywhere on these screens.
 
 ## Changes on 2026-11-12, and why
 
@@ -63,6 +94,30 @@ Gabe, 2026-11-16, on the live Passes page: "that presentation is brutal … impo
 | 3 | A car's history (`PlateTimeline` with `blue`) is one line per visit: the camera's in and out joined by their session id ("Mon Nov 16 · 9:56 AM – 11:17 AM", then "1 h 21 m · camera"), "– now" for the visit in progress, "– exit not seen" otherwise. Session ids are never shown (also not on Lookup); a human number (H-0012) shows only when the line does not already say it. `src/lib/visitHistory.js`. | Each visit showed a raw UUID and said "seen entering" three times, as two unrelated items. |
 | 4 | Light theme: `--ll-surface-2`, `--ll-line`, `--ll-text-3` now resolve (they named variables that exist nowhere); tag inks on the blue surfaces reach 5.5:1; dark-theme Passes columns are cards, not white. | The missing hairlines made borders fall back to ink (the heavy outlines); tags were 2.9–4.5:1. |
 
+## Changes on 2026-11-17 (Today at a glance), and why
+
+Gabe, 2026-11-16: "make it cleaner, simpler, and with less clutter and more straightforward easy to view and interpret". He picked the "Today at a glance" layout. Spec: `docs/superpowers/specs/2026-11-16-office-today-admin-table-pause-design.md` Part 1.
+
+| # | Change | Why |
+|---|---|---|
+| 1 | The office opens on **Today**: three tiles, the registrations to approve with Approve / Deny on the row, Hold a car · Request a tow · Check a plate, and the open requests. | The office had to find Requests, Registrations and Settings behind "More" to see what needed it. |
+| 2 | The header shows "Towing by" its tow company and a Today \| Vehicles switch; "More" moves to Vehicles. The nav tab for one property reads **Today** (was Home). | One switch between "what needs me" and "who is here", in the same place on both. |
+| 3 | A property with no camera says *Registered vehicles*, never "Cars on the property now: 0"; a number that failed to load is "—". | A 0 that is a guess reads as a fact (spec anti-goal). |
+| 4 | The remembered section lasts one browser tab for the office. | Every office had "passes" remembered from before Today, which would have hidden Today for good. |
+| 5 | While Today shows, the page is up to 1200 px wide at ≥ 1024 px (as Passes). | The header and its switch stay in the same place between Today and Vehicles. |
+| 6 | Room is left for Part 3: the pause banner becomes Today's first child and "Pause enforcement" the fourth action. | Part 3 (enforcement pause) is a separate change. |
+
+## Changes on 2026-11-17 (review of Today and the admin table), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | Vehicles at a property with no camera lists the registered vehicles under the camera line; Today's *Registered vehicles* tile opens it. | Today said "Registered vehicles 8" and the tab called Vehicles showed none. |
+| 2 | No "View as Partner" for the office; for owners and admins it is the token button (`.pq-btn--small`), not purple. | Acting as the tow company is not an office task, and purple was a second accent. |
+| 3 | The bottom tab for one property reads **Home** again (it read Today, see the table above). | On Vehicles the bottom tab said "Today" and stayed lit while the switch said Vehicles. |
+| 4 | Inactive nav labels and icons use `--text-muted` in both themes (was `--text-ghost`, 2.2:1 on the dark nav). Every nav icon sits in a 20 px box. | Contrast, and the shield and target icons sat 2 px lower. |
+| 5 | Five nav tabs at 480 px or narrower (any role): 10 px sentence-case labels, was 9 px capitals. With "View as Partner" in the header at 480 px or narrower (any owner with partners, Stevenson's included), the account name and "Live" are hidden. | 9 px capitals were unreadable; the header ran off the screen. Accepted for every role rather than scoped to the new screens. |
+| 6 | A plate check that matches a long-term pass reads "Registered · Unit 102 · …", without "Resident". "Request a tow" beside Not registered is a 44 px target. | "Registered" and "Resident" said the same thing. |
+
 ## Open questions
 
 - The office can no longer add a property itself. Confirm LotLogic adds
@@ -78,5 +133,10 @@ calls in the page (Playwright `page.route`, or a `fetch` override). Return
 `/auth/me` with one apartment property whose `role` is `admin`, and
 `is_platform_admin: false`. That reproduces the office exactly, with sample
 data and nothing touching production. Check a laptop (1280 px) and a phone
-(390 px) for each section: Passes, an opened person, Requests, Registrations,
-Settings, Account.
+(390 px) for each section: Today, Vehicles (Passes), an opened person,
+Requests, Registrations, Settings, Account.
+
+`tests/fixtures/dashboardWorld.ts` does all of this for six accounts (one
+property with no camera, one with cameras, two properties, Stevenson's, a
+platform admin, a LotLogic agent); `tests/e2e/office-today.spec.ts` uses it and
+saves light and dark screenshots to `tests/test-results/dash-screens/`.

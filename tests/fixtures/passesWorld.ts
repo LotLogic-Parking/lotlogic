@@ -824,22 +824,26 @@ export function listTestId(who: Who, world?: Pick<PassesWorld, 'propertyId'>): '
 /**
  * The address that opens the property on the section holding the rows.
  * Admin: `/app?property=<id>` (the property page opens on Passes). Office:
- * `/app` (one property, so it opens by itself, with no "Back to Lots"). Tow
- * company, or the office at a classic property: `/app?property=<id>&section=live`.
+ * `/app?property=<id>&section=passes` (it opens on Today, and Passes is its
+ * Vehicles switch; one property, so still no "Back to Lots"). Tow company, or
+ * the office at a classic property: `/app?property=<id>&section=live`.
  */
 export function passesUrl(origin: string, who: Who, world?: Pick<PassesWorld, 'propertyId'>): string {
   const id = world?.propertyId ?? PROPERTY_ID;
   if (listTestId(who, world) === 'live-tab') return `${origin}/app?property=${id}&section=live`;
-  return who === 'office' ? `${origin}/app` : `${origin}/app?property=${id}`;
+  return who === 'office' ? `${origin}/app?property=${id}&section=passes` : `${origin}/app?property=${id}`;
 }
 
 /** Open the property on the section that holds the rows and wait for the first row. */
 export async function gotoPasses(page: Page, origin: string, who: Who, world?: Pick<PassesWorld, 'propertyId'>): Promise<void> {
-  // The property page remembers its last section (`localStorage.lotlogic_pd_section:<type>`) and
-  // reopens on it. Forget it, so a second call in one test lands on the rows again and not on
-  // Requests or Registrations. (On the first call the page is about:blank and there is nothing to forget.)
+  // The property page remembers its last section (`lotlogic_pd_section:<type>`: localStorage, or
+  // sessionStorage for the office) and reopens on it. Forget it, so a second call in one test lands
+  // on the rows again and not on Requests or Registrations. (On the first call the page is
+  // about:blank and there is nothing to forget.)
   await page.evaluate(() => {
-    for (const k of Object.keys(localStorage)) if (k.startsWith('lotlogic_pd_section:')) localStorage.removeItem(k);
+    for (const store of [localStorage, sessionStorage]) {
+      for (const k of Object.keys(store)) if (k.startsWith('lotlogic_pd_section:')) store.removeItem(k);
+    }
   }).catch(() => undefined);
   await page.goto(passesUrl(origin, who, world));
   await page.getByTestId(listTestId(who, world)).locator('.ls-person').first().waitFor({ timeout: 30_000 });

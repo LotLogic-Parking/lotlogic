@@ -170,3 +170,35 @@ test('isClassicOffice: Stevensons keeps the classic page; everything else gets t
   assert.equal(isClassicOffice(null), false);
   assert.equal(isClassicOffice({}), false);
 });
+
+// ── Platform admins: one portfolio table (spec 2026-11-16 Part 2, plan Task 7) ──
+const CAMERA_PROPS = [{ features: { cameras: true } }, { features: { cameras: false } }];
+
+test('a platform admin gets Properties · Money · Admin · Account (App adds Enforcement before Account)', () => {
+  const tabs = navTabsFor('owner', CAMERA_PROPS, { platformAdmin: true });
+  assert.deepEqual(tabs, [
+    { id: 'lots', label: 'Properties' },
+    { id: 'money', label: 'Money' },
+    { id: 'admin', label: 'Admin' },
+    { id: 'account', label: 'Account' },
+  ]);
+  // The same whatever the properties are.
+  assert.deepEqual(ids(navTabsFor('owner', [], { platformAdmin: true })), ['lots', 'money', 'admin', 'account']);
+  assert.deepEqual(ids(navTabsFor('owner', [{ features: { cameras: false } }], { platformAdmin: true })), ['lots', 'money', 'admin', 'account']);
+});
+
+test('money is a known tab; analytics and towactivity stay known (reached from Properties)', () => {
+  for (const id of ['money', 'analytics', 'towactivity', 'earnings', 'invoices']) assert.equal(isKnownTab(id), true, id);
+});
+
+test('a non-admin owner with cameras keeps the four tabs; an office keeps Properties · Account', () => {
+  assert.deepEqual(ids(navTabsFor('owner', CAMERA_PROPS)), ['lots', 'analytics', 'towactivity', 'account']);
+  assert.deepEqual(ids(navTabsFor('owner', CAMERA_PROPS, { platformAdmin: false })), ['lots', 'analytics', 'towactivity', 'account']);
+  assert.deepEqual(ids(navTabsFor('owner', CAMERA_PROPS, { managerOnly: true })), ['lots', 'account']);
+});
+
+test('platformAdmin means nothing to a partner or a Truck', () => {
+  const apt = [{ property_type: 'apartment' }];
+  assert.deepEqual(ids(navTabsFor('partner', apt, { partnerRequestsReady: true, platformAdmin: true })), ['lots', 'requests', 'lookup', 'activity', 'account']);
+  assert.deepEqual(ids(navTabsFor('partner', apt, { memberRole: 'driver', partnerRequestsReady: true, platformAdmin: true })), ['lookup', 'requests', 'account']);
+});

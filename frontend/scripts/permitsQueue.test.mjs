@@ -1065,3 +1065,61 @@ test('unit history lines read Long-term / Short-term, the plate and the name whe
   assert.deepEqual(historyStatusTag('???'), { tone: 'neutral', text: 'Unknown status' });
   assert.equal(UNIT_HISTORY_EMPTY, 'No earlier parking passes at this unit.');
 });
+
+// ── Pending-only mode (office Today, plan Task 4) ─────────────
+import { queueStateFor, pendingOldestFirst, submittedShort, attentionChip } from '../src/lib/permitsQueue.js';
+
+test('queueStateFor: pending-only ignores and never writes ?status=&q=', () => {
+  assert.deepEqual(queueStateFor({ pendingOnly: true, search: '?status=approved&q=abc' }), { segment: 'pending', q: '', syncUrl: false });
+  assert.deepEqual(queueStateFor({ pendingOnly: false, search: '?status=approved&q=abc' }), { segment: 'approved', q: 'abc', syncUrl: true });
+  // The full queue reads the URL exactly as readQueueQuery does.
+  const r = readQueueQuery('?status=denied&q=214');
+  assert.deepEqual(queueStateFor({ search: '?status=denied&q=214' }), { segment: r.status, q: r.q, syncUrl: true });
+});
+
+test('queueStateFor: an embedded queue opens on its segment and leaves the URL alone', () => {
+  assert.deepEqual(queueStateFor({ segment: 'approved', search: '?status=history&q=abc' }), { segment: 'approved', q: '', syncUrl: false });
+  // An unknown segment is ignored: the URL decides, as before.
+  assert.deepEqual(queueStateFor({ segment: 'nope', search: '?status=history' }).syncUrl, true);
+});
+
+test('pendingOldestFirst: only what waits for a decision, the longest wait first', () => {
+  const rows = queueRows({
+    residents: [
+      { id: 'a', status: 'pending', created_at: '2026-11-16T18:00:00Z' },
+      { id: 'b', status: 'approved', created_at: '2026-11-10T18:00:00Z' },
+      { id: 'c', status: 'pending', created_at: '2026-11-15T23:05:00Z' },
+    ],
+    guests: [{ id: 'd', status: 'pending', created_at: '2026-11-16T12:00:00Z' }],
+  });
+  assert.deepEqual(pendingOldestFirst(rows, Date.parse('2026-11-16T19:30:00Z')).map(r => r.id), ['c', 'd', 'a']);
+  assert.deepEqual(pendingOldestFirst(null), []);
+});
+
+test('submittedShort: today / yesterday with the time, else the day, in Charlotte', () => {
+  const now = Date.parse('2026-11-16T19:30:00Z'); // Mon 2:30 PM ET
+  assert.equal(submittedShort('2026-11-16T14:12:00Z', now), 'today 9:12 AM');
+  assert.equal(submittedShort('2026-11-15T23:05:00Z', now), 'yesterday 6:05 PM');
+  // 11:30 PM on Sunday in Charlotte is Monday in UTC: still yesterday.
+  assert.equal(submittedShort('2026-11-16T04:30:00Z', now), 'yesterday 11:30 PM');
+  assert.equal(submittedShort('2026-11-09T15:00:00Z', now), 'Mon Nov 9');
+  assert.equal(submittedShort('bad', now), '');
+});
+
+test('attentionChip: the review window shows only once it needs attention', () => {
+  const now = Date.parse('2026-11-16T19:30:00Z');
+  const long = (hoursAgo) => queueRows({ residents: [{ id: 'x', status: 'pending', created_at: new Date(now - hoursAgo * 3600000).toISOString() }] })[0];
+  assert.equal(attentionChip(long(2), now), null);                     // 70 h left: nothing to say
+  assert.deepEqual(attentionChip(long(60), now), { tone: 'amber', text: '12h left' });
+  assert.equal(attentionChip(long(80), now).tone, 'red');
+  const guest = queueRows({ guests: [{ id: 'g', status: 'pending', created_at: new Date(now - 3600000).toISOString() }] })[0];
+  assert.equal(attentionChip(guest, now), null);
+});
+
+test('submittedShort: just after midnight, two days ago is not "yesterday"', () => {
+  const now = Date.parse('2026-11-17T05:30:00Z'); // Tue 12:30 AM ET
+  assert.equal(submittedShort('2026-11-16T04:00:00Z', now), 'Sun Nov 15');    // Sun 11 PM ET
+  assert.equal(submittedShort('2026-11-16T06:00:00Z', now), 'yesterday 1:00 AM');
+  // Across the fall-back Sunday (2026-11-01, 25 hours long).
+  assert.equal(submittedShort('2026-11-01T04:30:00Z', Date.parse('2026-11-02T05:30:00Z')), 'yesterday 12:30 AM');
+});

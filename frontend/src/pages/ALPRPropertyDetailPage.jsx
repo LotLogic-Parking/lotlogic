@@ -29,6 +29,8 @@ import { LotStatusTab } from './lot/LotStatusTab.jsx';
 import { SOLO_SECTION_IDS, passTarget, withActivityChips, withLotStatusChip, rowTarget } from '../lib/lotStatus.js';
 import { isClassicOffice } from '../lib/features.js';
 import { plateText, writeQueueQuery } from '../lib/permitsQueue.js';
+import { displayPartnerName, towPartnerName } from '../lib/towPartner.js';
+import OfficeToday from './office/OfficeToday.jsx';
 
 // Heavy — lazy-loaded so opening a property doesn't pull in the full
 // parking-log bundle before the operator ever scrolls to it.
@@ -274,14 +276,17 @@ export function sectionChipsFor(propertyType, features, { isPartner = false, isA
       ...locked.filter(c => c.id !== 'log'),
     ], { isPartner }), { isPartner, classic: true });
   }
-  // The office (Gabe, 2026-11-11: "reduce and simplify"): the page is the
-  // Passes screen and nothing else. Requests, the registration queue and any
+  // The office (Gabe, 2026-11-11: "reduce and simplify"; 2026-11-16: Today
+  // at a glance): the page opens on Today and the header's Today | Vehicles
+  // switch is the way between Today and the Passes screen, so Today is not a
+  // chip (`hidden`). On Vehicles, Requests, the registration queue and any
   // locked chip sit behind one "More" button in the header (`more: true`),
   // next to Settings (QR codes, cameras, rules), which is page state rather
   // than a section. No Traffic chip: its numbers are one line under the
   // Passes columns.
   if (!isAdmin) {
     return [
+      { id: 'today', label: 'Today', hidden: true },
       { id: 'passes', label: 'Passes' },
       { id: 'requests', label: 'Requests', more: true },
       { ...(lockedById.get('log') || { id: 'log', label: 'Registrations' }), more: true },
@@ -314,6 +319,17 @@ function LockGlyph() {
   );
 }
 
+// The office's two screens behind the Today | Vehicles switch; every other
+// section opens the More menu so its chips are there to come back with.
+const HOME_SECTIONS = ['today', 'passes'];
+
+// Where the page remembers its section. The office remembers it for the
+// browser tab only: a refresh keeps its place, a new visit opens on Today
+// (and the "passes" every office stored before Today existed cannot hide it).
+function sectionStore(office) {
+  return office ? window.sessionStorage : window.localStorage;
+}
+
 export function sectionStorageKey(propertyType) {
   return `lotlogic_pd_section:${propertyType || 'unknown'}`;
 }
@@ -327,6 +343,9 @@ export function resolveSectionFilter({ propertyType, features, initialSection, s
   const ids = sectionChipsFor(propertyType, features, { isPartner, isAdmin, classic }).map(c => c.id);
   if (initialSection && ids.includes(initialSection)) return initialSection;
   if (stored && ids.includes(stored)) return stored;
+  // The office's home. (Its remembered section lasts one browser tab, see
+  // sectionStore, so a new visit lands here.)
+  if (ids.includes('today')) return 'today';
   // A partner opens an apartment on its lot status: that is what the driver
   // came to the property for. The office opens on Passes.
   if (isPartner && ids.includes('lotstatus')) return 'lotstatus';
@@ -338,6 +357,8 @@ export function resolveSectionFilter({ propertyType, features, initialSection, s
 export function ALPRPropertyDetailPage({
   propertyId,
   onBack,
+  // What the back link says: the platform admin's table is "Properties".
+  backLabel = 'Back to Lots',
   user,
   // `/auth/me.properties[].features {passes, qr, cameras}` for exactly this
   // property — ALPRPropertiesPage already holds it (that's where the list
@@ -432,6 +453,8 @@ export function ALPRPropertyDetailPage({
   const lockedChipDescId = useUid('pd-chip-locked');
 
   const isTruckPlaza = property?.property_type === 'truck_plaza';
+  // The office at an apartment: Today is its home (spec 2026-11-16 Part 1).
+  const officeHome = managerOnly && !!property && !isTruckPlaza;
 
   // Top-of-page section filter. Lets the operator focus on one surface
   // instead of scrolling past everything, and persists across reloads.
@@ -446,7 +469,7 @@ export function ALPRPropertyDetailPage({
     if (sectionResolvedRef.current || !property) return;
     sectionResolvedRef.current = true;
     let stored = null;
-    try { stored = localStorage.getItem(sectionStorageKey(property.property_type)); } catch { /* blocked storage */ }
+    try { stored = sectionStore(managerOnly).getItem(sectionStorageKey(property.property_type)); } catch { /* blocked storage */ }
     const next = resolveSectionFilter({
       propertyType: property.property_type,
       features,
@@ -457,12 +480,12 @@ export function ALPRPropertyDetailPage({
       classic,
     });
     setSectionFilter(next);
-    if (managerOnly && next !== 'passes') setMoreOpen(true);
+    if (managerOnly && !HOME_SECTIONS.includes(next)) setMoreOpen(true);
   }, [property, features, initialSection, user?._role, user?._platformAdmin, managerOnly, classic]);
   useEffect(() => {
     if (!sectionFilter || !property) return;
-    try { localStorage.setItem(sectionStorageKey(property.property_type), sectionFilter); } catch { /* blocked storage */ }
-  }, [sectionFilter, property]);
+    try { sectionStore(managerOnly).setItem(sectionStorageKey(property.property_type), sectionFilter); } catch { /* blocked storage */ }
+  }, [sectionFilter, property, managerOnly]);
   // Settings takes the page over while it is open (audit 2026-11-11: it used
   // to render below the whole section, off-screen on a phone). It holds the
   // registration QR codes, the cameras and the rules.
@@ -484,7 +507,7 @@ export function ALPRPropertyDetailPage({
   const goSection = useCallback((id) => {
     setShowSettings(false);
     setSectionFilter(id);
-    if (managerOnly && id !== 'passes') setMoreOpen(true);
+    if (managerOnly && !HOME_SECTIONS.includes(id)) setMoreOpen(true);
   }, [managerOnly]);
 
   // A Lot status row tap: a hold goes to Requests; a pass goes to the Parking
@@ -511,6 +534,13 @@ export function ALPRPropertyDetailPage({
   // the composer stays the attestation — nothing is posted from here.
   const requestTow = useCallback((row) => {
     setRequestPrefill({ kind: 'tow', plate: plateText(row), nonce: Date.now() });
+    goSection('requests');
+    try { window.scrollTo(0, 0); } catch { /* ignore */ }
+  }, [goSection]);
+  // Today's "Hold a car" / "Request a tow": the same composer, on that kind,
+  // with the plate (if any) filled in. The composer's tap stays the signature.
+  const composeFromToday = useCallback((kind, plate = '') => {
+    setRequestPrefill({ kind, plate, nonce: Date.now() });
     goSection('requests');
     try { window.scrollTo(0, 0); } catch { /* ignore */ }
   }, [goSection]);
@@ -881,8 +911,46 @@ export function ALPRPropertyDetailPage({
   return (
     <div className="page-enter">
       {/* A one-property office has no list to go back to (App.jsx officeSingle). */}
-      {onBack && <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← Back to Lots</button>}
+      {onBack && <button onClick={onBack} style={{background:'none',border:'none',color: 'var(--accent-text)',fontSize:13,fontWeight:700,cursor:'pointer',padding:0,marginBottom:12}}>← {backLabel}</button>}
 
+      {officeHome ? (
+        /* The office's header (spec 2026-11-16 Part 1): the property, its tow
+           company, and the Today | Vehicles switch. On Vehicles the More menu
+           (Requests, Registrations, Settings) stays where it was. */
+        <div className="ot-head">
+          <div className="ot-head-id">
+            <h1 className="ot-head-name">{property.name}</h1>
+            {/* No name known: no line ("Towing by your tow company" says nothing). */}
+            {displayPartnerName(property.partner_name || property.tow_company_name) && (
+              <div className="ot-head-sub">Towing by {towPartnerName(property, user)}</div>
+            )}
+          </div>
+          <div className="ot-head-tools">
+            {view !== 'today' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (moreOpen) { setMoreOpen(false); setShowSettings(false); setSectionFilter('passes'); }
+                  else setMoreOpen(true);
+                }}
+                className="pq-btn ot-more"
+                aria-expanded={moreOpen}
+              >{moreOpen ? 'Close' : 'More'}</button>
+            )}
+            <div className="pq-segments ot-switch" role="group" aria-label="Show">
+              {[['today', 'Today'], ['passes', 'Vehicles']].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="pq-segment"
+                  aria-pressed={id === 'today' ? view === 'today' : view !== 'today'}
+                  onClick={() => { setMoreOpen(false); setShowSettings(false); setSectionFilter(id); }}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
       <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:12,padding:'16px',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
           <div style={{minWidth:0,flex:1}}>
@@ -912,6 +980,7 @@ export function ALPRPropertyDetailPage({
           )}
         </div>
       </div>
+      )}
 
       {/* Top section filter — pick what's visible below. Sticks to the top of
           the property page. The office sees it only while "More" is open;
@@ -986,6 +1055,19 @@ export function ALPRPropertyDetailPage({
           entry photo, the pass's time left or the countdown to register, and
           red when the office should act. The registration queue opens from
           its footer. Apartments only. */}
+      {view === 'today' && officeHome && (
+        <ErrorBoundary label="today">
+          <OfficeToday
+            property={property}
+            cameras={features?.cameras ?? property?.features?.cameras}
+            onOpenVehicles={() => goSection('passes')}
+            onHold={() => composeFromToday('hold')}
+            onTow={(plate) => composeFromToday('tow', plate)}
+            onOpenRequests={() => goSection('requests')}
+          />
+        </ErrorBoundary>
+      )}
+
       {view === 'passes' && !isTruckPlaza && (
         <ErrorBoundary label="passes">
           <React.Suspense fallback={<SkeletonCards />}>
@@ -995,6 +1077,17 @@ export function ALPRPropertyDetailPage({
               onOpenPass={openPass}
               onRequestTow={canRequestTow ? requestTow : undefined}
               onOpenRegistrations={() => goSection('log')}
+              // No camera (The Volaire until 2026-12-17): the property's
+              // registered vehicles, the list the office's Today tile counts.
+              // Owner sessions only (the office, an admin); never a partner.
+              noCameraList={isOwner ? (
+                <ApartmentPermits
+                  property={property}
+                  title="Registered vehicles"
+                  initialSegment="approved"
+                  onRequestTow={canRequestTow ? requestTow : undefined}
+                />
+              ) : null}
             />
           </React.Suspense>
         </ErrorBoundary>

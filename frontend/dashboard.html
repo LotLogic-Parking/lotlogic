@@ -504,11 +504,15 @@
       cursor: pointer;
       border: none;
       background: none;
-      color: var(--text-ghost);
+      /* --text-muted, not --text-ghost: ghost was 2.2:1 on the dark nav.
+         Muted is 6.8:1 dark and 4.8:1 light, so the themes match. */
+      color: var(--text-muted);
       font-family: inherit;
       transition: color .15s;
       position: relative;
     }
+    /* Every icon in one 20 px box (the inline 22 px ones sat 2 px lower). */
+    .nav-item > svg { width: 20px; height: 20px; flex: 0 0 20px; }
     .nav-item.active { color: var(--accent-text); }
     .nav-item.active::before {
       content: '';
@@ -1744,7 +1748,6 @@
     .theme-light .header-wordmark { color: var(--text-primary); }
     .theme-light .header-name { color: var(--text-muted); }
     .theme-light .bottom-nav { background: rgba(255,255,255,.97); border-top-color: var(--border); }
-    .theme-light .nav-item { color: var(--text-muted); }
     /* --accent-text (#1D4ED8) is 6.7:1 on the white nav. */
     .theme-light .nav-item.active { color: var(--accent-text); }
     .theme-light .nav-item.active::before { background: var(--accent); }
@@ -3694,6 +3697,506 @@
     @media (max-width: 480px) { .ls-blue .ls-event--event { padding-left: 14px; } }
     .ls-blue .ls-event-when { color: var(--ll-text-2); }
     .ls-blue .ls-timeline-title { color: var(--ll-text-2); }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Office › Today (ot-): the leasing office's home screen
+       (spec 2026-11-16 Part 1, src/pages/office/OfficeToday.jsx).
+       - Theme tokens only (--bg-*, --border*, --text-*, --accent*,
+         --on-accent, --red): light and dark come for free.
+       - Blue is the one accent: "Waiting for you" above zero is the blue
+         wash, not amber. Red and green only as small tags or text.
+       - Small grey text: --text-muted only on a card; on the page or on
+         --bg-inset use --text-secondary.
+       - Two breakpoints: 1024 px (tiles in a row) and 640 px (rows stack).
+       - Flat surfaces with a 1 px hairline, like .pq-row and .ls-tile.
+       ══════════════════════════════════════════════════════════════════ */
+/* ── Shared pieces ── */
+    /* A text link that is a 44 px target. */
+    .ot-link, .ap-link {
+      display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px;
+      background: none; border: 0; border-radius: 8px; color: var(--accent-text);
+      font-family: inherit; font-size: 13px; font-weight: 800; line-height: 1.2;
+      text-decoration: none; white-space: nowrap; cursor: pointer;
+    }
+    .ot-link:hover, .ap-link:hover { text-decoration: underline; }
+    /* A value that failed to load: an em dash in grey, never 0. */
+    .ot-none, .ap-none { color: var(--text-secondary); font-weight: 500; }
+    /* Skeleton bars. Each has the box of the text it stands in for, so
+       nothing moves when the data lands. Reuses the dashboard's shimmer
+       keyframes; the two greys are visible on a card in both themes. */
+    .ot-skel, .ap-skel {
+      display: block; border-radius: 6px;
+      background: linear-gradient(90deg, var(--border) 25%, var(--border-subtle) 50%, var(--border) 75%);
+      background-size: 200% 100%; animation: shimmer 1.5s ease infinite;
+    }
+    @media (prefers-reduced-motion: reduce) { .ot-skel, .ap-skel { animation: none; } }
+
+    /* ── Office › Today ─────────────────────────────────────────────── */
+    /* The property header card: name, "Towing by …", the Today | Vehicles
+       switch. Same box as today's inline-styled header (card, 16 px, 12 px
+       radius, 16 px under it). Shown on Today and on Vehicles. */
+    .ot-head {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+      padding: 16px; margin-bottom: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-head-id { flex: 1 1 200px; min-width: 0; }
+    .ot-head-name {
+      font-size: 18px; font-weight: 800; line-height: 1.25; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ot-head-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    /* "More" on Vehicles: a quiet button the height of the switch beside it. */
+    .ot-more { min-width: 88px; background: var(--bg-card); font-size: 14px; }
+    @media (max-width: 640px) { .ot-more { min-width: 72px; padding-inline: 12px; font-size: 13px; } }
+    .ot-more[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-text); }
+    /* Today takes the Passes screen's width (.page-content:has(.ls-passes)),
+       so the header and its switch do not move between Today and Vehicles. */
+    @media (min-width: 1024px) { .page-content:has(.ot) { max-width: 1200px; } }
+    @media (max-width: 640px) { .ot-head-tools { flex: 1 1 100%; flex-wrap: nowrap; } }
+    .ot-head-sub {
+      margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* The switch is .pq-segments + .pq-segment. The pressed half is the brand
+       blue, the selected state .ls--blue gives the segments on Vehicles. */
+    .ot-switch { flex: 0 0 auto; }
+    .ot-switch .pq-segment { min-width: 104px; }
+    .ot-switch .pq-segment[aria-pressed="true"] {
+      background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: none;
+    }
+    .ot-switch .pq-segment[aria-pressed="true"]:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+    @media (max-width: 640px) {
+      .ot-switch { flex: 1 1 100%; }
+      .ot-switch .pq-segment { flex: 1 1 0; min-width: 0; }
+    }
+
+    /* The page under the header: a column with one 16 px gap. The pause
+       banner (Part 3) becomes the first child; nothing else moves. */
+    .ot { display: flex; flex-direction: column; gap: 16px; }
+
+    /* Three tiles: label, number, one line under it. */
+    .ot-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .ot-tile {
+      display: flex; flex-direction: column; min-width: 0; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-tile-l {
+      font-size: 11px; font-weight: 700; line-height: 1.35; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-secondary);
+    }
+    .ot-tile-n {
+      margin: 6px 0 2px; font-size: 34px; font-weight: 800; line-height: 1.1; letter-spacing: -.02em;
+      color: var(--text-primary); font-variant-numeric: tabular-nums;
+    }
+    /* The line under the number keeps its 18 px even when it is empty. */
+    .ot-tile-s { min-height: 18px; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
+    /* "Waiting for you" above zero: the blue wash and its hairline, blue ink
+       on the label and the number. There is no amber in this brand. */
+    .ot-tile.is-waiting {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent-line);
+    }
+    .ot-tile.is-waiting .ot-tile-l, .ot-tile.is-waiting .ot-tile-n { color: var(--accent-text); }
+    .ot-tile.is-waiting .ot-tile-s { color: var(--text-primary); font-weight: 600; }
+    .ot-tile .ot-skel--n { width: 56px; height: 37px; margin: 6px 0 2px; }
+    .ot-tile .ot-skel--s { width: 132px; height: 12px; margin: 3px 0; }
+    /* A tile that opens its list ("Registered vehicles"): the label is the
+       button, stretched over the whole tile; a chevron says it goes on. */
+    .ot-tile.is-link { position: relative; transition: border-color .15s; }
+    .ot-tile.is-link:hover { border-color: var(--accent-line); }
+    .ot-tile.is-link:has(.ot-tile-btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ot-tile-btn {
+      display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: 0;
+      font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: left; cursor: pointer;
+    }
+    .ot-tile-btn:focus-visible { outline: none; }
+    .ot-tile-btn::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+    .ot-tile-go { font-size: 15px; line-height: 1; color: var(--accent-text); }
+    @media (max-width: 1023px) {
+      /* One tile per row: the words on the left, the number on the right. */
+      .ot-tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .ot-tile {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; align-content: center;
+        column-gap: 12px; row-gap: 2px; min-height: 68px; padding: 12px 16px;
+      }
+      .ot-tile-l { grid-column: 1; grid-row: 1; }
+      .ot-tile-s { grid-column: 1; grid-row: 2; }
+      .ot-tile-n { grid-column: 2; grid-row: 1 / span 2; margin: 0; font-size: 30px; text-align: right; }
+      /* No line under the number: the label centres against the number. */
+      .ot-tile-s:empty { display: none; }
+      .ot-tile:has(> .ot-tile-s:empty) .ot-tile-l { grid-row: 1 / span 2; }
+      .ot-tile .ot-skel--n { grid-column: 2; grid-row: 1 / span 2; width: 44px; height: 33px; margin: 0; }
+      .ot-tile .ot-skel--s { grid-column: 1; grid-row: 2; }
+    }
+
+    /* A card with a sentence-case title: the registrations to approve. */
+    .ot-card { min-width: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .ot-card-head { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .ot-card-title { font-size: 16px; font-weight: 800; line-height: 1.35; color: var(--text-primary); }
+    .ot-empty { padding: 18px 16px; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+    /* The queue component (.pq) breaks out of a 640 px column on a laptop.
+       On Today it sits in the page's own column. */
+    .pq.ot-pq { margin-inline: 0; gap: 0; }
+    /* Vehicles at a property with no camera: the registered vehicles under
+       the one muted camera line, in the Passes screen's own column. */
+    .ot-nocam { margin-top: 14px; }
+    .ot-nocam .pq { margin-inline: 0; }
+
+    .ot-regs { list-style: none; }
+    .ot-reg { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; min-height: 72px; padding: 12px 16px; }
+    .ot-reg + .ot-reg { border-top: 1px solid var(--border-subtle); }
+    /* The thumbnail is a button (it opens the documents): a 56 x 44 target
+       around the 56 x 42 .pq-thumb. */
+    .ot-reg-doc {
+      flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 44px;
+      background: none; border: 0; border-radius: 6px; cursor: zoom-in;
+    }
+    .ot-reg-main { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .ot-reg-who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .ot-reg-name {
+      min-width: 0; font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ot-reg-unit { flex: 0 0 auto; font-size: 13px; font-weight: 700; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }
+    .ot-reg-car {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0;
+      font-size: 13px; line-height: 1.4; color: var(--text-secondary);
+    }
+    .ot-reg-car > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+    .ot-reg-when { color: var(--text-muted); white-space: nowrap; }
+    .ot-reg-acts { flex: 0 0 auto; display: flex; gap: 8px; }
+    .ot-reg-acts .pq-btn { min-width: 88px; }
+    .ot-reg-acts .pq-btn--primary { min-width: 104px; }
+    .ot-reg-error { flex: 1 1 100%; font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--red); }
+    .ot-reg .ot-skel--thumb { flex: 0 0 56px; width: 56px; height: 42px; }
+    .ot-reg .ot-skel--name { width: 160px; max-width: 60%; height: 14px; margin: 3px 0; }
+    .ot-reg .ot-skel--car { width: 260px; max-width: 90%; height: 12px; margin: 3px 0; }
+    @media (max-width: 640px) {
+      /* Phone: photo top-left; the car on its own line, then the plate and
+         the time; the two buttons under the row, Approve twice as wide. */
+      .ot-reg { align-items: flex-start; }
+      .ot-reg-main { flex-basis: 0; }
+      .ot-reg-car > span:first-child { flex: 1 1 100%; }
+      .ot-reg-acts { flex: 1 1 100%; }
+      .ot-reg-acts .pq-btn { flex: 1 1 0; min-width: 0; }
+      .ot-reg-acts .pq-btn--primary { flex-grow: 2; }
+    }
+
+    /* Actions: white buttons on the page, on the tiles' own three columns.
+       A fourth one (Pause enforcement, Part 3) joins the same grid. */
+    .ot-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .ot-action { min-height: 52px; background: var(--bg-card); }
+    .ot-action[aria-expanded="true"] {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent); color: var(--accent-text);
+    }
+    @media (max-width: 640px) {
+      .ot-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .ot-actions > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+    }
+
+    /* The plate box under the actions, and its one result line. */
+    .ot-check {
+      display: flex; flex-direction: column; gap: 12px; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ot-check .pq-label { margin-bottom: -6px; }
+    /* The input and its button are one row of equal height. */
+    .ot-check-form { display: flex; align-items: stretch; gap: 8px; }
+    .ot-check-form .req-plate-input { flex: 1 1 auto; min-width: 0; max-width: 320px; }
+    .ot-check-form .pq-btn { flex: 0 0 auto; min-width: 96px; }
+    .ot-check-result {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px; padding: 10px 12px;
+      background: var(--bg-inset); border: 1px solid var(--border); border-radius: 10px;
+      font-size: 14px; line-height: 1.4; color: var(--text-primary);
+    }
+    .ot-check-detail { min-width: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+
+    /* "2 open requests · See all": one row, the whole row is the button. */
+    .ot-reqline {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; min-height: 52px; padding: 12px 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      color: var(--text-primary); font-family: inherit; font-size: 14px; font-weight: 700; line-height: 1.3;
+      text-align: left; cursor: pointer;
+    }
+    .ot-reqline:hover { border-color: var(--text-faint); }
+    .ot-reqline-n { font-variant-numeric: tabular-nums; }
+    .ot-reqline-go { flex: 0 0 auto; font-size: 13px; font-weight: 800; color: var(--accent-text); white-space: nowrap; }
+    /* The plate check's one-line hints, and "Request a tow" at the end of a
+       "Not registered" result. */
+    .ot-check-hint { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text-secondary); }
+    .ot-check-hint.is-error { color: var(--red); }
+    .ot-check-act { margin-left: auto; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       Admin › Properties (ap-): the platform admin's portfolio table, side
+       panel and Money tab (spec 2026-11-16 Part 2,
+       src/pages/admin/AdminPropertiesPage.jsx, src/pages/MoneyPage.jsx).
+       Same rules as the ot- block above: theme tokens only, blue the one
+       accent, red and green only as small tags, dots or text; breakpoints
+       1024 px (table + panel, or cards) and 640 px; flat 1 px hairlines.
+       ══════════════════════════════════════════════════════════════════ */
+    /* ── Admin › Properties ─────────────────────────────────────────── */
+    .ap {
+      --ap-top: calc(58px + env(safe-area-inset-top));
+      --ap-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    /* The table and its panel need ~1,240 px: the page widens the column
+       for this screen only, as Today and Passes do. */
+    @media (min-width: 1024px) { .page-content:has(.ap) { max-width: 1272px; } }
+    .ap-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 16px; }
+    /* Used WITH .section-title (Anton caps), at the 20 px Admin › Today uses. */
+    .ap-title { font-size: 20px; line-height: 1.2; }
+    .ap-top-links { display: flex; flex-wrap: wrap; gap: 0 8px; margin-right: -6px; }
+
+    .ap-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .ap-tools .pq-search { flex: 1 1 100%; min-width: 0; }
+    .ap-tools .pq-search input { width: 100%; }
+    .ap-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+    /* Used WITH .req-chip (44 px pill, pressed = blue fill). Adds the count
+       and a white fill, because these sit on the page, not on a card. */
+    .ap-chip {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-card); color: var(--text-secondary); font-size: 13px; white-space: nowrap;
+    }
+    .ap-chip-n { font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .ap-chip[aria-pressed="true"] .ap-chip-n { color: var(--on-accent); }
+    .ap-chip[aria-pressed="true"]:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+    @media (max-width: 1023px) {
+      /* One row of chips that scrolls sideways, edge to edge: the only
+         sideways scroller on the page. */
+      .ap-chips {
+        flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+        margin-inline: -16px; padding-inline: 16px;
+      }
+      .ap-chips::-webkit-scrollbar { display: none; }
+      /* The row scrolls: its right edge fades so a cut chip reads as "more". */
+      .ap-chips {
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+        mask-image: linear-gradient(90deg, #000 calc(100% - 32px), transparent);
+      }
+    }
+    @media (min-width: 1024px) {
+      .ap-tools .pq-search { flex: 0 0 auto; }
+      .ap-tools .pq-search input { width: 300px; }
+    }
+
+    .ap-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (min-width: 1024px) {
+      .ap-layout { grid-template-columns: minmax(0, 1fr) 320px; }
+      /* Both columns scroll inside one screen height, as .pq-layout does:
+         the panel stays beside the row that opened it however long the
+         table is. (Nothing can be position: sticky on the page itself.) */
+      .ap-tablecard, .ap-panel { max-height: calc(100vh - var(--ap-top) - var(--ap-bottom) - 24px); overflow-y: auto; }
+    }
+
+    /* The table: Admin › Today's table family (13 px cells, 11 px caps
+       heads, hairline rows) with fixed columns and right-aligned numbers. */
+    .ap-tablecard { min-width: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow-x: hidden; }
+    .ap-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+    .ap-table th {
+      position: sticky; top: 0; z-index: 1; height: 44px; padding: 8px 10px;
+      background: var(--bg-card); box-shadow: inset 0 -1px 0 var(--border);
+      text-align: left; vertical-align: bottom;
+      font-size: 11px; font-weight: 700; line-height: 1.3; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .ap-table td {
+      height: 48px; padding: 6px 10px; border-top: 1px solid var(--border-subtle);
+      color: var(--text-primary); vertical-align: middle;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ap-table tbody tr:first-child td { border-top: 0; }
+    .ap-table th:first-child, .ap-table td:first-child { padding-left: 16px; }
+    .ap-table th:last-child, .ap-table td:last-child { padding-right: 16px; }
+    /* 88 px keeps every number heading to two lines ("Tows this / week"). */
+    .ap-col-partner { width: 132px; }
+    .ap-col-num { width: 88px; }
+    .ap-col-status { width: 176px; }
+    .ap-name { font-size: 14px; font-weight: 700; }
+    .ap-partner { color: var(--text-secondary); }
+    .ap-table th.ap-num, .ap-num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.ap-num, .ap-card-stat .ap-num { font-weight: 700; color: var(--text-primary); }
+    /* A zero is quiet so the eye lands on what is not zero. */
+    td.ap-num.is-zero, .ap-card-stat .ap-num.is-zero { font-weight: 500; color: var(--text-secondary); }
+    /* Registrations waiting longer than 24 hours: blue ink, heavier. */
+    td.ap-num.is-late, .ap-card-stat .ap-num.is-late { font-weight: 800; color: var(--accent-text); }
+
+    .ap-row { cursor: pointer; }
+    .ap-row:hover td { background: var(--bg-inset); }
+    .ap-row.is-selected td { background: var(--accent-tint); }
+    .ap-row.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .ap-row:focus { outline: none; }
+    .ap-row:focus-visible td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    .ap-row:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    .ap-row:focus-visible td:last-child { box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+    /* Between 1024 and 1199 px the tow partner column goes (the chips and
+       the panel both name it) so the property name keeps its room. */
+    @media (min-width: 1024px) and (max-width: 1199px) {
+      .ap-layout { grid-template-columns: minmax(0, 1fr) 300px; }
+      .ap-col-partner, .ap-table .ap-partner { display: none; }
+    }
+
+    /* Status. The urgent states and "N waiting" are .pq-tag (--red, and
+       --amber, which is the blue slot); "Starts <date>" is .pq-tag--neutral;
+       "All good" is not a pill: a green dot and the words. */
+    .ap-tag-strong { font-weight: 800; }
+    /* A long need title ends in "…" inside its cell (the full title is the tag's title). */
+    .ap-table td .pq-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+    .ap-ok { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }
+    .ap-ok::before { content: ''; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .ap-empty { padding: 28px 16px; text-align: center; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+
+    /* Side panel (and the same body inside an opened card on a phone). */
+    .ap-panel {
+      display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 16px;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .ap-panel-empty { padding: 32px 20px; text-align: center; font-size: 14px; line-height: 1.5; color: var(--text-secondary); }
+    .ap-panel-head { display: flex; align-items: flex-start; gap: 8px; }
+    .ap-panel-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .ap-panel-name { font-size: 18px; font-weight: 800; line-height: 1.25; color: var(--text-primary); overflow-wrap: anywhere; }
+    .ap-panel-addr { font-size: 13px; line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
+    .ap-panel-id .pq-tag, .ap-panel-id .ap-ok { margin-top: 6px; }
+    .ap-panel-close {
+      flex: 0 0 auto; width: 44px; height: 44px; margin: -10px -10px 0 0;
+      background: none; border: 0; border-radius: 10px; color: var(--text-muted);
+      font-family: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+    }
+    .ap-panel-close:hover { color: var(--text-primary); }
+    .ap-panel-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .ap-label {
+      margin-bottom: 8px; font-size: 11px; font-weight: 700; line-height: 1.35; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-muted);
+    }
+
+    /* What needs us at this property (from admin-ops): a dot, a sentence,
+       one small button. Red dot = urgent; blue dot = the rest. */
+    .ap-needs { list-style: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .ap-need { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 8px 10px; padding: 12px; }
+    .ap-need + .ap-need { border-top: 1px solid var(--border-subtle); }
+    .ap-need-dot { width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--accent); }
+    .ap-need.is-urgent .ap-need-dot { background: var(--red); }
+    .ap-need-title { font-size: 14px; font-weight: 700; line-height: 1.4; color: var(--text-primary); overflow-wrap: anywhere; }
+    .ap-need-detail { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+    .ap-need .pq-btn { grid-column: 2; justify-self: start; }
+
+    .ap-facts { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .ap-fact {
+      display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; column-gap: 8px;
+      min-height: 44px; padding: 0 4px 0 12px; font-size: 13px; line-height: 1.4;
+    }
+    .ap-fact + .ap-fact { border-top: 1px solid var(--border-subtle); }
+    .ap-fact dt { color: var(--text-secondary); }
+    /* The <dd> holds the value and its Edit button (a <dl> row may hold only
+       <dt> and <dd>); display: contents lets both sit in the row's grid. */
+    .ap-fact dd { display: contents; }
+    .ap-fact-v { grid-column: 2; padding: 6px 0; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .ap-fact-v.is-unset { font-weight: 500; color: var(--text-secondary); }
+    .ap-edit {
+      min-width: 48px; min-height: 44px; padding: 0 8px; background: none; border: 0; border-radius: 8px;
+      color: var(--accent-text); font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+    }
+    .ap-edit:hover { background: var(--accent-tint); }
+    /* Editing one fact in place: the label on its own line, then the field
+       with Save and Cancel. */
+    .ap-fact.is-editing { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px; padding: 10px 12px 12px; }
+    .ap-fact.is-editing dt { grid-column: 1 / -1; }
+    .ap-input {
+      width: 100%; min-height: 44px; padding: 8px 10px;
+      background: var(--bg-inset); border: 1px solid var(--border); border-radius: 10px;
+      color: var(--text-primary); font-family: inherit; font-size: 14px; font-weight: 600;
+    }
+    .ap-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-line); }
+    .ap-error { grid-column: 1 / -1; font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--red); }
+
+    .ap-panel-acts { display: flex; flex-direction: column; gap: 8px; }
+    .ap-panel-acts .pq-btn { width: 100%; }
+    .ap-hint { margin-top: -2px; text-align: center; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+
+    /* Phone and tablet: the table becomes cards, the panel opens inside the
+       chosen card. */
+    .ap-cards { list-style: none; display: none; flex-direction: column; gap: 8px; }
+    .ap-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .ap-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .ap-card-btn {
+      display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 56px; padding: 14px 16px;
+      background: none; border: 0; border-radius: 12px; color: inherit; font-family: inherit; text-align: left; cursor: pointer;
+    }
+    .ap-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+    /* The name wraps to a second line before it is cut: a status tag that
+       says why ("1 waiting over a day") takes room on a phone. */
+    .ap-card-name {
+      flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--text-primary);
+      overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+      padding-top: 1px;
+    }
+    .ap-card-top .pq-tag, .ap-card-top .ap-ok { flex: 0 0 auto; }
+    .ap-card-partner { font-size: 13px; line-height: 1.4; color: var(--text-secondary); }
+    .ap-card-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; margin-top: 2px; }
+    .ap-card-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+    .ap-card-stat .ap-num { font-size: 13px; }
+    .ap-card-body { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; border-top: 1px solid var(--border-subtle); }
+    @media (max-width: 1023px) {
+      .ap-tablecard, .ap-panel { display: none; }
+      .ap-cards { display: flex; }
+    }
+
+    /* Loading rows and cards. */
+    .ap-skel--name { width: 62%; height: 14px; }
+    .ap-skel--cell { width: 70%; height: 12px; }
+    .ap-skel--num { width: 24px; height: 12px; margin-left: auto; }
+    .ap-skel--tag { width: 84px; height: 22px; }
+
+    /* ── Admin › Money: Earnings, then Billing, one heading each ────── */
+    .ap-money { display: flex; flex-direction: column; gap: 32px; }
+    .ap-money-sec { min-width: 0; }
+    .ap-money-sec > .ap-title { margin-bottom: 12px; }
+    .ap-money-sec + .ap-money-sec { padding-top: 24px; border-top: 1px solid var(--border); }
+    /* Laptop: Earnings and Billing side by side in Properties' width, so the
+       page does not change width between the two tabs. */
+    @media (min-width: 1024px) {
+      .page-content:has(.ap-money) { max-width: 1272px; }
+      .ap-money { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; align-items: start; }
+      .ap-money-sec + .ap-money-sec { padding-top: 0; border-top: 0; }
+    }
+    /* Big numbers in ink; red and green only as small text (brand rule). */
+    .ap-money .kpi-val, .theme-light .ap-money .kpi-val { color: var(--text-primary); }
+    /* Billing's own "Billing & QuickBooks" heading repeats the section title. */
+    .ap-money-sec .page-section > h2:first-child { display: none; }
+
+    /* A load that failed: one line on the page with its words and a retry. */
+    .ap-alert {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px;
+      padding: 8px 8px 8px 14px; background: var(--bg-card); border: 1px solid var(--border);
+      border-left: 3px solid var(--red); border-radius: 10px;
+      font-size: 13px; line-height: 1.45; color: var(--text-secondary);
+    }
+    .ap-alert[role="status"] { border-left-color: var(--accent); }
+    .ap-alert strong { color: var(--text-primary); }
+    .ap-fact dt label { cursor: pointer; }
+
+    /* Phone header and nav with five tabs (the admin's Properties · Money ·
+       Admin · Enforcement · Account). The 480 px nav rule near the top of
+       this sheet loses the cascade to the base .nav-label rule declared after
+       it, so five uppercase labels ran out of room ("PROPERTI…"); and with
+       "View as Partner" in the header, the signed-in name pushed the header
+       past the screen. The name is on Account and "Live" is the default; at
+       phone width the switcher keeps the room. */
+    @media (max-width: 480px) {
+      /* Five tabs at 78 px each: 10 px sentence case fits "Enforcement". */
+      .bottom-nav [role="tablist"]:has(> :nth-child(5)) .nav-label { font-size: 10px; letter-spacing: 0; text-transform: none; }
+      .header-right:has(.header-switch) :is(.header-name, .conn-indicator) { display: none; }
+    }
+    /* "View as Partner" (owners and admins, never the office): the token
+       button, not the old purple one. */
+    .header-switch-btn { min-height: 36px; gap: 6px; white-space: nowrap; }
+    .header-switch-caret { font-size: 10px; opacity: .7; }
+    @media (max-width: 640px) { .header-switch-btn { min-height: 44px; } }
+
   </style>
 </head>
 <body>
