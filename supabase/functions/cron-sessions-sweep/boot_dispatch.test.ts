@@ -1,6 +1,7 @@
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { excludePaused, pausesFromRows, type PauseRead } from "../_shared/pause.ts";
 import {
-  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
+  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, findCoveringPass, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
 } from "./boot_dispatch.ts";
 
 Deno.test("phones: normalised to E.164, de-duplicated, junk dropped", () => {
@@ -38,35 +39,7 @@ Deno.test("pastDispatchWindow", () => {
   assertEquals(pastDispatchWindow("bad", now, 10), false);
 });
 
-// ── a small PostgREST fake ───────────────────────────────────────────────
-type Row = Record<string, unknown>;
-function fakeDb(tables: Record<string, Row[]>) {
-  let seq = 0;
-  return {
-    from(table: string) {
-      const all = tables[table] ?? (tables[table] = []);
-      let rows = [...all];
-      let patch: Row | null = null;
-      const b: Record<string, unknown> = {};
-      const self = b as Record<string, (...a: unknown[]) => unknown>;
-      const finish = () => { if (patch) for (const r of rows) Object.assign(r, patch); return { data: rows, error: null }; };
-      // Any point in the chain can be awaited, as with supabase-js.
-      self.then = (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise.resolve(finish()).then(res, rej);
-      self.select = () => Object.assign(Object.create(b), { then: (res: (v: unknown) => unknown) => Promise.resolve(finish()).then(res) });
-      self.insert = (row: unknown) => { const r = { id: `v${++seq}`, ...(row as Row) }; all.push(r); rows = [r]; return b; };
-      self.update = (p: unknown) => { patch = p as Row; return b; };
-      self.eq = (c: unknown, v: unknown) => { rows = rows.filter(r => (c === "properties.property_type" ? (r.properties as Row)?.property_type : r[c as string]) === v); return b; };
-      self.is = (c: unknown, _v: unknown) => { rows = rows.filter(r => r[c as string] == null); return b; };
-      self.in = (c: unknown, v: unknown) => { rows = rows.filter(r => (v as unknown[]).includes(r[c as string])); return b; };
-      self.lt = (c: unknown, v: unknown) => { rows = rows.filter(r => String(r[c as string]) < String(v)); return b; };
-      self.limit = () => Promise.resolve(finish());
-      self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
-      self.single = () => { const o = finish(); return Promise.resolve({ data: o.data[0] ?? null, error: null }); };
-      return b;
-    },
-  // deno-lint-ignore no-explicit-any
-  } as any;
-}
+import { fakeDb, type Row } from "./fake_db.ts";
 
 const NOW = new Date("2026-11-11T20:23:00Z");
 const APT = { property_type: "apartment", name: "Mayfield Memorial Apartments", address: "4912 Daybreak Dr" };
@@ -166,4 +139,134 @@ Deno.test("bootRegistrations: a resident plate one confusable character off stil
   assertEquals(n, 1);
   assertEquals(sessions[0].state, "resident");
   assertEquals((sessions[0] as Row).resident_plate_id, "r1");
+});
+
+// ── enforcement pause ────────────────────────────────────────────────────
+const pausedAt = (now: Date, rows: Array<{ property_id: string; starts_at: string; ends_at: string }>): PauseRead =>
+  ({ ok: true, missing: false, ...pausesFromRows(rows.map((r, i) => ({ id: `pz${i}`, ended_early_at: null, cancelled_at: null, reason: null, ...r })), now, 24) });
+const PAUSE_P1 = { property_id: "p1", starts_at: "2026-11-11T18:00:00Z", ends_at: "2026-11-11T21:00:00Z" };
+
+Deno.test("bootDispatch during a pause: the paused property is left out in SQL (before the limit), others still dispatch", async () => {
+  const grace = (id: string, property_id: string) => ({ id, property_id, normalized_plate: id.toUpperCase(), plate_text: id.toUpperCase(), entered_at: "2026-11-11T20:00:00Z", entry_plate_event_id: "e", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT });
+  // Twelve waiting cars at the paused property would fill BOOT_MAX_PER_TICK (10) if filtered after the select.
+  const sessions = [...Array.from({ length: 12 }, (_, i) => grace(`held${i}`, "p1")), grace("due1", "p2")];
+  const cams = [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }, { property_id: "p2", active: true, orientation: "exit", exit_order: 2 }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: cams };
+  const sent: string[] = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: NOW, pauses: pausedAt(NOW, [PAUSE_P1]),
+    send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions.filter(s => s.state === "expired").map(s => s.id), ["due1"]);
+  assertEquals(sessions.filter(s => s.property_id === "p1").every(s => s.state === "grace" && s.violation_id === null), true);
+  assertEquals(tables.alpr_violations.length, 1);
+  assertMatch(sent[0], /Plate DUE1/);
+});
+
+Deno.test("bootDispatch after a pause: the held car is picked up on the first run after ends_at, once", async () => {
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T19:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const send = async (_to: string, body: string) => { sent.push(body); return { ok: true, status: 201 }; };
+  const during = new Date("2026-11-11T20:59:59Z");
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: during, pauses: pausedAt(during, [PAUSE_P1]), send }), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions[0].state, "grace");
+  const after = new Date("2026-11-11T21:00:00Z"); // at == ends_at: enforcement is back
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: after, pauses: pausedAt(after, [PAUSE_P1]), send }), { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: after, pauses: pausedAt(after, [PAUSE_P1]), send }), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sent.length, 1);
+  assertEquals(tables.alpr_violations.length, 1);
+});
+
+Deno.test("bootDispatch with an unknown pause state: nothing is claimed or sent this tick", async () => {
+  const sessions = [{ id: "s1", property_id: "p2", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p2", active: true, orientation: "exit", exit_order: 2 }] };
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: NOW, pauses: { ok: false, error: "timeout" }, send: async () => ({ ok: true, status: 201 }) });
+  assertEquals(out, { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions[0].state, "grace");
+  assertEquals(tables.alpr_violations.length, 0);
+});
+
+Deno.test("findCoveringPass: a live pass or approved resident plate at the property, by the entry's fuzzy rule", async () => {
+  const passes = [
+    { id: "old", property_id: "p1", plate_text: "ABC1234", valid_from: "2026-11-10T00:00:00Z", valid_until: "2026-11-11T00:00:00Z", cancelled_at: null, status: "active" },
+    { id: "new", property_id: "p1", plate_text: "abc-1234", valid_from: "2026-11-11T00:00:00Z", valid_until: "2026-11-12T00:00:00Z", cancelled_at: null, status: "active" },
+  ];
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: passes, resident_plates: [] }), "p1", "ABC1234", NOW), { kind: "pass", id: "new" });
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [passes[0]], resident_plates: [] }), "p1", "ABC1234", NOW), null);
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "approved", active: true }] }), "p1", "ABC1234", NOW), { kind: "resident", id: "r1" });
+  assertEquals(await findCoveringPass(fakeDb({ visitor_passes: [], resident_plates: [{ id: "r1", property_id: "p1", plate_text: "ABC1234", back_plate: null, status: "pending", active: true }] }), "p1", "ABC1234", NOW), null);
+});
+
+Deno.test("pending-dispatch candidates (index.ts query shape): a paused property's held rows never fill the 50-row window, and come back after the pause", async () => {
+  const v = (id: string, property_id: string) => ({ id, property_id, dispatched_at: null, status: "pending", dispatch_attempts: 0, created_at: "2026-11-11T18:00:00Z" });
+  const violations = [...Array.from({ length: 60 }, (_, i) => v(`held${i}`, "p1")), v("due", "p2")];
+  const candidates = async (at: Date) => {
+    const db = fakeDb({ alpr_violations: violations });
+    const q = db.from("alpr_violations").select("id, property_id").is("dispatched_at", null).neq("status", "dispatch_failed").neq("status", "dismissed")
+      .lt("dispatch_attempts", 3).lt("created_at", "2026-11-11T20:00:00Z");
+    const { data } = await excludePaused(q, pausedAt(at, [PAUSE_P1]), "properties.property_type").limit(50);
+    return (data as Row[]).map(r => r.id as string);
+  };
+  assertEquals(await candidates(new Date("2026-11-11T20:30:00Z")), ["due"]);
+  const after = await candidates(new Date("2026-11-11T21:00:00Z"));
+  assertEquals(after.length, 50);
+  assertEquals(after[0], "held0");
+  assertEquals(violations.every(r => r.dispatch_attempts === 0 && r.status === "pending"), true); // nothing burned while held
+});
+
+Deno.test("boot text after a pause: a car from another day shows the day, and says it waited for the pause to end", () => {
+  // In Fri Nov 13, 7:00 PM ET; texted Mon Nov 16, 7:01 AM ET when the pause ended at 7:00 AM.
+  const b = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-14T00:00:00Z",
+    minutesHere: 3601, violationId: "3f2a9c1e-8b7d-4e6f-9a0b-1c2d3e4f5a6b", pauseEndedAt: "2026-11-16T12:00:00Z" });
+  assertMatch(b, /In since Fri 7:00 PM \(3601m\)\. No parking pass\.\nHeld by an enforcement pause that ended at 7:00 AM\. It may have left unseen\.\n/);
+  assertMatch(b, /Do not boot before Fri 7:15 PM\./);
+  // Same-day texts are unchanged.
+  const today = bootMessage({ propertyName: "Mayfield", address: null, plate: "ABC1234", enteredAt: "2026-11-11T20:12:00Z", minutesHere: 11, violationId: "x" });
+  assertMatch(today, /In since 3:12 PM \(11m\)\. No parking pass\.\nDo not boot before 3:27 PM\./);
+});
+
+Deno.test("bootDispatch after a pause: the text says the pause held it; a car that came after the pause does not", async () => {
+  const s = (id: string, entered_at: string) => ({ id, property_id: "p1", normalized_plate: id.toUpperCase(), plate_text: id.toUpperCase(), entered_at, entry_plate_event_id: "e", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT });
+  const sessions = [s("held1", "2026-11-11T19:00:00Z"), s("new1", "2026-11-11T21:01:00Z")];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const at = new Date("2026-11-11T21:12:00Z");
+  await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]),
+    send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(sent.length, 2);
+  assertMatch(sent[0], /Plate HELD1\n.*\nHeld by an enforcement pause that ended at 4:00 PM\./);
+  assertEquals(/pause/.test(sent[1]), false);
+});
+
+// ── a boot dispatch texted before the pause (Gabe, 2026-11-17) ─────────────
+// It goes ahead during the pause: never held, never texted again, and its
+// stand-downs (the car registered or left, or no reply) still go out.
+
+Deno.test("boot texted before the pause: never texted again during or after it; its stand-downs still run during it", async () => {
+  // Texted 5:50 PM ET-equivalent, before the pause started at 18:00 UTC; p1 is paused 18:00 -> 21:00.
+  const dispatchedAt = "2026-11-11T17:50:00Z";
+  const sessions = [
+    { id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T17:30:00Z", entry_plate_event_id: "e1", state: "expired", exited_at: null, exit_hinted_at: null, violation_id: "v1", properties: APT },
+    { id: "s2", property_id: "p1", normalized_plate: "XYZ789", plate_text: "XYZ789", entered_at: "2026-11-11T17:31:00Z", entry_plate_event_id: "e2", state: "expired", exited_at: "2026-11-11T19:10:00Z", exit_hinted_at: null, violation_id: "v2", properties: APT },
+  ];
+  const bootV = (id: string, s: typeof sessions[number]) => ({ id, session_id: s.id, property_id: "p1", plate_text: s.plate_text, status: "dispatched", action_channel: "boot_sms", left_before_tow_email_sent_at: null, left_before_tow_at: null, dispatched_at: dispatchedAt, plate_sessions: s, properties: { name: "Mayfield", address: null } });
+  const violations = [bootV("v1", sessions[0]), bootV("v2", sessions[1])];
+  const passes = [{ id: "pass1", property_id: "p1", plate_text: "ABC1234", valid_from: "2026-11-11T19:00:00Z", valid_until: "2026-11-12T19:00:00Z", cancelled_at: null, status: "active" }];
+  const tables = { plate_sessions: sessions, alpr_violations: violations as Row[], plate_events: [] as Row[], visitor_passes: passes, resident_plates: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const send = async (_to: string, body: string) => { sent.push(body); return { ok: true, status: 201 }; };
+  const during = new Date("2026-11-11T19:30:00Z");
+  const deps = (at: Date) => ({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]), send });
+  // During the pause: nothing re-dispatched; the car that registered and the car that left are stood down.
+  assertEquals(await bootDispatch(deps(during)), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(await bootRegistrations(deps(during)), 1);
+  assertEquals(await bootStandDowns(deps(during)), { stood_down: 1, stale: 0 });
+  assertEquals(sent.length, 2);
+  assertMatch(sent[0], /\[STAND DOWN\] Mayfield\nPlate ABC1234 registered a parking pass/);
+  assertMatch(sent[1], /\[STAND DOWN\] Mayfield\nPlate XYZ789 was seen leaving/);
+  // After the pause: still never texted again.
+  const after = new Date("2026-11-11T21:01:00Z");
+  assertEquals(await bootDispatch(deps(after)), { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sent.length, 2);
+  assertEquals(violations.length, 2);
 });

@@ -37,6 +37,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sameVehicle } from "../camera-snapshot/plate_identity.ts";
+import { excludePaused, heldThroughPause, type PauseRead } from "../_shared/pause.ts";
 
 export const GRACE_DISPATCH_MINUTES_DEFAULT = 10;
 export const SIGN_WINDOW_MINUTES = 15;
@@ -52,6 +53,8 @@ export type BootDeps = {
   dispatchMinutes?: number;
   staleHours?: number;
   send?: (to: string, body: string, mediaUrls: string[]) => Promise<{ ok: boolean; status: number; error?: string }>;
+  /** The tick's enforcement-pause read (_shared/pause.ts). Absent = no pause filter. */
+  pauses?: PauseRead;
 };
 
 /** "+1 (971) 295-7521", "9712957521" → "+19712957521"; junk → null. */
@@ -87,6 +90,18 @@ function clockET(iso: string | null | undefined): string {
   }
 }
 
+const dayET = (t: Date) => t.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+
+/** "7:00 PM" when `iso` falls on the same Eastern day as `now`, else "Fri 7:00 PM" (a car held by a pause can be days old). */
+function clockETFrom(iso: string | null | undefined, now: Date): string {
+  if (!iso) return "?";
+  const t = new Date(iso);
+  if (!Number.isFinite(t.getTime())) return "?";
+  if (dayET(t) === dayET(now)) return clockET(iso);
+  const day = t.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" });
+  return `${day} ${clockET(iso)}`;
+}
+
 /** When the posted window ends: entered_at + 15 min. The driver may not boot before it. */
 export function bootAllowedAfter(enteredAtIso: string): string {
   return new Date(new Date(enteredAtIso).getTime() + SIGN_WINDOW_MINUTES * 60_000).toISOString();
@@ -99,17 +114,26 @@ export type BootContext = {
   enteredAt: string;
   minutesHere: number;
   violationId: string;
+  /**
+   * Set when an enforcement pause held this dispatch: the pause's end. A pause
+   * holds only what was not yet sent (Gabe, 2026-11-17); a car texted before
+   * the pause was texted then, never again, so this line is only on texts the
+   * pause held, which go out once, at its end.
+   */
+  pauseEndedAt?: string | null;
 };
 
 /** The dispatch text. Short, every line a fact the driver acts on. */
 export function bootMessage(c: BootContext): string {
   const id = shortId(c.violationId);
+  const now = new Date(new Date(c.enteredAt).getTime() + c.minutesHere * 60_000);
   return [
     `[BOOT] ${c.propertyName}`,
     `Plate ${c.plate}`,
-    `In since ${clockET(c.enteredAt)} (${c.minutesHere}m). No parking pass.`,
+    `In since ${clockETFrom(c.enteredAt, now)} (${c.minutesHere}m). No parking pass.`,
+    ...(c.pauseEndedAt ? [`Held by an enforcement pause that ended at ${clockETFrom(c.pauseEndedAt, now)}. It may have left unseen.`] : []),
     ...(c.address ? [c.address] : []),
-    `Do not boot before ${clockET(bootAllowedAfter(c.enteredAt))}. Check it is still there and still unregistered.`,
+    `Do not boot before ${clockETFrom(bootAllowedAfter(c.enteredAt), now)}. Check it is still there and still unregistered.`,
     `Reply DONE-${id} when booted, GONE-${id} if it left.`,
   ].join("\n");
 }
@@ -176,7 +200,7 @@ async function sendToAll(deps: BootDeps, body: string, mediaUrls: string[]): Pro
 const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? v[0] ?? null : v ?? null);
 
 /** Properties that may dispatch: an active camera that sees cars leave. Cached per tick. */
-async function exitCameraProperties(db: SupabaseClient, propertyIds: string[]): Promise<Set<string>> {
+export async function exitCameraProperties(db: SupabaseClient, propertyIds: string[]): Promise<Set<string>> {
   if (propertyIds.length === 0) return new Set();
   const { data, error } = await db
     .from("alpr_cameras")
@@ -200,6 +224,9 @@ type GraceRow = {
 /**
  * Grace sessions at apartments past the dispatch window: claim them to
  * expired, record the violation as a boot dispatch, text the drivers.
+ * A property under an enforcement pause is left out in the query itself,
+ * before the limit, and its sessions stay untouched in grace; the first run
+ * after the pause ends picks them up. An unknown pause state holds them all.
  */
 export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number; failed: number; skipped_no_exit_camera: number }> {
   const out = { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 };
@@ -208,7 +235,7 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
   const now = deps.now ?? new Date();
   const minutes = deps.dispatchMinutes ?? GRACE_DISPATCH_MINUTES_DEFAULT;
   const cutoff = new Date(now.getTime() - minutes * 60_000).toISOString();
-  const { data, error } = await db
+  let q = db
     .from("plate_sessions")
     .select("id,property_id,normalized_plate,plate_text,entered_at,entry_plate_event_id,properties!inner(property_type,name,address)")
     .eq("state", "grace")
@@ -216,8 +243,9 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
     .is("exit_hinted_at", null)
     .is("violation_id", null)
     .lt("entered_at", cutoff)
-    .eq("properties.property_type", "apartment")
-    .limit(BOOT_MAX_PER_TICK);
+    .eq("properties.property_type", "apartment");
+  if (deps.pauses) q = excludePaused(q, deps.pauses, "properties.property_type");
+  const { data, error } = await q.limit(BOOT_MAX_PER_TICK);
   if (error) throw error;
   const rows = ((data ?? []) as GraceRow[]).filter(s => one(s.properties)?.property_type === "apartment");
   const canDispatch = await exitCameraProperties(db, [...new Set(rows.map(s => s.property_id))]);
@@ -255,9 +283,12 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
 
     const { data: ev } = await db.from("plate_events").select("image_url").eq("id", s.entry_plate_event_id).maybeSingle();
     const photo = (ev as { image_url?: string | null } | null)?.image_url ?? null;
+    // Held by a pause: its dispatch minute fell before the pause ended.
+    const dueAt = new Date(new Date(s.entered_at).getTime() + minutes * 60_000).toISOString();
+    const pauseEndedAt = deps.pauses ? heldThroughPause(deps.pauses, s.property_id, dueAt) : null;
     const body = bootMessage({
       propertyName: prop.name || "Property", address: prop.address ?? null, plate: s.plate_text,
-      enteredAt: s.entered_at, minutesHere, violationId,
+      enteredAt: s.entered_at, minutesHere, violationId, pauseEndedAt,
     });
     const r = await sendToAll(deps, body, photo ? [photo] : []);
     if (r.sent > 0) {
@@ -311,6 +342,28 @@ async function standDown(deps: BootDeps, v: BootViolation, reason: "registered" 
 }
 
 /**
+ * A live visitor pass or approved resident plate at the property that covers
+ * the plate, by the entry's fuzzy rule, over the front and back plate.
+ */
+export async function findCoveringPass(db: SupabaseClient, propertyId: string, plate: string, now: Date): Promise<{ kind: "pass" | "resident"; id: string } | null> {
+  const { data: passes } = await db.from("visitor_passes")
+    .select("id,plate_text,back_plate,valid_from,valid_until,cancelled_at,status")
+    .eq("property_id", propertyId).is("cancelled_at", null).in("status", ["active", "approved"]);
+  const pass = (passes ?? []).find((p: { plate_text?: string; back_plate?: string | null; valid_from?: string; valid_until?: string }) => {
+    if (!plateCovers(p.plate_text, plate) && !plateCovers(p.back_plate, plate)) return false;
+    if (p.valid_from && new Date(p.valid_from) > now) return false;
+    return !!p.valid_until && new Date(p.valid_until) > now;
+  });
+  if (pass) return { kind: "pass", id: pass.id };
+  const { data: res } = await db.from("resident_plates").select("id,plate_text,back_plate,status,active")
+    .eq("property_id", propertyId).eq("active", true);
+  const resident = (res ?? []).find((r: { plate_text?: string; back_plate?: string | null; status?: string }) =>
+    (r.status ?? "approved") === "approved"
+    && (plateCovers(r.plate_text, plate) || plateCovers(r.back_plate, plate)));
+  return resident ? { kind: "resident", id: resident.id } : null;
+}
+
+/**
  * A dispatched car that now holds a pass: back to registered / resident,
  * the violation dismissed, the drivers stood down. Same fuzzy plate rule
  * as the entry, over visitor passes and resident plates.
@@ -323,27 +376,12 @@ export async function bootRegistrations(deps: BootDeps): Promise<number> {
   for (const v of await openBootViolations(db)) {
     const sess = one(v.plate_sessions);
     if (!sess || sess.exited_at || sess.state !== "expired") continue;
-    const { data: passes } = await db.from("visitor_passes")
-      .select("id,plate_text,back_plate,valid_from,valid_until,cancelled_at,status")
-      .eq("property_id", v.property_id).is("cancelled_at", null).in("status", ["active", "approved"]);
-    const pass = (passes ?? []).find((p: { plate_text?: string; back_plate?: string | null; valid_from?: string; valid_until?: string }) => {
-      if (!plateCovers(p.plate_text, sess.normalized_plate) && !plateCovers(p.back_plate, sess.normalized_plate)) return false;
-      if (p.valid_from && new Date(p.valid_from) > now) return false;
-      return !!p.valid_until && new Date(p.valid_until) > now;
-    });
-    let resident: { id: string } | null = null;
-    if (!pass) {
-      const { data: res } = await db.from("resident_plates").select("id,plate_text,back_plate,status,active")
-        .eq("property_id", v.property_id).eq("active", true);
-      resident = (res ?? []).find((r: { plate_text?: string; back_plate?: string | null; status?: string }) =>
-        (r.status ?? "approved") === "approved"
-        && (plateCovers(r.plate_text, sess.normalized_plate) || plateCovers(r.back_plate, sess.normalized_plate))) ?? null;
-    }
-    if (!pass && !resident) continue;
+    const cover = await findCoveringPass(db, v.property_id, sess.normalized_plate, now);
+    if (!cover) continue;
     const nowIso = now.toISOString();
     const flip = await db.from("plate_sessions").update({
-      state: pass ? "registered" : "resident",
-      ...(pass ? { visitor_pass_id: pass.id } : { resident_plate_id: resident!.id }),
+      state: cover.kind === "pass" ? "registered" : "resident",
+      ...(cover.kind === "pass" ? { visitor_pass_id: cover.id } : { resident_plate_id: cover.id }),
       updated_at: nowIso,
     }).eq("id", sess.id).eq("state", "expired").select("id");
     if (flip.error) throw flip.error;

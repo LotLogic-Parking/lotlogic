@@ -39,6 +39,9 @@ import { admin, bytesToHex, CMD, CORS, HttpError, json, loadSecret, wifiPassword
 import { adminEmails, adminFromAuthMe, DEFAULT_DASHBOARD_API, looksLikeJwt, memberFromAuthMe } from "./admin.ts";
 import { addAgent, isLotLogicAgent, listAgents, removeAgent, resendAgent, supabaseStore, type TeamCall } from "./agents.ts";
 import { joinSquare, logSince, matchProperty, placementPoint, squareDashboardUrl, squareFeeCents, type PropertyPoint, type SquarePayment } from "./payments.ts";
+import { annotatePauses } from "./pause_gate.ts";
+import { refuseIfPaused } from "./lock_pause.ts";
+import { readPauses } from "../_shared/pause.ts";
 
 const SESSION_H = 12;
 const LOCK_TTL_S = 600;
@@ -68,7 +71,7 @@ Deno.serve(async (req) => {
       if (route === "agents") return json(await listAgents(supabaseStore(db), me));
       if (route === "boots") return json(await listBoots(db, me));
       if (route === "boot") return json(await bootDetail(db, me, url.searchParams.get("id")));
-      if (route === "properties") return json(await listProperties(db, me));
+      if (route === "properties") return json(annotatePauses(await listProperties(db, me), await readPauses(db, new Date())));
       if (route === "payments") return json(await payments(db, me, url));
     }
     if (req.method === "POST") {
@@ -418,6 +421,11 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     const { properties } = await listProperties(db, me);
     if (!properties.some((p: { id: string }) => p.id === propertyId)) throw new HttpError(403, "property_not_yours", "You can't boot at that property.");
   }
+  // Enforcement pause (lock_pause.ts): no boot at a paused property. The agent's draft is kept by the screen.
+  await refuseIfPaused(db, {
+    now: new Date(), propertyId, lat: num(body.lat), lon: num(body.lon), plate,
+    myProperties: async () => (await listProperties(db, me)).properties, points: () => propertyPoints(db),
+  });
   const { data: partner } = await db.from("enforcement_partners").select("boot_fee_cents").eq("id", b.partner_id).single();
   const fee = partner?.boot_fee_cents ?? 0;
   if (fee <= 0) throw new HttpError(409, "no_boot_fee", "Your company has no boot fee set, so the motorist couldn't pay. Ask LotLogic to set it.");
