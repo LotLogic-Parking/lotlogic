@@ -3,6 +3,7 @@ import { requestsApi } from '../../lib/requestsApi.js';
 import { requestErrorMessage } from '../../lib/requestErrors.js';
 import { useNowTick } from '../../hooks.js';
 import { fmtETClock, fmtETShort, holdRowTime } from '../../lib/holdTime.js';
+import { TOW_PARTNER_FALLBACK } from '../../lib/towPartner.js';
 
 // ── One request row (spec §5.2) ──────────────────────────────
 //
@@ -21,7 +22,7 @@ const KIND_GLYPH = { hold: '✋', tow: '🚨', photo: '📷' };
 // Spec §5.2: no `sent` delivery 5 minutes after `created` and the row says so.
 const UNREACHED_AFTER_MS = 5 * 60 * 1000;
 
-/** True when nothing has reached N Style and enough time has passed to say so. */
+/** True when nothing has reached the tow company and enough time has passed to say so. */
 export function isUnreached(request, now = Date.now()) {
   if (!request || request.sent_at) return false;
   const created = Date.parse(request.created_at || '');
@@ -51,10 +52,11 @@ function firstName(display) {
  * @param {object} request
  * @param {string} [viewerName] the signed-in account's display name, so
  *   "Removed by you" is said only when the caller is in fact the actor.
+ * @param {string} [partner] the property's tow company (lib/towPartner.js)
  */
-export function outcomeWords(request, viewerName) {
+export function outcomeWords(request, viewerName, partner = TOW_PARTNER_FALLBACK) {
   const who = request?.resolved_by_display || '';
-  if (request?.resolution_note === 'property_rejected') return 'Property not confirmed by N Style';
+  if (request?.resolution_note === 'property_rejected') return `Property not confirmed by ${partner}`;
   switch (request?.resolution) {
     case 'expired': return 'Expired';
     case 'property_removed': {
@@ -88,6 +90,7 @@ export function RequestRow({
   canAct = false,
   canFulfill = false,
   viewerName = '',
+  partnerName = TOW_PARTNER_FALLBACK,
   flagged = false,
   openUpload = false,
   onExtend,
@@ -180,15 +183,15 @@ export function RequestRow({
   // The status line, in the §5.2 order: delivery → seen → checked. Each part
   // carries a word, so none of them is colour-only.
   const statusParts = [];
-  if (unreached) statusParts.push("⚠ Couldn't reach N Style");
-  else if (request.sent_at) statusParts.push('Sent to N Style ✓');
+  if (unreached) statusParts.push(`⚠ Couldn't reach ${partnerName}`);
+  else if (request.sent_at) statusParts.push(`Sent to ${partnerName} ✓`);
   else if (active) statusParts.push('Sending…');
   if (request.partner_ack_at) {
-    const who = request.partner_ack_by_display || 'N Style';
+    const who = request.partner_ack_by_display || partnerName;
     const at = fmtETClock(request.partner_ack_at);
     statusParts.push(at ? `Seen by ${who} ${at}` : `Seen by ${who}`);
   }
-  if (request.checked_count > 0) statusParts.push(`Checked by N Style ${request.checked_count}×`);
+  if (request.checked_count > 0) statusParts.push(`Checked by ${partnerName} ${request.checked_count}×`);
 
   return (
     <div
@@ -233,7 +236,7 @@ export function RequestRow({
         </div>
       )}
 
-      {!active && <div className="req-pill">{outcomeWords(request, viewerName)}</div>}
+      {!active && <div className="req-pill">{outcomeWords(request, viewerName, partnerName)}</div>}
 
       {/* The §6.5 [Photo sent] surface: upload a photo against this request.
           Only on an open photo request — a hold has nothing to fulfil — and

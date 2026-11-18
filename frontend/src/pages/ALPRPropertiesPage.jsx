@@ -11,6 +11,7 @@ import { RejectedPropertyNotice } from '../ui/RejectedPropertyNotice.jsx';
 import { RegisteredDrill } from './RegisteredDrill.jsx';
 import { lazyPage } from '../lib/lazyPage.js';
 import { listRequests } from '../lib/requestsApi.js';
+import { towPartnerName } from '../lib/towPartner.js';
 
 // Heavy — lazy-loaded so opening the Lots list doesn't pull in the full
 // property-detail bundle (which itself pulls in TruckParkingLog).
@@ -303,7 +304,7 @@ export function ALPRPropertiesPage({
                     </div>
                     <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
                       <span className={`lot-pill-paper ${verified ? 'green' : 'amber'}`}>
-                        <span className="dot"></span>{verified ? 'Confirmed' : 'Waiting for N Style'}
+                        <span className="dot"></span>{verified ? 'Confirmed' : `Waiting for ${towPartnerName(p, user)}`}
                       </span>
                       {canDelete && (
                       <button

@@ -12,7 +12,7 @@ import { RequestRow } from './RequestRow.jsx';
 // would drag the outcome pill below 4.5:1 in `.theme-light`, and the pill is
 // the one thing in the row a manager actually came to read.
 
-export function RecentList({ items, canAct, canFulfill, viewerName, onHistory, onReinstate, addToast }) {
+export function RecentList({ items, canAct, canFulfill, viewerName, partnerName, onHistory, onReinstate, addToast }) {
   const rows = Array.isArray(items) ? items : [];
   if (rows.length === 0) return null;
   return (
@@ -27,6 +27,7 @@ export function RecentList({ items, canAct, canFulfill, viewerName, onHistory, o
             canAct={canAct}
             canFulfill={canFulfill}
             viewerName={viewerName}
+            partnerName={partnerName}
             onHistory={onHistory}
             onReinstate={r.kind === 'hold' ? onReinstate : undefined}
             addToast={addToast}
