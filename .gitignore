@@ -60,3 +60,7 @@ frontend/.test-dist-*/
 # Wave 2.6 visual no-op harness — current/ is a throwaway diff target,
 # regenerated every run; tests/visual/baseline/ IS committed.
 tests/visual/current/
+
+# Playwright: the run's cached TEST_* sign-ins (tests/fixtures/sessionCache.ts).
+# Holds live session tokens; never commit.
+tests/.auth/
