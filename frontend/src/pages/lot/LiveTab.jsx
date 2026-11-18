@@ -102,6 +102,11 @@ function PersonPanel({ row, list, propertyId, permitsRow, now, onZoom, onOpenPas
 
 // `chipOverride` ({tone, text}) lets the Passes screen put its own tag on the
 // row (the 15-minute countdown, Dispatched) in place of the pass chip.
+const personTitledByPlate = (row) => {
+  const plate = String(row?.plate ?? '').trim();
+  return Boolean(plate) && rowTitle(row) === plate;
+};
+
 export function PersonRow({ row, list, open, onToggle, panelId, now, chipOverride = null, ...panel }) {
   const chip = chipOverride || passChip(row.pass);
   const ticking = chipOverride ? '' : timeLeftText(row.pass, now);
@@ -117,7 +122,8 @@ export function PersonRow({ row, list, open, onToggle, panelId, now, chipOverrid
         <PhotoFrame url={row.entry_photo_url} plate={row.plate} alt="" />
         <span className="ls-person-main">
           <span className="ls-person-head">
-            <span className="ls-person-name">{rowTitle(row)}</span>
+            {/* A row with no name is titled by its plate: set it like a plate. */}
+            <span className={`ls-person-name${personTitledByPlate(row) ? ' ls-person-name--plate' : ''}`}>{rowTitle(row)}</span>
             <Tag tone={chip.tone}>{chipText}</Tag>
           </span>
           <span className="ls-person-sum">{rowSummary(row, list)}</span>
