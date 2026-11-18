@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '../../lib/api.js';
+import { listPauses } from '../../lib/requestsApi.js';
+import { useNowTick } from '../../hooks.js';
 import { opsFetch, REFRESH_MS } from '../../lib/ops.js';
 import { ago } from '../../lib/enforcement.js';
 import { goLiveLabel } from '../../lib/officeToday.js';
 import {
-  DASH, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, residentLink, sortRows, statusFor, towPartnerOf, waitingLate,
+  CLASSIC_PAUSE_LINE, DASH, activePause, applyFilter, filterChips, joinOps, managerName, needDetail, needsFor, numberOrDash, pauseOffer, residentLink, sortRows, statusFor,
+  towPartnerOf, waitingLate,
 } from '../../lib/adminTable.js';
+import { pauseBanners } from '../../lib/pause.js';
+import { PauseBanners } from '../office/PauseBanners.jsx';
+import { PauseSheet, PauseStopSheet } from '../office/PauseSheet.jsx';
 import { lazyPage } from '../../lib/lazyPage.js';
 import { ErrorBoundary } from '../../ui/ErrorBoundary.jsx';
 import { SkeletonCards } from '../../ui/Skeletons.jsx';
@@ -23,9 +30,10 @@ const ALPRPropertyDetailPage = lazyPage(() => import('../ALPRPropertyDetailPage.
 // Styles: .ap-* in dashboard.html (theme tokens only), with .pq-* buttons,
 // tags and search, and .req-chip for the filter chips.
 
-/** The status pill: red and the waiting / amber needs are tags; Starts and Not checked are neutral; All good is a dot and the words. */
+/** The status pill: red and the waiting / amber needs are tags; Paused is the blue tag; Starts and Not checked are neutral; All good is a dot and the words. */
 function Status({ status }) {
   if (status.tone === 'green') return <span className="ap-ok">{status.label}</span>;
+  if (status.key === 'paused') return <span className="pq-tag pq-tag--info ap-tag-strong" title={status.label}>{status.label}</span>;
   if (status.tone === 'red') return <span className="pq-tag pq-tag--red" title={status.label}>{status.label}</span>;
   if (status.tone === 'amber') return <span className="pq-tag pq-tag--amber ap-tag-strong" title={status.label}>{status.label}</span>;
   return <span className="pq-tag pq-tag--neutral">{status.label}</span>;
@@ -123,8 +131,86 @@ function Needs({ row, onShowBoot }) {
   );
 }
 
+/**
+ * Part 3 for a platform admin: the property's pauses as the office sees them
+ * on Today (running and scheduled, with End now and Cancel) and Pause
+ * enforcement, which the backend allows a platform admin at any apartment
+ * (same 72-hour rules). Read when the row opens and every 60 s while it is
+ * open and the page is visible (Today's cadence, and the table's), so the
+ * panel never disagrees with the row's status pill for long; until the first
+ * read the row's own running pause (/admin/clients' `active_pause`) shows
+ * without a button. `onChanged` reloads the table, so the pill follows.
+ * A property on the classic office page (lib/features.js), which shows the
+ * office no pause banner, gets a line instead of Pause enforcement.
+ */
+function useAdminPauses(row, onChanged) {
+  const now = useNowTick();
+  const offer = pauseOffer(row);
+  const apartment = offer !== null;
+  const [pauses, setPauses] = useState(null);
+  const [sheet, setSheet] = useState(null);   // null | {kind: 'new'} | {kind: 'stop', banner}
+  const [openBefore, setOpenBefore] = useState(0);
+  const [note, setNote] = useState('');
+  const req = useRef(0);
+  const anchor = useRef(null);
+  const [layer, setLayer] = useState(null);
+  useEffect(() => { setLayer(anchor.current?.closest('.app') || document.body); }, []);
+
+  const load = useCallback(async () => {
+    if (!apartment) return;
+    const mine = ++req.current;
+    try {
+      const out = await listPauses(row.id);
+      if (mine === req.current) {
+        setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+        setOpenBefore(Number.isInteger(out?.open_before_pause_count) ? out.open_before_pause_count : 0);
+      }
+    } catch { /* keep what was shown */ }
+  }, [row.id, apartment]);
+  useEffect(() => {
+    setPauses(null); setOpenBefore(0); setSheet(null); setNote(''); load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
+  useEffect(() => {
+    if (!note) return undefined;
+    const t = setTimeout(() => setNote(''), 20000);
+    return () => clearTimeout(t);
+  }, [note]);
+
+  const running = activePause(row, now);
+  const shown = pauses ?? (running ? [{ id: running.id, status: 'active', ends_at: running.ends_at, reason: running.reason }] : []);
+  const banners = pauseBanners(shown, now);
+  const done = (_pause, text) => { setSheet(null); setNote(text || ''); load(); onChanged?.(); };
+  const overlay = (node) => (layer ? createPortal(node, layer) : null);
+
+  return {
+    banners,
+    node: (
+      <div ref={anchor} className="ap-pauses">
+        <PauseBanners banners={banners} compact testId="ap-pause"
+          onAct={pauses ? (banner) => setSheet({ kind: 'stop', banner }) : null} />
+        {note && <p className="ap-hint" role="status">{note}</p>}
+        {sheet?.kind === 'new' && overlay(
+          <PauseSheet property={row} pauses={pauses} openBefore={openBefore} onClose={() => setSheet(null)} onSaved={done} onRefresh={load} />,
+        )}
+        {sheet?.kind === 'stop' && overlay(
+          <PauseStopSheet property={row} banner={sheet.banner} onClose={() => setSheet(null)} onDone={done} />,
+        )}
+      </div>
+    ),
+    button: offer === 'classic'
+      ? <p className="ap-hint" data-testid="ap-pause-classic">{CLASSIC_PAUSE_LINE}</p>
+      : offer === 'pause' && pauses
+        ? <button type="button" className="pq-btn" aria-haspopup="dialog" onClick={() => setSheet({ kind: 'new' })}>Pause enforcement</button>
+        : null,
+  };
+}
+
 /** What the panel (laptop) and an opened card (phone) both show under the name. */
-function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, origin }) {
+function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, onPausesChanged, origin }) {
   const tow = towPartnerOf(row);
   const partner = tow.id ? (partners || []).find(p => p.id === tow.id) : null;
   const link = residentLink(row, origin);
@@ -136,8 +222,11 @@ function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, ori
   };
   const isPlaza = row.property_type === 'truck_plaza';
   const manager = managerName(row);
+  const pause = useAdminPauses(row, onPausesChanged);
   return (
     <>
+      {/* Part 3: the running and scheduled pauses, with End now and Cancel (the head's pill steps aside for them). */}
+      {pause.node}
       <Needs row={row} onShowBoot={onShowBoot} />
       <dl className="ap-facts">
         {/* A row built from admin-ops alone does not know its tow partner: a dash, not "None yet". */}
@@ -169,6 +258,7 @@ function Details({ row, partners, onOpen, onViewAs, onShowBoot, onSaveFacts, ori
         {partner && <button type="button" className="pq-btn" onClick={() => onViewAs(partner)}>View as {tow.name || partner.company_name}</button>}
         {/* A truck plaza has no residents, so no resident link and no button for one. */}
         {!isPlaza && <button type="button" className="pq-btn" onClick={copy} disabled={!link}>{link ? 'Copy resident link' : 'No link yet'}</button>}
+        {pause.button}
         {!isPlaza && !link && <p className="ap-hint">This property has no QR code yet.</p>}
         {link && copied && <p className="ap-hint" role="status">{copied}</p>}
       </div>
@@ -300,7 +390,7 @@ export function AdminPropertiesPage({
     );
   }
 
-  const detailProps = { partners, onOpen: setOpenId, onViewAs, onShowBoot: showBoot, onSaveFacts, origin };
+  const detailProps = { partners, onOpen: setOpenId, onViewAs, onShowBoot: showBoot, onSaveFacts, onPausesChanged: load, origin };
   const emptyText = rows && rows.length
     ? (query.trim() ? `No property matches “${query.trim()}”.` : chip === 'attention' ? 'Nothing needs attention. Every property is fine.' : 'No property here.')
     : 'No properties yet. Onboard one from Admin.';
@@ -406,7 +496,7 @@ export function AdminPropertiesPage({
               return (
                 <li key={r.id} className={`ap-card${isSel ? ' is-selected' : ''}`} data-testid="ap-card">
                   <button type="button" className="ap-card-btn" aria-expanded={isSel} aria-controls={isSel ? `ap-card-${r.id}` : undefined} onClick={() => select(r.id)}>
-                    <span className="ap-card-top"><span className="ap-card-name">{r.name}</span><Status status={st} /></span>
+                    <span className="ap-card-top"><span className="ap-card-name">{r.name}</span>{!(isSel && st.key === 'paused') && <Status status={st} />}</span>
                     <span className="ap-card-partner">{towPartnerOf(r).name || (r._partial ? DASH : 'No tow partner')}</span>
                     <span className="ap-card-stats">
                       {stat('Active passes', r.active_pass_count)}
@@ -434,11 +524,11 @@ export function AdminPropertiesPage({
                 <div className="ap-panel-id">
                   <h2 className="ap-panel-name">{selected.name}</h2>
                   <p className="ap-panel-addr">{selected.address || 'No address'}</p>
-                  <Status status={statusFor(selected, now)} />
+                  {/* Paused: the pause box right below says it, with its reason and End now. */}
+                  {statusFor(selected, now).key !== 'paused' && <Status status={statusFor(selected, now)} />}
                 </div>
                 <button type="button" className="ap-panel-close" aria-label={`Close ${selected.name}`} onClick={() => setSelectedId(null)}>✕</button>
               </div>
-              {/* Part 3: an active pause shows here, between the head and the body. */}
               <div className="ap-panel-body">
                 <Details row={selected} {...detailProps} />
               </div>

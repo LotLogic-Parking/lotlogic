@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNowTick } from '../../hooks.js';
-import { getPermits, getPresence, getPropertySummary, listRequests } from '../../lib/requestsApi.js';
+import { getPermits, getPresence, getPropertySummary, listPauses, listRequests } from '../../lib/requestsApi.js';
 import { queueRows } from '../../lib/permitsQueue.js';
 import { DASH, findPlate, plateVerdict, todayTiles } from '../../lib/officeToday.js';
+import { pauseBanners } from '../../lib/pause.js';
+import { PauseSheet, PauseStopSheet } from './PauseSheet.jsx';
+import { PauseBanners } from './PauseBanners.jsx';
 import { ApartmentPermits } from '../ApartmentPermits.jsx';
 import { Tag } from '../permits/parts.jsx';
 
@@ -22,10 +26,17 @@ import { Tag } from '../permits/parts.jsx';
 // the tiles). A plate check reads the queue fresh, so it answers for a
 // registration approved a minute ago.
 //
-// Room for Part 3 (enforcement pause): its banner becomes the first child of
-// .ot and "Pause enforcement" the fourth action.
+// Part 3 (enforcement pause): the pause banners are the first child of .ot
+// (one per active or scheduled pause, the running one first), and "Pause
+// enforcement" is the fourth action. Only an admin of the property sets, ends
+// or cancels a pause (the backend's rule); everyone else sees the banner
+// without its button. (A platform admin never sees Today: they set, end and
+// cancel pauses from the Properties panel, AdminPropertiesPage.) The pauses are read on open and every 60 s while the
+// page is visible (as the presence is), so a scheduled pause turns into a
+// running one and a running one goes away on time.
 
 const REFRESH_MS = 60000;
+const NOTE_MS = 20000;
 const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 
 // `onOpen[tile id]`: a tile that opens its list. "Registered vehicles" (no
@@ -114,6 +125,7 @@ function PlateCheck({ property, presence, holds, canRequest, onTow }) {
 export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRequests, onOpenVehicles }) {
   const propertyId = property?.id;
   const canRequest = ['admin', 'manager'].includes(property?.role);
+  const canPause = property?.role === 'admin' && property?.property_type !== 'truck_plaza';
   const now = useNowTick();
 
   const [presence, setPresence] = useState(null);
@@ -121,6 +133,19 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
   const [counts, setCounts] = useState(null);
   const [requests, setRequests] = useState(null);
   const [checkOpen, setCheckOpen] = useState(false);
+  const [pauses, setPauses] = useState(null);
+  // null | {kind: 'new'} | {kind: 'stop', banner}
+  const [pauseSheet, setPauseSheet] = useState(null);
+  // Open tow requests and sent tow notices that a pause set now would not hold (contract C).
+  const [openBefore, setOpenBefore] = useState(0);
+  const [pauseNote, setPauseNote] = useState('');
+  // The pause sheets render into the app root, as ApartmentPermits' do: the
+  // page wrappers keep an entrance-animation transform, which would anchor a
+  // position: fixed sheet to the page box instead of the screen.
+  const rootRef = useRef(null);
+  const [layer, setLayer] = useState(null);
+  useEffect(() => { setLayer(rootRef.current?.closest('.app') || document.body); }, []);
+  const overlay = (node) => (layer ? createPortal(node, layer) : null);
 
   // Presence: every minute while the page is visible, never at a property
   // with no camera (it would say "no camera" every time).
@@ -140,6 +165,37 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, [loadPresence, cameras]);
 
+  // The property's pauses: on open, every minute while visible, and after
+  // every change. A failed read keeps what was shown; it never invents one.
+  const pausesReq = useRef(0);
+  const loadPauses = useCallback(async () => {
+    if (!propertyId) return;
+    const req = ++pausesReq.current;
+    try {
+      const out = await listPauses(propertyId);
+      if (req === pausesReq.current) {
+        setPauses(Array.isArray(out?.pauses) ? out.pauses : []);
+        setOpenBefore(Number.isInteger(out?.open_before_pause_count) ? out.open_before_pause_count : 0);
+      }
+    } catch { /* keep the last answer */ }
+  }, [propertyId]);
+  useEffect(() => {
+    setPauses(null);
+    setOpenBefore(0);
+    loadPauses();
+    const id = setInterval(() => { if (visible()) loadPauses(); }, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [loadPauses]);
+
+  const onPauseDone = useCallback((_pause, note) => { setPauseSheet(null); setPauseNote(note || ''); loadPauses(); }, [loadPauses]);
+  // A note ("This pause has already ended.") is about the moment it was
+  // said: it goes after a while instead of staying under the banners all day.
+  useEffect(() => {
+    if (!pauseNote) return undefined;
+    const t = setTimeout(() => setPauseNote(''), NOTE_MS);
+    return () => clearTimeout(t);
+  }, [pauseNote]);
+
   // The week's numbers and the open requests: once per property.
   useEffect(() => {
     if (!propertyId) return undefined;
@@ -155,9 +211,13 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
   const tiles = todayTiles({ presence, counts, summary, cameras, goLiveDate: property?.go_live_date, now });
   const holds = (requests || []).filter(r => r?.kind === 'hold');
   const open = requests ? requests.length : null;
+  const banners = pauseBanners(pauses, now);
 
   return (
-    <section className="ot" aria-label="Today" data-testid="office-today">
+    <section ref={rootRef} className="ot" aria-label="Today" data-testid="office-today">
+      <PauseBanners banners={banners} onAct={canPause ? (banner) => setPauseSheet({ kind: 'stop', banner }) : null} />
+      {pauseNote && <p className="ot-check-hint" role="status">{pauseNote}</p>}
+
       <Tiles tiles={tiles} onOpen={cameras === false && onOpenVehicles ? { onsite: onOpenVehicles } : {}} />
 
       <ApartmentPermits property={property} pendingOnly title="Approve these registrations" onCounts={setCounts} />
@@ -172,6 +232,11 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
           aria-controls="ot-check"
           onClick={() => setCheckOpen(v => !v)}
         >Check a plate</button>
+        {canPause && (
+          <button type="button" className="pq-btn ot-action" aria-haspopup="dialog" onClick={() => setPauseSheet({ kind: 'new' })}>
+            Pause enforcement
+          </button>
+        )}
       </div>
 
       {checkOpen && <PlateCheck property={property} presence={presence} holds={holds} canRequest={canRequest} onTow={onTow} />}
@@ -181,6 +246,13 @@ export default function OfficeToday({ property, cameras, onHold, onTow, onOpenRe
           <span><span className="ot-reqline-n">{open}</span> open {open === 1 ? 'request' : 'requests'}</span>
           <span className="ot-reqline-go">See all <span aria-hidden="true">›</span></span>
         </button>
+      )}
+
+      {pauseSheet?.kind === 'new' && overlay(
+        <PauseSheet property={property} pauses={pauses} openBefore={openBefore} onClose={() => setPauseSheet(null)} onSaved={onPauseDone} onRefresh={loadPauses} />,
+      )}
+      {pauseSheet?.kind === 'stop' && overlay(
+        <PauseStopSheet property={property} banner={pauseSheet.banner} onClose={() => setPauseSheet(null)} onDone={onPauseDone} />,
       )}
     </section>
   );

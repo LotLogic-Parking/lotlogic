@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   joinOps, statusFor, filterChips, applyFilter, residentLink, sortRows, towPartnerOf, needsFor, needDetail, managerName, numberOrDash, DASH,
+  pauseOffer, CLASSIC_PAUSE_LINE,
 } from '../src/lib/adminTable.js';
 
 const NOW = Date.parse('2026-11-16T19:30:00Z'); // Mon Nov 16, 2:30 PM in Charlotte
@@ -216,4 +217,52 @@ test('numberOrDash: a number is grouped, anything else is a dash', () => {
   assert.equal(numberOrDash(null), DASH);
   assert.equal(numberOrDash(undefined), DASH);
   assert.equal(numberOrDash('3'), '3');
+});
+
+// ── Part 3: a property whose enforcement is paused ───────────
+const PAUSE = { id: 'p1', ends_at: '2026-11-17T23:00:00+00:00', ends_local: 'Tue Nov 17, 6:00 PM ET', reason: 'Pool party' };
+
+test('statusFor: a pause reads "Paused until <time>" in blue, after the red and waiting keys, before Starts', () => {
+  const joined = (r) => joinOps([r], OPS)[0];
+  assert.deepEqual(statusFor(joined(row('volaire', { active_pause: PAUSE })), NOW), { key: 'paused', label: 'Paused until Tue 6:00 PM', tone: 'blue' });
+  // Before go-live too: the pause is what is true right now.
+  assert.equal(statusFor(joined(row('volaire', { active_pause: PAUSE, go_live_date: '2027-01-01' })), NOW).key, 'paused');
+  // Red and the waiting / amber keys still come first.
+  assert.equal(statusFor(joined(row('plaza', { active_pause: PAUSE, unreached_request_count: 1 })), NOW).key, 'unreached');
+  assert.equal(statusFor(joined(row('plaza', { active_pause: PAUSE })), NOW).key, 'camera_offline');
+  assert.equal(statusFor(joined(row('fm', { active_pause: PAUSE, pending_registration_count: 3, oldest_pending_registration_at: ago(30 * HOUR) })), NOW).key, 'waiting');
+  assert.equal(statusFor(joined(row('fm', { active_pause: PAUSE })), NOW).key, 'needs_amber');
+  // Without admin-ops the pause still shows (it comes from /admin/clients).
+  assert.equal(statusFor({ ...row('v', { active_pause: PAUSE }), ops: null }, NOW).key, 'paused');
+});
+
+test('statusFor: a pause whose end has passed (the table was left open) is dropped', () => {
+  const joined = (r) => joinOps([r], OPS)[0];
+  const later = Date.parse(PAUSE.ends_at);
+  assert.equal(statusFor(joined(row('volaire', { active_pause: PAUSE })), later).key, 'ok');
+  assert.equal(statusFor(joined(row('volaire', { active_pause: null })), NOW).key, 'ok');
+});
+
+test('sortRows: a paused property sorts after the waiting ones and before Starts', () => {
+  const rows = joinOps([
+    row('volaire', { go_live_date: '2027-01-01' }),
+    row('v2', { name: 'A paused one', active_pause: PAUSE }),
+    row('fm2', { pending_registration_count: 2, oldest_pending_registration_at: ago(30 * HOUR) }),
+  ], OPS);
+  assert.deepEqual(sortRows(rows, NOW).map(r => r.id), ['fm2', 'v2', 'volaire']);
+});
+
+test('a paused property does not need attention (blue is not red or amber)', () => {
+  const rows = joinOps([row('volaire', { active_pause: PAUSE })], OPS);
+  assert.equal(filterChips(rows, NOW).find(c => c.id === 'attention').count, 0);
+});
+
+test('pauseOffer: Pause enforcement at an apartment; a line instead at a classic office page; nothing at a truck plaza', () => {
+  const STEVENSONS = 'af974dbe-5836-4a10-9dc8-d5f12e5cb9cc';   // CLASSIC_OFFICE_PROPERTY_IDS: no pause banner on its office page
+  assert.equal(pauseOffer({ id: 'p1', property_type: 'apartment' }), 'pause');
+  assert.equal(pauseOffer({ id: STEVENSONS, property_type: 'apartment' }), 'classic');
+  assert.equal(pauseOffer({ id: STEVENSONS.toUpperCase(), property_type: 'apartment' }), 'classic');
+  assert.equal(pauseOffer({ id: 'p2', property_type: 'truck_plaza' }), null);
+  assert.equal(pauseOffer({ id: 'p3', property_type: 'apartment', _partial: true }), null);   // admin-ops alone: the type is not the backend's
+  assert.equal(CLASSIC_PAUSE_LINE, "Pausing is not available for this property's office page yet.");
 });

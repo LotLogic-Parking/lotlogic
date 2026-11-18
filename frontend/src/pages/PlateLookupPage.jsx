@@ -3,7 +3,7 @@ import { db } from '../lib/db.js';
 import { apiFetch } from '../lib/api.js';
 import { scopePropsToPartner } from '../shared/scope.js';
 import { PlateTimeline } from './lot/PlateTimeline.jsx';
-import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine } from '../lib/verdicts.js';
+import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine, lookupSuggestions } from '../lib/verdicts.js';
 import { isTruck } from '../lib/partnerTeam.js';
 
 const REMEMBERED_KEY = 'lotlogic_lookup_property';
@@ -54,7 +54,8 @@ function PlateLookupVerdict({ out, scope, propertyName, companyName, history, ty
       ? <div style={{ marginTop: 12, fontWeight: 600, fontSize: 14, lineHeight: 1.45 }}>Temp tag EXPIRED — eligible for the expired-tag (48-hr-warning) tow path.</div>
       : <div style={{ marginTop: 12, fontSize: 14, opacity: .85 }}>Temp tag{d.tag_expiration ? ' · expires ' + fmtTagDate(d.tag_expiration) : ''}</div>
   ) : null;
-  const suggestions = out.verdict === 'not_registered' && Array.isArray(out.suggestions) ? out.suggestions : [];
+  // Also under a pause whose answer underneath is not_registered (contract C sends them then too).
+  const suggestions = lookupSuggestions(out);
   // A Truck's check covers only their properties, and says so (spec §2.2).
   const scopeLine = scopeCountLine(out.scope);
 
@@ -80,6 +81,10 @@ function PlateLookupVerdict({ out, scope, propertyName, companyName, history, ty
           {pres.glyph && <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 8 }}>{pres.glyph}</div>}
           <div style={{ fontWeight: 800, fontSize: 32, letterSpacing: '-.01em' }}>{pres.signal}</div>
           {pres.reason && <div style={{ fontSize: 14, marginTop: 10, lineHeight: 1.45, opacity: .92 }}>{pres.reason}</div>}
+          {/* A paused property: what the answer will be once enforcement resumes, quietly (spec Part 3). */}
+          {pres.after && <div data-testid="lookup-after-pause" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.45, opacity: .8 }}>{pres.after}</div>}
+          {/* Already in motion before the pause (Gabe 2026-11-17): the normal card stands, and says why (contract C). */}
+          {pres.stands && <div data-testid="lookup-pause-stands" style={{ fontSize: 13, fontWeight: 700, marginTop: 6, lineHeight: 1.45 }}>{pres.stands}</div>}
           {out.verdict === 'on_file_elsewhere' && pres.propertyId && (
             <button onClick={() => onSwitchProperty && onSwitchProperty(pres.propertyId)}
               style={{ marginTop: 10, background: 'none', border: '1px solid currentColor', color: 'inherit', borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
@@ -226,7 +231,7 @@ export function PlateLookupPage({ user, plate: deepPlate = null, property: deepP
       if (scope === ALL_SCOPE) {
         const out = await apiFetch(`/partner/lookup?plate=${encodeURIComponent(pl)}`);
         if (req !== lookupReqRef.current) return;
-        const resolved = resolveAllScopeResult(out, rememberedPropertyId);
+        const resolved = resolveAllScopeResult(out, rememberedPropertyId, properties?.find(p => p.id === rememberedPropertyId)?.name);
         const rendered = { verdict: resolved.verdict, detail: { ...resolved.detail, plate: pl }, scope: out?.scope };
         setResult(rendered);
         vibrateIfDoNotTow(rendered, 'all');

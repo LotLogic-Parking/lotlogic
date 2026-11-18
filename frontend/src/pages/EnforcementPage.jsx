@@ -5,10 +5,11 @@ import {
   placeLine, portal, stateLabel, uploadBootFile,
 } from '../lib/enforcement.js';
 import {
-  attestation, bootActions, bootCounts, bootNotices, commandOutcome, editPlacement, freeBoots, hasFault, lockBody,
+  attestation, bootActions, bootCounts, bootNotices, bootPauseNotice, commandOutcome, editPlacement, freeBoots, hasFault, lockBody,
   lowBattery, newPlacement, normPlate, outcomeMessage, pendingCommand, POLL_MS, signPlacement, STEP_NAMES, stepMissing,
 } from '../agent/logic.js';
 import { fmtETStamp } from '../lib/holdTime.js';
+import { PauseIcon } from './office/PauseBanners.jsx';
 
 // ── Enforcement ──────────────────────────────────────────────
 // The Smart Boot fleet. LotLogic's two admins see every boot, the agents and
@@ -102,7 +103,7 @@ function SignaturePad({ value, onSign, hint }) {
 }
 
 // ── place a boot: 4 steps ─────────────────────────────────────
-function PlaceFlow({ boots, properties, startBootId, me, onExit, onChanged }) {
+function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, onExit, onChanged }) {
   const [f, setF] = React.useState(() => ({ ...newPlacement(startBootId || ''), signed_name: me?.name || '' }));
   const [phase, setPhase] = React.useState('form'); // form | locking | done | failed
   const [detail, setDetail] = React.useState(null);  // GET /boot of the boot picked in step 3
@@ -115,9 +116,11 @@ function PlaceFlow({ boots, properties, startBootId, me, onExit, onChanged }) {
 
   const picked = f.boot_id ? (detail?.boot?.id === f.boot_id ? detail.boot : boots.find(b => b.id === f.boot_id)) : null;
   const pending = detail?.boot?.id === f.boot_id ? pendingCommand(detail) : null;
-  const ctx = { properties, boot: picked, pending, opening: pending?.purpose === 'fit' };
+  const ctx = { properties, pausesUnknown, boot: picked, pending, opening: pending?.purpose === 'fit' };
   const label = boots.find(b => b.id === f.boot_id)?.label || picked?.label || '';
   const prop = properties.find(p => p.id === f.property_id);
+  // Enforcement paused at the picked property: said before the photo and the signature, on every step.
+  const pauseNote = bootPauseNotice(prop, pausesUnknown);
   const missing = stepMissing(f, f.step, ctx);
   const set = (key) => (e) => setF(prev => editPlacement(prev, key, e.target.value));
 
@@ -227,6 +230,13 @@ function PlaceFlow({ boots, properties, startBootId, me, onExit, onChanged }) {
   return (
     <div className="enf-place enf-form" data-testid={`place-step-${f.step}`}>
       {head}
+      {pauseNote?.kind === 'paused' && (
+        <div className="ot-pause is-active is-compact" role="status" data-testid="place-pause">
+          <PauseIcon size={18} />
+          <p className="ot-pause-text"><span className="ot-pause-title">{pauseNote.text}</span></p>
+        </div>
+      )}
+      {pauseNote?.kind === 'unknown' && <p className="enf-muted" role="status" data-testid="place-pause">{pauseNote.text}</p>}
       {f.step === 1 && (properties.length
         ? (
           <label className="pq-field"><span className="pq-label">Property</span>
@@ -754,6 +764,7 @@ export default function EnforcementPage({ agent = false }) {
   const [me, setMe] = React.useState(null);
   const [properties, setProperties] = React.useState(null);
   const [propsErr, setPropsErr] = React.useState('');
+  const [pausesUnknown, setPausesUnknown] = React.useState(false); // boot-portal could not read the pauses
   const [err, setErr] = React.useState('');
   const [open, setOpen] = React.useState(null);
   const [placing, setPlacing] = React.useState(null); // the boot a placement started from
@@ -767,18 +778,24 @@ export default function EnforcementPage({ agent = false }) {
       setErr(x.message || 'Could not load the boots.');
     }
   }, []);
+  // The properties, each with its `paused_until`: on open and again whenever a
+  // placement starts, so a pause set since is said before the photo.
+  const loadProperties = React.useCallback(() => portal('properties')
+    .then(r => { setProperties(r.properties || []); setPausesUnknown(!!r.pauses_unknown); setPropsErr(''); })
+    .catch(x => { setProperties(prev => prev || []); setPropsErr(x.message || 'Could not load your properties.'); }), []);
   React.useEffect(() => {
     load();
-    portal('properties').then(r => { setProperties(r.properties || []); setPropsErr(''); })
-      .catch(x => { setProperties([]); setPropsErr(x.message || 'Could not load your properties.'); });
+    loadProperties();
     const id = setInterval(load, REFRESH_MS);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, loadProperties]);
+  const placingNow = placing !== null;
+  React.useEffect(() => { if (placingNow) loadProperties(); }, [placingNow, loadProperties]);
 
   if (placing !== null) {
     return (
       <section className="ls ls--blue enf" aria-label="Enforcement" data-testid="enforcement-page">
-        <PlaceFlow boots={boots || []} properties={properties || []} startBootId={placing} me={me}
+        <PlaceFlow boots={boots || []} properties={properties || []} pausesUnknown={pausesUnknown} startBootId={placing} me={me}
           onChanged={load} onExit={(bootId) => { setPlacing(null); setOpen(bootId); load(); window.scrollTo(0, 0); }} />
       </section>
     );

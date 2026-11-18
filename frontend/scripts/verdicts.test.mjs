@@ -3,7 +3,8 @@
 // can't silently shift another's signal word or tone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine } from '../src/lib/verdicts.js';
+import { verdictPresentation, resolveAllScopeResult, scopeOptions, scopeCountLine, lookupSuggestions } from '../src/lib/verdicts.js';
+import { fmtPauseTime } from '../src/lib/pause.js';
 
 const BANNED = /\b(resident|visitor|permanent|temporary|guest|driver)s?\b/i;
 
@@ -263,6 +264,29 @@ test('resolveAllScopeResult: a pending match at a DIFFERENT property is on_file_
   assert.equal(verdictPresentation(r.verdict, r.detail, 'all').tone, 'amber');
 });
 
+test('resolveAllScopeResult: a camera tow notice sent before a pause at ANOTHER property is not "on file" there (no pass or hold)', () => {
+  // Contract C: a paused property where a flag was sent before the pause is kept as a not_registered match
+  // with flagged_before_pause, though the plate has no parking pass or hold there. The remembered lot is
+  // not among the matches, so the plate is on file at neither: never "Pass or hold is for <there>".
+  const r = resolveAllScopeResult({
+    verdict: 'not_registered',
+    matches: [{ property_id: 'p2', property_name: 'The Volaire', verdict: 'not_registered',
+      detail: { plate: 'ABC1234', flagged_before_pause: true, camera_flag: { kind: 'tow', sent_local: 'Thu Oct 8, 9:00 AM ET' } } }],
+  }, 'p1', 'Mayfield');
+  assert.notEqual(r.verdict, 'on_file_elsewhere');
+  const p = verdictPresentation(r.verdict, r.detail, 'all');
+  assert.doesNotMatch(JSON.stringify(p), /Pass or hold is for/);
+  assert.deepEqual(p.lines, [
+    'At The Volaire: no parking pass or hold · tow notice sent before the pause',
+    'At Mayfield: no parking pass or hold',
+  ]);
+  // At the remembered lot itself: its own ELIGIBLE TO TOW card and the stands line.
+  const own = resolveAllScopeResult({ verdict: 'not_registered', matches: [{ property_id: 'p2', property_name: 'The Volaire', verdict: 'not_registered',
+    detail: { flagged_before_pause: true, camera_flag: { kind: 'tow' } } }] }, 'p2');
+  assert.equal(own.verdict, 'not_registered');
+  assert.equal(verdictPresentation(own.verdict, own.detail, 'all').stands, 'Tow notice sent before the pause — still stands');
+});
+
 test('resolveAllScopeResult: no remembered property -> no on_file_elsewhere override, backend result stands', () => {
   const r = resolveAllScopeResult({
     verdict: 'hold',
@@ -339,4 +363,137 @@ test('scopeCountLine: no line without a count', () => {
   for (const bad of [undefined, null, {}, { property_count: null }, { property_count: '3' }, { property_count: 2.5 }, { property_count: -1 }]) {
     assert.equal(scopeCountLine(bad), null, JSON.stringify(bad));
   }
+});
+
+// ── Part 3: enforcement paused at the property ───────────────
+const PAUSED_DETAIL = {
+  pause_id: 'p1', property_name: 'The Volaire', starts_at: '2026-11-20T23:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00',
+  ends_local: 'Sat Nov 21, 6:00 PM ET', reason: 'Pool party',
+  underlying: { verdict: 'not_registered', detail: { plate: 'ABC1234' } },
+};
+
+const UNTIL = fmtPauseTime(PAUSED_DETAIL.ends_at);
+
+test('paused -> DO NOT TOW — PAUSED, the go tone (so the phone buzzes), who paused it and until when', () => {
+  const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
+  assert.equal(p.signal, 'DO NOT TOW — PAUSED');
+  assert.equal(p.tone, 'go');
+  assert.ok(p.glyph);
+  // The end in the words every pause surface uses (the banner, the Requests line: fmtPauseTime, so
+  // "Sat 6:00 PM" within the week and "Sat Nov 21, 6:00 PM" further out), never " ET" on one screen only.
+  assert.equal(p.reason, `Enforcement paused by The Volaire until ${UNTIL} · Pool party`);
+  assert.doesNotMatch(p.reason, / ET\b/);
+  assert.equal(verdictPresentation('paused', { ...PAUSED_DETAIL, reason: null }, 'property').reason,
+    `Enforcement paused by The Volaire until ${UNTIL}`);
+  // No ISO end: the server's own words, without " ET".
+  assert.equal(verdictPresentation('paused', { ...PAUSED_DETAIL, ends_at: undefined, reason: null }, 'property').reason,
+    'Enforcement paused by The Volaire until Sat Nov 21, 6:00 PM');
+});
+
+test('paused: what the answer would be after the pause is a quiet second line', () => {
+  assert.equal(verdictPresentation('paused', PAUSED_DETAIL, 'property').after, 'After the pause: no parking pass here');
+  const pass = { ...PAUSED_DETAIL, underlying: { verdict: 'resident', detail: {} } };
+  assert.equal(verdictPresentation('paused', pass, 'property').after, 'After the pause: parking pass');
+  const none = { ...PAUSED_DETAIL, underlying: null };
+  assert.equal(verdictPresentation('paused', none, 'property').after, undefined);
+});
+
+test('tow_requested during a pause says the office asked for it during the pause', () => {
+  const p = verdictPresentation('tow_requested', { property_name: 'The Volaire', ref: 'T-2052', during_pause: true }, 'property');
+  assert.equal(p.signal, 'TOW REQUESTED');
+  assert.match(p.reason, /^Requested by the office during the pause/);
+  assert.match(p.reason, /T-2052/);
+  assert.equal(p.stands, undefined);
+});
+
+// Gabe 2026-11-17: a pause holds only NEW enforcement. What was already in motion before it
+// reads its normal answer at the curb, with one short line, never DO NOT TOW — PAUSED.
+const PAUSE_NOTE = { pause_id: 'p1', property_name: 'The Volaire', starts_at: '2026-11-20T23:00:00+00:00', ends_at: '2026-11-21T23:00:00+00:00', ends_local: 'Sat Nov 21, 6:00 PM ET', reason: 'Pool party' };
+
+test('tow_requested placed before a pause: the normal tow card, plus "Placed before the pause — still stands"', () => {
+  const p = verdictPresentation('tow_requested', { property_name: 'The Volaire', ref: 'T-2052', placed_before_pause: true, pause: PAUSE_NOTE }, 'property');
+  assert.equal(p.signal, 'TOW REQUESTED');
+  assert.equal(p.tone, 'stop');
+  assert.match(p.reason, /^Requested by The Volaire office/);
+  assert.equal(p.stands, 'Placed before the pause — still stands');
+  assert.doesNotMatch(JSON.stringify(p), /wait until|PAUSED/i);
+});
+
+test('a camera flag whose tow notice (or boot text) went out before the pause: the normal answer, plus a line', () => {
+  const flag = { violation_id: 'v1', kind: 'tow', sent_at: '2026-10-08T13:00:00+00:00', sent_local: 'Thu Oct 8, 9:00 AM ET' };
+  const nr = verdictPresentation('not_registered', { property_name: 'The Volaire', flagged_before_pause: true, camera_flag: flag, pause: PAUSE_NOTE }, 'property');
+  assert.equal(nr.signal, 'ELIGIBLE TO TOW');
+  assert.equal(nr.stands, 'Tow notice sent before the pause (Thu Oct 8, 9:00 AM) — still stands');
+  const boot = verdictPresentation('expired_guest', { property_name: 'The Volaire', hours_ago: 3, flagged_before_pause: true, camera_flag: { ...flag, kind: 'boot' }, pause: PAUSE_NOTE }, 'property');
+  assert.equal(boot.signal, 'ELIGIBLE TO TOW');
+  assert.equal(boot.stands, 'Boot text sent before the pause (Thu Oct 8, 9:00 AM) — still stands');
+  // No send time: still said, without one.
+  const bare = verdictPresentation('not_registered', { flagged_before_pause: true, camera_flag: { kind: 'tow' } }, 'property');
+  assert.equal(bare.stands, 'Tow notice sent before the pause — still stands');
+  // A tow request placed before the pause on a flagged plate: the request's line.
+  const both = verdictPresentation('tow_requested', { ref: 'T-1', placed_before_pause: true, flagged_before_pause: true, camera_flag: flag }, 'property');
+  assert.equal(both.stands, 'Placed before the pause — still stands');
+  // Nothing in motion: no line.
+  assert.equal(verdictPresentation('not_registered', {}, 'property').stands, undefined);
+});
+
+test('grouped: an answer that stands through a pause says so on its line', () => {
+  const p = verdictPresentation('grouped', { matches: [
+    { property_id: 'a', property_name: 'The Volaire', verdict: 'tow_requested', detail: { ref: 'T-1', placed_before_pause: true } },
+    { property_id: 'b', property_name: 'Mayfield', verdict: 'not_registered', detail: { flagged_before_pause: true, camera_flag: { kind: 'tow' } } },
+    { property_id: 'c', property_name: 'Fort Mill', verdict: 'tow_requested', detail: { ref: 'T-2', during_pause: true } },
+  ] }, 'all');
+  assert.deepEqual(p.lines, [
+    'At The Volaire: TOW REQUESTED T-1 · placed before the pause',
+    'At Mayfield: no parking pass or hold · tow notice sent before the pause',
+    'At Fort Mill: TOW REQUESTED T-2 · requested during the pause',
+  ]);
+});
+
+test('grouped: a paused property\'s line says DO NOT TOW — PAUSED and until when', () => {
+  const p = verdictPresentation('grouped', { matches: [
+    { property_id: 'a', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL },
+    { property_id: 'b', property_name: 'Mayfield', verdict: 'not_registered', detail: {} },
+  ] }, 'all');
+  assert.equal(p.lines[0], `At The Volaire: DO NOT TOW — PAUSED until ${UNTIL}`);
+});
+
+test('resolveAllScopeResult: a pause at the remembered property (or with none remembered) is that lot\'s DO NOT TOW — PAUSED', () => {
+  const out = { verdict: 'paused', matches: [{ property_id: 'v', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL }] };
+  assert.deepEqual(resolveAllScopeResult(out, 'v', 'The Volaire'), { verdict: 'paused', detail: PAUSED_DETAIL });
+  assert.deepEqual(resolveAllScopeResult(out, ''), { verdict: 'paused', detail: PAUSED_DETAIL });
+});
+
+test('resolveAllScopeResult: a pause at ANOTHER property is never this lot\'s DO NOT TOW — the grouped card, with this lot\'s own line', () => {
+  // The Volaire is paused; the driver's lot is Mayfield; the plate is on file nowhere.
+  const out = { verdict: 'paused', matches: [{ property_id: 'v', property_name: 'The Volaire', verdict: 'paused', detail: PAUSED_DETAIL }] };
+  const r = resolveAllScopeResult(out, 'mayfield', 'Mayfield');
+  assert.equal(r.verdict, 'grouped');
+  assert.deepEqual(r.detail.matches.map(m => [m.property_id, m.verdict]), [['v', 'paused'], ['mayfield', 'not_registered']]);
+  const pres = verdictPresentation(r.verdict, r.detail, 'all');
+  assert.notEqual(pres.tone, 'go');                                          // no buzz, no green DO NOT TOW
+  assert.deepEqual(pres.lines, [`At The Volaire: DO NOT TOW — PAUSED until ${UNTIL}`, 'At Mayfield: no parking pass or hold']);
+  // Never "on file elsewhere" either: the pause line must stay in sight.
+  assert.notEqual(r.verdict, 'on_file_elsewhere');
+  // Two paused properties: one line each, not one property's card for both.
+  const two = { verdict: 'paused', matches: [out.matches[0], { property_id: 'f', property_name: 'Fort Mill', verdict: 'paused', detail: { ...PAUSED_DETAIL, property_name: 'Fort Mill' } }] };
+  assert.equal(resolveAllScopeResult(two, 'mayfield', 'Mayfield').verdict, 'grouped');
+  assert.equal(resolveAllScopeResult(two, 'mayfield', 'Mayfield').detail.matches.length, 3);
+  assert.equal(resolveAllScopeResult(two, 'v', 'The Volaire').detail.matches.length, 2);
+});
+
+test('paused copy uses no banned word', () => {
+  const p = verdictPresentation('paused', PAUSED_DETAIL, 'property');
+  for (const s of [p.signal, p.reason, p.after]) assert.doesNotMatch(s, BANNED);
+});
+
+test('lookupSuggestions: near-miss plates for not_registered, and for a pause whose answer underneath is not_registered', () => {
+  const near = [{ plate: 'ABC1235', source: 'guest', active_now: true }];
+  assert.deepEqual(lookupSuggestions({ verdict: 'not_registered', suggestions: near }), near);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'not_registered', detail: {} } }, suggestions: near }), near);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'resident', detail: {} } }, suggestions: near }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'resident', suggestions: near }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'paused', detail: { underlying: { verdict: 'not_registered' } } }), []);
+  assert.deepEqual(lookupSuggestions({ verdict: 'not_registered', suggestions: 'nope' }), []);
+  assert.deepEqual(lookupSuggestions(null), []);
 });

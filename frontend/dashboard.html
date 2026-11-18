@@ -3330,6 +3330,8 @@
       font-family: inherit; font-size: 13px; font-weight: 800; text-decoration: underline; cursor: pointer;
     }
     .ls-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+    /* Enforcement paused (Part 3): the DO NOT TOW line above the counts. */
+    .ls-pause { margin: 12px 0; }
     @media (min-width: 640px) { .ls-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
     .ls-tile {
       display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 2px; padding: 10px 12px;
@@ -3893,6 +3895,8 @@
     }
     @media (max-width: 640px) {
       .ot-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      /* "Pause enforcement" on one line in a half-width cell. */
+      .ot-action { padding-inline: 8px; }
       .ot-actions > :last-child:nth-child(odd) { grid-column: 1 / -1; }
     }
 
@@ -3929,6 +3933,109 @@
     .ot-check-hint { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text-secondary); }
     .ot-check-hint.is-error { color: var(--red); }
     .ot-check-act { margin-left: auto; }
+
+    /* ── Enforcement pause (Part 3) ───────────────────────────────────
+       The banner on Today (and, compact, on the tow company's Requests):
+       a running pause is the solid LotLogic blue with white words, the
+       loudest thing on the page because it changes what happens to every
+       car; a scheduled one is the quiet blue wash. One line each, the
+       button at its end. */
+    .ot-pauses { display: flex; flex-direction: column; gap: 8px; }
+    .ot-pause {
+      display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 12px 10px 16px;
+      border: 1px solid transparent; border-radius: 12px;
+    }
+    .ot-pause.is-active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .ot-pause.is-scheduled {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent-line); color: var(--text-primary);
+    }
+    .ot-pause-icon { flex: 0 0 auto; }
+    .ot-pause.is-scheduled .ot-pause-icon { color: var(--accent-text); }
+    .ot-pause-text { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+    .ot-pause-title { font-weight: 800; }
+    .ot-pause-reason { font-weight: 500; }
+    .ot-pause.is-active .ot-pause-reason { opacity: .9; }
+    .ot-pause.is-scheduled .ot-pause-reason { color: var(--text-secondary); }
+    .ot-pause-btn { flex: 0 0 auto; min-width: 104px; }
+    /* White on the blue: the one control on the banner, LotLogic blue ink. */
+    .ot-pause.is-active .ot-pause-btn { background: #FFFFFF; border-color: #FFFFFF; color: #1D4ED8; }
+    .ot-pause.is-active .ot-pause-btn:hover { background: #EFF6FF; border-color: #EFF6FF; }
+    .ot-pause.is-active .ot-pause-btn:focus-visible { outline: 2px solid #FFFFFF; outline-offset: 2px; }
+    .ot-pause.is-scheduled .ot-pause-btn { background: var(--bg-card); }
+    .ot-pause.is-compact { min-height: 48px; padding: 10px 14px; gap: 10px; }
+    .ot-pause.is-compact .ot-pause-text { font-size: 14px; }
+    @media (max-width: 640px) {
+      .ot-pause { flex-wrap: wrap; align-items: flex-start; padding: 14px 14px 14px 16px; }
+      .ot-pause-icon { margin-top: 1px; }
+      .ot-pause-text { flex-basis: calc(100% - 32px); }
+      .ot-pause-btn { flex: 1 1 100%; }
+      .ot-pause.is-compact { align-items: center; padding: 10px 14px; }
+      /* The reason on its own line under the time, without the dot. */
+      .ot-pause-sep { display: none; }
+      .ot-pause-reason { display: block; }
+    }
+
+    /* The Pause enforcement sheet (.ps-, src/pages/office/PauseSheet.jsx):
+       four choices as full-width rows, the reason, then the box that says
+       exactly what will happen. */
+    .ps-lead { color: var(--text-primary); }
+    /* The decision gets the room: "Pause enforcement" stays on one line at 390 px. */
+    .ps .pq-sheet-actions .pq-btn--primary, .pq-sheet-actions.ps-stop .pq-btn--primary { flex-grow: 2; }
+    .ps-when { display: grid; gap: 8px; min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
+    .ps-option {
+      display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 4px 12px;
+      min-height: 56px; padding: 10px 14px; box-sizing: border-box;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+      transition: border-color .15s, background-color .15s;
+    }
+    .ps-option:hover { border-color: var(--text-faint); }
+    .ps-option input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); color-scheme: dark; }
+    /* The native radio follows the theme: an unchecked one is a ring, never a white disc on the dark row. */
+    .theme-light .ps-option input { color-scheme: light; }
+    /* A quick window that runs into another pause: offered, but not choosable, and its hint says why. */
+    .ps-option.is-off { cursor: not-allowed; background: var(--bg-inset); }
+    .ps-option.is-off:hover { border-color: var(--border); }
+    .ps-option.is-off .ps-option-label { color: var(--text-secondary); }
+    .ps-option-label { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
+    .ps-option-hint { font-size: 13px; line-height: 1.3; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+    .ps-option.is-on {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border-color: var(--accent);
+    }
+    .ps-option.is-on .ps-option-hint { color: var(--text-primary); }
+    .ps-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 480px) {
+      .ps-option-hint { grid-column: 2; text-align: left; }
+    }
+    .ps-custom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 8px; }
+    @media (max-width: 480px) { .ps-custom { grid-template-columns: minmax(0, 1fr); } }
+    .ps-optional { font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+    .pq-hint.is-error { color: var(--red); font-weight: 700; }
+    .ps-summary {
+      padding: 14px 16px; border-radius: 12px;
+      background: var(--bg-inset); border: 1px dashed var(--border);
+    }
+    .ps-summary.is-ready {
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card);
+      border: 1px solid var(--accent-line);
+    }
+    .ps-summary-when { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .ps-summary-tag {
+      padding: 3px 8px; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+      font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; line-height: 1.3;
+    }
+    .ps-summary-time { font-size: 17px; font-weight: 800; line-height: 1.3; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .ps-summary-len { font-size: 13px; font-weight: 700; color: var(--accent-text); white-space: nowrap; }
+    .ps-summary-line { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--text-primary); }
+    .ps-summary-line:first-child { margin-top: 0; }
+    .ps-summary-quiet { font-size: 13px; color: var(--text-secondary); }
+    .ps-stop-what {
+      margin-bottom: 12px; padding: 12px 14px; border-radius: 10px;
+      background: linear-gradient(var(--accent-tint), var(--accent-tint)), var(--bg-card); border: 1px solid var(--accent-line);
+      font-size: 15px; font-weight: 800; line-height: 1.4; color: var(--text-primary);
+    }
+    .ps-stop-reason { font-weight: 500; color: var(--text-secondary); }
 
     /* ══════════════════════════════════════════════════════════════════
        Admin › Properties (ap-): the platform admin's portfolio table, side
@@ -4013,9 +4120,10 @@
     .ap-table th:first-child, .ap-table td:first-child { padding-left: 16px; }
     .ap-table th:last-child, .ap-table td:last-child { padding-right: 16px; }
     /* 88 px keeps every number heading to two lines ("Tows this / week"). */
-    .ap-col-partner { width: 132px; }
+    .ap-col-partner { width: 114px; }
     .ap-col-num { width: 88px; }
-    .ap-col-status { width: 176px; }
+    /* Room for "Paused until Wed 6:00 PM"; a longer pill ends in an ellipsis and keeps its title. */
+    .ap-col-status { width: 200px; }
     .ap-name { font-size: 14px; font-weight: 700; }
     .ap-partner { color: var(--text-secondary); }
     .ap-table th.ap-num, .ap-num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -4044,6 +4152,12 @@
        --amber, which is the blue slot); "Starts <date>" is .pq-tag--neutral;
        "All good" is not a pill: a green dot and the words. */
     .ap-tag-strong { font-weight: 800; }
+    /* Part 3: the property's pauses (the Today banners, compact) at the top of the side panel and the card. */
+    .ap-pauses .ot-pauses { margin-bottom: 12px; }
+    /* The panel is narrow: the reason on its own line under the time, without the dot. */
+    .ap-pauses .ot-pause-sep { display: none; }
+    .ap-pauses .ot-pause-reason { display: block; }
+    .ap-pauses > .ap-hint { margin: 0 0 12px; }
     /* A long need title ends in "…" inside its cell (the full title is the tag's title). */
     .ap-table td .pq-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .ap-ok { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); white-space: nowrap; }

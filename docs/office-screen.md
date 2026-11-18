@@ -46,6 +46,11 @@ At an apartment, the property's header shows its name, "Towing by" and its tow c
     (Registered, Visitor pass, Waiting for approval, On hold, Not registered),
     with "Request a tow" beside a Not registered answer.
   - "2 open requests · See all" when there are any.
+  - **Pause enforcement** (the fourth action, admins of the property only) and,
+    above the tiles, a banner for each pause: running, the solid blue "Enforcement
+    paused until Wed 6:00 PM · Pool party" with **End now**; scheduled, the blue wash
+    "Enforcement pause scheduled Fri Nov 20, 6:00 PM – Sun 11:59 PM" with **Cancel**. Managers
+    and viewers see the banner without its button. See "Enforcement pause" below.
 - **Vehicles** is the Passes screen (`src/pages/lot/PassesTab.jsx`): residents
   on the left, visitors on the right, each with an entry photo. Tapping a
   person opens the details panel (`PersonRow` in `src/pages/lot/LiveTab.jsx`).
@@ -107,6 +112,110 @@ Gabe, 2026-11-16: "make it cleaner, simpler, and with less clutter and more stra
 | 5 | While Today shows, the page is up to 1200 px wide at ≥ 1024 px (as Passes). | The header and its switch stay in the same place between Today and Vehicles. |
 | 6 | Room is left for Part 3: the pause banner becomes Today's first child and "Pause enforcement" the fourth action. | Part 3 (enforcement pause) is a separate change. |
 
+## Enforcement pause
+
+Spec Part 3; backend contract in lotlogic-backend `routers/enforcement_pauses.py`. Decided
+by Gabe: a pause is at most 72 hours, and when it ends enforcement resumes right away
+(no fresh grace). The pure half is `src/lib/pause.js`; the sheet is
+`src/pages/office/PauseSheet.jsx`.
+
+- **The sheet** (Today → Pause enforcement): first line "No new tows or boots at <property>
+  while it is paused. A pause can be at most 72 hours." Then **When**: *Tonight* (6 PM to
+  7 AM; after 6 PM or before 7 AM, now to 7 AM), *Next 24 hours* (from now), *This
+  weekend* (Fri 6 PM to Sun 11:59 PM; during the weekend from now; gone from Sunday
+  6 PM), *Pick a time* (a start and an end). All in Charlotte time, either side of a DST
+  change. Then an optional reason (120 characters), then one box with the window, its
+  length and "Enforcement resumes Sun Nov 22, 11:59 PM, right away. No grace period."
+  Nothing is sent until that box is filled; a rule it breaks (over 72 hours, an end
+  before the start, a start in the past or over 30 days out) is said beside the
+  buttons. When the property already has a pause, the first line adds "pauses need a
+  full day (24 hours) between them", a quick window within a day of it is not
+  choosable ("Too close to the pause on Fri Nov 20"), and a custom one says so before
+  Save. The server's own refusals come back in the same words (an overlap: "There is
+  already a pause then. You can pause again from Mon Nov 23, 11:59 PM."); after one,
+  the pauses are read again and Save stays off until the window changes. A retry whose
+  pause turns out to exist (the first answer was lost) closes onto its banner with
+  "That pause is already set." The box's tag says *Paused* for a window that starts now
+  and *Scheduled* for a later one. When something at the property is already in motion
+  (`open_before_pause_count` on the pauses read), the box adds "2 open tow requests and
+  tow notices from before will still go ahead." before Save. The banners do not change.
+- A start of "now" is sent as `starts_at: null`, so the server's clock decides it.
+- **End now** and **Cancel** ask once ("End the pause now?" / "Cancel this pause?")
+  with what happens next, then post `…/end` or `…/cancel`.
+- Whether a pause is running, scheduled or over is the server's `status`, never the
+  device clock; the page reads the pauses on open and every minute while visible, and a
+  pause that ended goes at the next read. A running pause says "until Wed 6:00 PM"
+  (the date when it is a week or more out); a scheduled one always says its start with
+  the date. Every pause time is said this way, without "ET", on every screen.
+- Custom times are typed as Charlotte time whatever the device's zone (every office is
+  in Eastern time today).
+- **Elsewhere:** the admin Properties table shows *Paused until Wed 6:00 PM* (blue, after
+  the red and waiting statuses, before *Starts*); the property's panel (and its card on
+  a phone) shows the same banners as Today, with **End now** and **Cancel**, and a
+  **Pause enforcement** button, so a platform admin sets, ends and cancels pauses there
+  (the pill steps aside in the panel head and the opened card, so the time is said
+  once). The tow company's Requests tab shows the pause at the top of that property's
+  list, even with no open request, and under each open tow request there that it
+  stands: "Requested by the office during the pause", or "Placed before the pause —
+  still stands" (what the curb check says). Lookup answers **DO NOT TOW — PAUSED**
+  ("Enforcement paused by <property> until <time> · <reason>", then "After the pause:
+  …") for everything not already in motion; an office tow request reads its normal
+  TOW REQUESTED card ("Requested by the office during the pause", or the usual card
+  plus "Placed before the pause — still stands"), and a camera flag whose tow notice
+  or boot text went out before the pause reads its normal ELIGIBLE TO TOW card plus
+  "Tow notice sent before the pause (<time>) — still stands". A company-wide check
+  from another lot never reads DO NOT TOW for that lot: it is the grouped card, the
+  paused property's line and the driver's own lot's line. The Lot status tab leads
+  with "DO NOT TOW — enforcement paused until …" (and says it in place of the empty
+  towable list); when something was in motion before the pause it reads "Enforcement
+  paused until … — requests placed before the pause still stand" and lists only those
+  cars, each with its note. When the only car listed is one the office asked to tow
+  during the pause (which the count leaves out, as it is new), it reads "Enforcement
+  paused until … — tow requests from the office still stand".
+- **What a pause holds (Gabe, 2026-11-17, binding).** A pause holds only *new*
+  enforcement. Anything already in motion before the pause's start still goes ahead
+  during it: an office tow request placed before the pause (one placed during it goes
+  ahead too), a camera flag whose tow notice went out before the pause, and a boot
+  dispatch already texted to a driver. At the curb those read their normal tow or boot
+  answer with a short note that they were placed or sent before the pause, never "DO
+  NOT TOW — paused", and no screen tells anyone to wait for the pause to end. Everything
+  not yet sent waits, and goes out once, the moment the pause ends.
+
+## Changes on 2026-11-17 (enforcement pause), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | Today gets the pause banner as its first child and **Pause enforcement** as the fourth action (the room item 6 above left). | Spec Part 3: the office can stop enforcement for an event, for at most 72 hours. |
+| 2 | Three quick windows plus a custom one, and the exact window in words before Save; the 72-hour limit is in the sheet's first sentence. | Gabe: "cleaner, simpler, less clutter, easy to interpret". Nobody should meet the limit as an error first. |
+| 3 | A running pause is solid blue with white words; a scheduled one is the blue wash. No amber. | A running pause changes what happens to every car, so it is the loudest thing on the page; blue is the one accent. |
+| 4 | End now and Cancel ask once before posting. | Ending a pause makes every car without a parking pass towable at once and tells the tow company. |
+| 5 | Only an admin of the property sees Pause, End now and Cancel on Today; platform admins have them in the Properties panel. | The backend allows only office admins and platform admins; a button that always fails is clutter, and a platform admin never sees Today. |
+| 6 | The admin table's status column is 200 px (was 176 px) and the tow partner column 114 px (was 132 px). | "Paused until Wed 6:00 PM" was cut off; the property names keep their room. |
+
+## Changes on 2026-11-17 (a pause holds only new enforcement), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | A tow request placed before a pause reads "Placed before the pause — still stands" on the tow company's Requests tab and under its normal TOW REQUESTED card in Lookup (was "Wait until the pause ends to tow"); one placed during it reads "Requested by the office during the pause". | Gabe's decision: what was in motion before the pause still goes ahead. |
+| 2 | A camera flag whose tow notice or boot text went out before the pause keeps its normal Lookup card, with "Tow notice (Boot text) sent before the pause (<time>) — still stands"; grouped lines gain "· placed before the pause" and the like. | The same decision, for what the cameras had already sent. |
+| 3 | The pause sheet's first line says "No new tows or boots", and the box says how many open tow requests and tow notices from before will still go ahead. | The office should know, before Save, that a pause does not call back what is already out. |
+| 4 | The Lot status tab's pause line and towable list follow `open_before_pause_count` and each car's `pause_note`. | During a pause the list holds only the cars already in motion; a blanket DO NOT TOW above them would contradict the list. |
+| 5 | Review: a car listed only for a tow request placed during the pause no longer sits under "DO NOT TOW — enforcement paused"; and a company-wide Lookup from another lot that finds only a tow notice sent before a pause elsewhere is the grouped card ("no parking pass or hold · tow notice sent before the pause" there, and the driver's own lot's line), not "On file at …: Pass or hold is for …". | The backend's `open_before_pause_count` leaves out requests placed during the pause, though they go ahead; and that plate has no parking pass or hold anywhere. |
+
+## Changes on 2026-11-17 (review of the pause screens), and why
+
+| # | Change | Why |
+|---|---|---|
+| 1 | A company-wide Lookup from another lot shows a pause elsewhere as a line on the grouped card, with the driver's own lot's line, never a single DO NOT TOW — PAUSED. | One property's pause made every unknown plate read DO NOT TOW at every other lot. |
+| 2 | Platform admins set, end and cancel pauses from the Properties panel. | The spec allows it, and Today (the only place with the buttons) never shows for a platform admin. |
+| 3 | Open tow requests at a paused property say whether they stand. | The pause line sat above a TOW card with Towed ✓ and no word on which instruction wins. |
+| 4 | The sheet knows the property's pauses: the gap rule up front, clashing windows not offered, a re-read and Save off after an overlap, a lost answer retried as the same Save. | A manager met the 24-hour rule only as a red error, and a retry after a lost answer read as someone else's pause. |
+| 5 | A custom start more than 5 minutes back says "That start has already passed" instead of quietly starting now; the picker steps by quarter hours. | The plan's rule; the step base moved with every tick. |
+| 6 | Pause times read the same everywhere (no "ET"), scheduled ones with their date, and "You can pause again **from** …". | Two formats for the one fact the pause is about; a weekday alone can be next week's; that time is itself allowed. |
+| 7 | Banners follow the server's status, not the device clock. | A phone hours fast hid a running pause. |
+| 8 | "Tonight" in the last half hour before 7 AM is this evening's. | It offered a pause of a few minutes. |
+| 9 | Native radios follow the theme. | In dark mode the unchecked ones were white discs. |
+
 ## Changes on 2026-11-17 (review of Today and the admin table), and why
 
 | # | Change | Why |
@@ -140,3 +249,7 @@ Requests, Registrations, Settings, Account.
 property with no camera, one with cameras, two properties, Stevenson's, a
 platform admin, a LotLogic agent); `tests/e2e/office-today.spec.ts` uses it and
 saves light and dark screenshots to `tests/test-results/dash-screens/`.
+`world.pauses` and the pause routes in the same fixture follow the backend contract;
+`tests/e2e/office-pause.spec.ts` covers the sheet, the banners, the admin pill, the tow
+company's Requests and Lookup, and saves its screenshots to
+`tests/test-results/pause-screens/`.

@@ -9,6 +9,7 @@ import {
   fetchRequestPhoto,
   fulfillRequest,
   getRequest,
+  listAllPauses,
   listPartnerProperties,
   listRequests,
   rejectPartnerProperty,
@@ -25,6 +26,8 @@ import {
   groupAndSort,
   pendingPropertiesFrom,
 } from '../lib/partnerRequests.js';
+import { withPauses } from '../lib/pause.js';
+import { NoBreakTimes } from '../ui/NoBreakTimes.jsx';
 import { PartnerRequestRow } from './partner/PartnerRequestRow.jsx';
 import { PendingPropertyCard } from './partner/PendingPropertyCard.jsx';
 
@@ -84,6 +87,10 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
   const [items, setItems] = useState([]);
   const [recent, setRecent] = useState([]);
   const [pending, setPending] = useState([]);
+  // Enforcement pauses at the company's properties (spec 2026-11-16 Part 3):
+  // a line at the top of that property's list. null until read, or when the
+  // backend has no pause route yet.
+  const [pauses, setPauses] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [chip, setChip] = useState('all');
@@ -105,14 +112,17 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
   const load = useCallback(async ({ quiet } = {}) => {
     if (!quiet) setLoading(true);
     try {
-      const [active, pendingProps] = await Promise.all([
+      const [active, pendingProps, paused] = await Promise.all([
         listRequests({ view: 'active', limit: ACTIVE_LIMIT }),
         // A backend without Task 15's router answers 404 — the tab still works
         // as a request list, it just cannot offer the confirm cards.
         listPartnerProperties({ verification_status: 'pending' }).catch(() => null),
+        // Same for the pause route: no answer, no pause lines.
+        listAllPauses().catch(() => null),
       ]);
       if (!mounted.current) return;
       setItems(Array.isArray(active?.items) ? active.items : []);
+      setPauses(Array.isArray(paused?.pauses) ? paused.pauses : null);
       setPending(pendingPropertiesFrom(pendingProps));
       setLoadError(null);
     } catch (err) {
@@ -123,6 +133,18 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Pauses start and end on their own: re-read them every minute while the
+  // tab is visible, so "scheduled" turns into "paused until" on time.
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      listAllPauses()
+        .then(out => { if (mounted.current) setPauses(Array.isArray(out?.pauses) ? out.pauses : null); })
+        .catch(() => { /* keep the last answer */ });
+    }, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   // Recent (7 days) is a second view, fetched only when the chip asks for it.
   useEffect(() => {
@@ -136,7 +158,7 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
 
   const chips = useMemo(() => chipsFor(items), [items]);
   const shown = chip === 'recent' ? recent : filterItems(items, chip);
-  const groups = useMemo(() => groupAndSort(shown, propertyNames), [shown, propertyNames]);
+  const groups = useMemo(() => withPauses(groupAndSort(shown, propertyNames), pauses, now), [shown, propertyNames, pauses, now]);
   const toDo = badgeCount({ ...countActionable(items), pendingProps: pending.length, pendingJoins });
   // The Recent chip is a second view, so it gets its own empty state — the
   // spec's "Nothing active." sentence is a claim about the active list.
@@ -294,9 +316,22 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
           }}>
             {group.propertyName}
             {!group.propertyVerified && <span> <span aria-hidden="true">⚠ </span>not yet confirmed</span>}
-            <span style={{ color: 'var(--text-muted)' }}> · {group.count}{chip === 'recent' ? '' : ' active'}</span>
+            {group.count > 0 && <span style={{ color: 'var(--text-muted)' }}> · {group.count}{chip === 'recent' ? '' : ' active'}</span>}
           </h3>
-          <ul style={{
+          {group.pauses.map(b => (
+            <div key={b.pauseId} className={`ot-pause is-${b.kind} is-compact`} role="status" data-testid={`partner-pause-${b.kind}`}
+              style={{ marginBottom: group.items.length ? 8 : 0 }}>
+              <svg className="ot-pause-icon" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                <rect x="5" y="4" width="3.5" height="12" rx="1.2" fill="currentColor" />
+                <rect x="11.5" y="4" width="3.5" height="12" rx="1.2" fill="currentColor" />
+              </svg>
+              <p className="ot-pause-text">
+                <span className="ot-pause-title"><NoBreakTimes text={b.title} /></span>
+                {b.reason && <><span className="ot-pause-sep"> · </span><span className="ot-pause-reason">{b.reason}</span></>}
+              </p>
+            </div>
+          ))}
+          {group.items.length > 0 && <ul style={{
             listStyle: 'none', margin: 0, padding: '0 12px',
             background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12,
           }}>
@@ -307,9 +342,10 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
                 now={now}
                 busy={busyId === item.id}
                 onAction={onRowAction}
+                pauseNote={group.notes?.[item.id] || ''}
               />
             ))}
-          </ul>
+          </ul>}
         </section>
       ))}
 
