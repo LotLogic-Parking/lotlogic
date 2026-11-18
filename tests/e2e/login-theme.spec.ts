@@ -37,11 +37,31 @@ test('login page renders inside the theme-light root and picks up the light back
   });
   expect(themeRootWrapsLogin).toBe(true);
 
-  // frontend/dashboard.html's `.theme-light .login-page` rule sets the
-  // background to `#f8f9fb` (solid, under the amber radial highlight) —
-  // the un-themed default rule instead resolves `var(--bg-primary)` to the
-  // dark root token (#0E0F11). Asserting the resolved color, not just the
-  // ancestor class, catches the CSS rule itself drifting from the token.
-  const bg = await loginPage.evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(bg).toBe('rgb(248, 249, 251)');
+  // frontend/dashboard.html's `.theme-light .login-page` rule paints
+  // `var(--bg-primary)` (solid, under a radial highlight) as resolved inside
+  // `.theme-light` — the light page token — whereas the un-themed default
+  // resolves the same var to the dark :root token. Assert the resolved
+  // colour against the tokens rather than a literal, so a retheme (#271 moved
+  // the light page from #F8F9FB to #F5F7FB) does not break the check while a
+  // CSS rule drifting off the token, or the login page falling back to the
+  // dark default, still does.
+  const { bg, lightPage, darkPage } = await loginPage.evaluate((el) => {
+    const resolve = (host: Element) => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--bg-primary)';
+      host.appendChild(probe);
+      const c = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return c;
+    };
+    return {
+      bg: getComputedStyle(el).backgroundColor,
+      // The themed root's --bg-primary, and the :root (un-themed) one.
+      lightPage: resolve(el.closest('.app.theme-light')!),
+      darkPage: resolve(document.documentElement),
+    };
+  });
+  expect(lightPage, '--bg-primary must resolve to an opaque colour').not.toBe('rgba(0, 0, 0, 0)');
+  expect(lightPage, 'the light theme must override the dark --bg-primary').not.toBe(darkPage);
+  expect(bg, 'the login page sits on the light theme\'s --bg-primary').toBe(lightPage);
 });

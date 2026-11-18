@@ -261,8 +261,8 @@ export function PartnerRequestsPage({ pendingJoins = 0, propertyNames, onBadgeCh
               borderRadius: 999, padding: '7px 13px', fontSize: 12, fontWeight: 700,
               minHeight: 36, cursor: 'pointer', fontFamily: 'inherit',
               background: chip === c.id ? 'var(--accent)' : 'var(--bg-inset)',
-              // --text-muted on --bg-inset is 4.47:1 in .theme-light; the
-              // chips are a control, so they take the secondary ink.
+              // The chips are a control, so they take the secondary ink
+              // (--text-muted on --bg-inset is 5.17:1 in .theme-light).
               color: chip === c.id ? 'var(--accent-ink)' : 'var(--text-secondary)',
               border: `1px solid ${chip === c.id ? 'var(--accent)' : 'var(--border)'}`,
             }}

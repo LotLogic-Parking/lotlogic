@@ -178,10 +178,14 @@
       --border-subtle: #EDF2F7;
       --text-primary: var(--ll-ink);
       --text-secondary: var(--ll-ink-2);
-      /* --text-muted carries small running text (metas, hints), so it is
-         #64748B (4.8:1 on white) rather than the palette's #94A3B8 (2.6:1),
-         which lands on --text-faint (labels, placeholders and icons only). */
-      --text-muted: #64748B;
+      /* --text-muted carries small running text (metas, hints) on every light
+         surface, so it is #59687E: 5.67:1 on white (--bg-card), 5.28:1 on the
+         page (--bg-primary), 5.17:1 on --bg-inset, 4.92:1 on --accent-tint
+         over white and 4.61:1 on --accent-tint over the page. The #64748B it
+         replaces was 4.76:1 on white but 4.44:1 on the page, under the 4.5:1
+         minimum. The palette's #94A3B8 (2.6:1) lands on --text-faint (labels,
+         placeholders and icons only). */
+      --text-muted: #59687E;
       --text-faint: var(--ll-ink-muted);
       --text-ghost: #CBD5E1;
       --text-dim: #E2E8F0;
@@ -1162,7 +1166,8 @@
       flex-shrink: 0;
     }
     .pd-share-btn:hover { color: var(--text-primary); border-color: var(--text-faint); }
-    /* --text-muted on --bg-inset is 4.48:1 in the light theme — just under. */
+    /* Written when --text-muted was under 4.5:1 on --bg-inset in the light
+       theme (it is 5.17:1 now); the button keeps the secondary ink. */
     .theme-light .pd-share-btn { color: var(--text-secondary); }
     .pd-section-head {
       display: flex; justify-content: space-between; align-items: center;
@@ -2842,7 +2847,8 @@
 
        Contrast: the selected chip and the buttons are an --accent fill with
        --on-accent ink: white on #2563EB, 5.2:1 in BOTH themes. `.signup-box
-       .field-label` is `var(--text-muted)` (6.8:1 dark / 4.8:1 light). */
+       .field-label` is `var(--text-muted)` (6.8:1 dark; light: 5.3:1 on the
+       page, 4.6:1 under the strongest part of the `.login-page` blue wash). */
     .signup-box { max-width: 420px; }
     .signup-box .field-label { color: var(--text-muted); }
     .signup-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -2956,9 +2962,9 @@
        replaces the list. Nothing under 12 px; controls 44 px, decision
        buttons 48 px. Every tag carries a word (tone is the second cue).
        Light-theme inks: --green-text, --info-ink, --accent-text and the
-       literal red inks below, each 4.5:1+ on its own tint. --text-muted is 4.48:1
-       on --bg-inset in .theme-light, so text on inset surfaces uses
-       --text-secondary. */
+       literal red inks below, each 4.5:1+ on its own tint. Text on inset
+       surfaces uses --text-secondary: --text-muted was under 4.5:1 on
+       --bg-inset in .theme-light when this was built (it is 5.17:1 now). */
     .pq {
       --pq-top: calc(58px + env(safe-area-inset-top));
       --pq-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));

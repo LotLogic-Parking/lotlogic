@@ -11,13 +11,14 @@
  * `resendVerification`, both routed here.
  *
  * `scan(page, 'verify-sheet')` mirrors tests/a11y/axe.spec.ts's helper
- * (same blocking-impact set, no waivers) — kept local to this file because
- * that one isn't exported.
+ * (same blocking-impact set, no waivers, the same `settle()` first) — kept
+ * local to this file because that one isn't exported.
  */
 import path from 'node:path';
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { buildAndServeFrontend } from '../fixtures/buildAndServeFrontend';
+import { settle } from '../fixtures/settle';
 
 const FRONTEND_DIR = path.resolve(__dirname, '../../frontend');
 let server: Awaited<ReturnType<typeof buildAndServeFrontend>>;
@@ -27,6 +28,9 @@ test.afterAll(async () => { await server.close(); });
 const BLOCKING = new Set(['serious', 'critical']);
 
 async function scan(page: Page, label: string) {
+  // The sheet fades and slides in; scanning mid-animation measured a blended
+  // background (#5b6271) and failed contrast at random on mobile-safari.
+  await settle(page);
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .include('#verify-harness')
