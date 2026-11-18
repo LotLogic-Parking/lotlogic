@@ -1241,8 +1241,13 @@ export function watchConsole(page: Page, world: World): void {
  * A spec that provokes a refusal on purpose (a 409, a 403) names it in `allow`: Chrome logs every
  * 4xx answer as a console error, `Failed to load resource: ... 409 (Conflict) [<url>]`.
  */
+// Google Fonts is the one thing a world lets through to the internet (as passesWorld does). A CI
+// runner that cannot reach it logs "Failed to load resource" for the stylesheet; the page falls
+// back to system fonts and works, so that line is not a problem of the page.
+const FONT_LOAD_FAILURE = /Failed to load resource.*fonts\.(googleapis|gstatic)\.com/;
+
 export function problems(world: World, allow: Array<RegExp | string> = []): { unhandled: string[]; consoleErrors: string[] } {
-  const allowed = (line: string) => allow.some((a) => (typeof a === 'string' ? line.includes(a) : a.test(line)));
+  const allowed = (line: string) => FONT_LOAD_FAILURE.test(line) || allow.some((a) => (typeof a === 'string' ? line.includes(a) : a.test(line)));
   return { unhandled: [...world.unhandled], consoleErrors: world.consoleErrors.filter((line) => !allowed(line)) };
 }
 

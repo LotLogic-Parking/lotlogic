@@ -296,7 +296,9 @@ test.describe('native shell bridge @desktop-only', () => {
     await expect(header(page)).toHaveAttribute('class', 'header');
     expect(await header(page).getAttribute('style')).toBeNull();
     await expect(header(page).locator('.header-wordmark')).toHaveText('LotLogic');
-    await expect(header(page).locator('.header-name')).toHaveText(ACCOUNTS.owner.name);
+    // A one-property office shows its name on Today's header card, not in the top bar
+    // (App.jsx officeSingle, PR #307), so the top bar carries no name here.
+    await expect(header(page).locator('.header-name')).toHaveCount(0);
 
     await signOut(page);
     const ours = await page.evaluate(() => ((window as unknown as Record<string, any>).__windowPosts as unknown[])
