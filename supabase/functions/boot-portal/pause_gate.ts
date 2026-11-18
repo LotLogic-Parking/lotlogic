@@ -31,7 +31,16 @@
 // The last two mirror the backend's curb verdict under a pause
 // (lotlogic-backend services/plate_verdict.py decide_for_property:
 // placed_before_pause / during_pause / flagged_before_pause), so the boot app
-// and the plate check agree. Every other boot at a paused property is refused.
+// and the plate check agree. As there, they stand only on a car nothing else
+// protects (_TOW_OVERRIDES_PAUSE): a live hold (tow_requests kind 'hold'), a
+// live parking pass (an approved resident_plates row, one still pending
+// inside PENDING_PROTECTION_HOURS, or an active visitor_passes row before its
+// valid_until) keeps the plate check at DO NOT TOW, so the boot is refused
+// whatever request or flag is open (protectedAt). A visitor_passes row past its
+// valid_until does not protect. The boot text above is the older rule and is not narrowed by this:
+// the sweep stands its drivers down when a pass covers the car
+// (cron-sessions-sweep bootRegistrations). Every other boot at a paused
+// property is refused.
 //
 // A refusal comes after the agent has opened and fitted the boot, so it says
 // which cars can still be booted, that nothing was recorded, and that the boot
@@ -76,6 +85,22 @@ export type CameraFlag = {
   visit_ended?: boolean;
 };
 
+/** A parking pass on file for a plate (lock_pause.ts reads both tables). */
+export type ParkingPass = {
+  property_id: string; table: "resident_plates" | "visitor_passes";
+  plate_text: string | null; normalized_back_plate?: string | null;
+  status?: string | null;
+  /** resident_plates.active: a cancelled pending request clears it. */
+  active?: boolean | null;
+  /** When a resident_plates request was submitted (its pending protection runs from here). */
+  created_at?: string | null;
+  /** A visitor_passes row protects until then. */
+  valid_until?: string | null;
+};
+
+/** How long an unreviewed resident_plates request protects the car (backend routers.apartment_passes.PENDING_PROTECTION_HOURS). */
+export const PENDING_PROTECTION_HOURS = 72;
+
 /**
  * How long before a pause began a tow email or boot text may have gone out
  * and still stand through it (backend enforcement_pause.FLAG_STANDING_DAYS).
@@ -86,6 +111,8 @@ const finite = (n: unknown): n is number => typeof n === "number" && Number.isFi
 const norm = (s: unknown) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const pausedMessage = (name: string | null, p: ActivePause) =>
   `Enforcement is paused at ${name || "this property"} until ${endsLocal(p.ends_at)}. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then.`;
+/** Said when the car was asked for or sent out, but a hold or a parking pass now protects it. */
+const PROTECTED = "This car has a hold or a parking pass on file, so it cannot be booted during the pause.";
 const TAKE_IT_OFF = "Nothing was recorded. Take the boot off the wheel.";
 
 /** Still open, or the driver answered DONE (resolved as a boot) within BOOT_REPLY_HOURS. Stood down, GONE, stale or never sent: no. */
@@ -108,17 +135,48 @@ export function dispatchedBeforePause(plate: string | null | undefined, property
   });
 }
 
-/** The office has an open tow request (kind 'tow', active, not expired) on this plate, front or back, at this property: placed before the pause or during it. */
-export function officeRequested(plate: string | null | undefined, propertyId: string, requests: OfficeRequest[], now: Date = new Date()): boolean {
+/** An open office request of this kind (active, not expired) on this plate, front or back, at this property. */
+function liveRequest(kind: string, plate: string | null | undefined, propertyId: string, requests: OfficeRequest[], now: Date): boolean {
   const want = norm(plate);
   if (!want) return false;
   return requests.some((r) => {
-    if (r.property_id !== propertyId || r.kind !== "tow" || r.status !== "active") return false;
+    if (r.property_id !== propertyId || r.kind !== kind || r.status !== "active") return false;
     if (norm(r.normalized_plate) !== want && norm(r.normalized_back_plate) !== want) return false;
     if (r.expires_at == null) return true;
     const exp = Date.parse(r.expires_at);
     return Number.isFinite(exp) && exp > now.getTime();
   });
+}
+
+/** The office has an open tow request (kind 'tow', active, not expired) on this plate, front or back, at this property: placed before the pause or during it. */
+export function officeRequested(plate: string | null | undefined, propertyId: string, requests: OfficeRequest[], now: Date = new Date()): boolean {
+  return liveRequest("tow", plate, propertyId, requests, now);
+}
+
+/** A pass the backend's verdict ranks above expired_guest (an approved or still-pending request, or a live short-term pass). */
+function passProtects(p: ParkingPass, now: Date): boolean {
+  if (p.table === "resident_plates") {
+    if (p.status === "approved") return true;
+    if (p.status !== "pending" || p.active !== true) return false;
+    const at = Date.parse(p.created_at ?? "");
+    return Number.isFinite(at) && now.getTime() - at < PENDING_PROTECTION_HOURS * 3_600_000;
+  }
+  if (p.status !== "active") return false;
+  const until = Date.parse(p.valid_until ?? "");
+  return Number.isFinite(until) && until > now.getTime();
+}
+
+/**
+ * Something keeps this car at DO NOT TOW at this property whatever is in
+ * motion (backend decide_for_property: a verdict outside _TOW_OVERRIDES_PAUSE):
+ * a live office hold, or a live parking pass, on the plate front or back.
+ */
+export function protectedAt(plate: string | null | undefined, propertyId: string, requests: OfficeRequest[], passes: ParkingPass[], now: Date = new Date()): boolean {
+  if (liveRequest("hold", plate, propertyId, requests, now)) return true;
+  const want = norm(plate);
+  if (!want) return false;
+  return passes.some((p) => p.property_id === propertyId
+    && (norm(p.plate_text) === want || norm(p.normalized_back_plate) === want) && passProtects(p, now));
 }
 
 /** A camera flag on this plate at this property whose tow email or boot text went out before the pause began (within FLAG_STANDING_DAYS of it) and is still open. */
@@ -146,19 +204,31 @@ export function lockPauseRefusal(i: {
   standing?: StandingDispatch[];
   requests?: OfficeRequest[];
   flags?: CameraFlag[];
+  /** Live parking passes on the plate at the paused properties (resident_plates, visitor_passes). */
+  passes?: ParkingPass[];
+  /** The holds or passes could not be read: no request or flag may stand (it can only refuse, never allow). */
+  protectionsUnknown?: boolean;
   now?: Date;
 }): Refusal | null {
   if (i.active.size === 0) return null;
   const now = i.now ?? new Date();
+  const inMotion = (propertyId: string, p: ActivePause) =>
+    officeRequested(i.plate, propertyId, i.requests ?? [], now) || flaggedBeforePause(i.plate, propertyId, p, i.flags ?? []);
+  const isProtected = (propertyId: string) =>
+    !!i.protectionsUnknown || protectedAt(i.plate, propertyId, i.requests ?? [], i.passes ?? [], now);
   const stands = (propertyId: string, p: ActivePause) =>
     dispatchedBeforePause(i.plate, propertyId, p, i.standing ?? [], now)
-    || officeRequested(i.plate, propertyId, i.requests ?? [], now)
-    || flaggedBeforePause(i.plate, propertyId, p, i.flags ?? []);
+    || (inMotion(propertyId, p) && !isProtected(propertyId));
+  // A request or flag held back only by a hold or pass says so; otherwise the general message.
+  const refuse = (name: string | null, propertyId: string, p: ActivePause): Refusal => ({
+    code: "enforcement_paused",
+    message: `${pausedMessage(name, p)} ${inMotion(propertyId, p) && !i.protectionsUnknown ? `${PROTECTED} ` : ""}${TAKE_IT_OFF}`,
+  });
   const nameOf = (id: string) => i.myProperties.find((p) => p.id === id)?.name ?? i.points.find((p) => p.id === id)?.name ?? null;
   if (i.propertyId) {
     const p = i.active.get(i.propertyId);
     if (!p || stands(i.propertyId, p)) return null;
-    return { code: "enforcement_paused", message: `${pausedMessage(nameOf(i.propertyId), p)} ${TAKE_IT_OFF}` };
+    return refuse(nameOf(i.propertyId), i.propertyId, p);
   }
   const gps = finite(i.lat) && finite(i.lon) && !(i.lat === 0 && i.lon === 0);
   if (gps) {
@@ -166,7 +236,7 @@ export function lockPauseRefusal(i: {
     const m = matchProperty(i.lat, i.lon, i.points.filter((p) => i.active.has(p.id)));
     const p = m.at_property && m.property_id ? i.active.get(m.property_id) : undefined;
     if (!p || stands(m.property_id!, p)) return null;
-    return { code: "enforcement_paused", message: `${pausedMessage(m.property, p)} ${TAKE_IT_OFF}` };
+    return refuse(m.property, m.property_id!, p);
   }
   // No property and no location: if any of the agent's properties is paused,
   // the agent has to say where they are, unless the plate is in motion (above)

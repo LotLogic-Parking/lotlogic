@@ -202,6 +202,44 @@ Deno.test("lock wiring: with no pause, nothing changes: requests and flags are n
   await run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [] }), "plaza", "XYZ9876").p;
 });
 
+// ── A hold or a parking pass keeps DO NOT TOW (backend _TOW_OVERRIDES_PAUSE) ──
+
+const longTerm = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "abc-1234", normalized_back_plate: null, status: "approved", active: true, created_at: "2026-01-01T00:00:00.000Z", ...o });
+const shortTerm = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "ABC 1234", normalized_back_plate: null, status: "active", valid_until: "2026-11-21T05:00:00.000Z", ...o });
+
+Deno.test("lock wiring: an open tow request with a live hold on the same plate is refused", async () => {
+  const r = await refusal(at({ tow_requests: [towRequest({}), towRequest({ id: "tr2", kind: "hold" })] }));
+  assertEquals(r.code, "enforcement_paused");
+  assertEquals(r.message.includes("This car has a hold or a parking pass on file"), true);
+  // A hold that has expired does not protect.
+  await at({ tow_requests: [towRequest({}), towRequest({ id: "tr2", kind: "hold", expires_at: "2026-11-21T01:00:00.000Z" })] });
+});
+
+Deno.test("lock wiring: a tow email sent before the pause, then a parking pass registered, is refused", async () => {
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({})] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ alpr_violations: [towEmail({})], resident_plates: [longTerm({})] })), "enforcement_paused");
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ plate_text: "ZZZ0000", normalized_back_plate: "ABC1234" })] })), "enforcement_paused");
+  // A pending request inside its protection window protects too.
+  assertEquals(await codeOf(at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", created_at: "2026-11-20T12:00:00.000Z" })] })), "enforcement_paused");
+});
+
+Deno.test("lock wiring: a pass that no longer protects (ended, pending too long, withdrawn, another plate or property) leaves the request or flag standing", async () => {
+  await at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({ valid_until: "2026-11-21T01:00:00.000Z" })] });
+  await at({ alpr_violations: [towEmail({})], visitor_passes: [shortTerm({ status: "expired" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", created_at: "2026-11-17T12:00:00.000Z" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "pending", active: false, created_at: "2026-11-20T12:00:00.000Z" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ status: "rejected" })] });
+  await at({ tow_requests: [towRequest({})], resident_plates: [longTerm({ plate_text: "ABC12345" }), longTerm({ property_id: "plaza" })] });
+});
+
+Deno.test("lock wiring: a failed read of passes refuses a request or flag; a boot text sent before the pause still stands", async () => {
+  for (const t of ["resident_plates", "visitor_passes"]) {
+    assertEquals(await codeOf(at({ tow_requests: [towRequest({})], alpr_violations: [towEmail({})] }, "ABC1234", { failReads: [t] })), "enforcement_paused", t);
+  }
+  await at({ alpr_violations: [bootSms({})] }, "ABC1234", { failReads: ["resident_plates", "visitor_passes"] });
+  await at({ alpr_violations: [bootSms({})], resident_plates: [longTerm({})], tow_requests: [towRequest({ kind: "hold" })] });
+});
+
 // ── release, open, cancel: untouched by a pause ─────────────────────────────
 // index.ts runs Deno.serve when loaded, so it cannot be imported here. What
 // keeps release, open and cancel working during a pause is that nothing they

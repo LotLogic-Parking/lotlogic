@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { annotatePauses, dispatchedBeforePause, flaggedBeforePause, lockPauseRefusal, officeRequested, unknownPauseBlocks } from "./pause_gate.ts";
+import { annotatePauses, dispatchedBeforePause, flaggedBeforePause, lockPauseRefusal, officeRequested, protectedAt, unknownPauseBlocks, type ParkingPass } from "./pause_gate.ts";
 import type { ActivePause, PauseRead } from "../_shared/pause.ts";
 
 // Property points as stored in production on 2026-11-15 (payments.test.ts).
@@ -137,4 +137,55 @@ Deno.test("lock with no pause: requests and flags change nothing", () => {
   const req = { property_id: "mayfield", kind: "photo", status: "active", normalized_plate: "ABC1234" };
   const flag = { property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-21T00:00:00Z", status: "dismissed" };
   assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: new Map(), points: POINTS, plate: "ABC1234", requests: [req], flags: [flag] }), null);
+});
+
+Deno.test("lock during a pause: a live hold or parking pass keeps the car at DO NOT TOW, whatever request or flag is open (backend _TOW_OVERRIDES_PAUSE)", () => {
+  const now = new Date("2026-11-21T01:00:00Z");
+  const tow = { property_id: "mayfield", kind: "tow", status: "active", normalized_plate: "ABC1234", normalized_back_plate: null, created_at: "2026-11-20T21:00:00Z", expires_at: null };
+  const hold = { ...tow, kind: "hold" };
+  const flag = { property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-18T20:00:00Z", status: "dispatched", action_taken: null, action_channel: "email", left_before_tow_at: null, tow_confirmed_at: null };
+  const longTerm: ParkingPass = { property_id: "mayfield", table: "resident_plates", plate_text: "abc-1234", normalized_back_plate: null, status: "approved", active: true, created_at: "2026-01-01T00:00:00Z" };
+  const shortTerm: ParkingPass = { property_id: "mayfield", table: "visitor_passes", plate_text: "ABC 1234", normalized_back_plate: null, status: "active", valid_until: "2026-11-21T05:00:00Z" };
+  const base = { propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS, plate: "ABC1234", now };
+  const said = "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. This car has a hold or a parking pass on file, so it cannot be booted during the pause. Nothing was recorded. Take the boot off the wheel.";
+
+  // (1) An open tow request and a live hold on the same plate: the plate check says DO NOT TOW, so refused.
+  assertEquals(lockPauseRefusal({ ...base, requests: [tow, hold] }), { code: "enforcement_paused", message: said });
+  // (2) A tow email sent two days before the pause, then a parking pass registered: refused.
+  assertEquals(lockPauseRefusal({ ...base, flags: [flag], passes: [shortTerm] }), { code: "enforcement_paused", message: said });
+  assertEquals(lockPauseRefusal({ ...base, flags: [flag], passes: [longTerm] })?.code, "enforcement_paused");
+  assertEquals(lockPauseRefusal({ ...base, requests: [tow], passes: [longTerm] })?.code, "enforcement_paused");
+  // By GPS and with neither property nor GPS, too.
+  assertEquals(lockPauseRefusal({ ...base, propertyId: null, lat: 35.2831, lon: -80.8105, requests: [tow, hold] })?.message, said);
+  assertEquals(lockPauseRefusal({ ...base, propertyId: null, flags: [flag], passes: [shortTerm] })?.code, "enforcement_paused");
+
+  // What does not protect: a hold that is over or expired, a pass that ended, a pending request past its window
+  // or withdrawn, a rejected one, or one on another plate or at another property. The request or flag stands.
+  for (const req of [{ ...hold, status: "removed" }, { ...hold, expires_at: "2026-11-21T00:59:00Z" }, { ...hold, normalized_plate: "XYZ789" }, { ...hold, property_id: "1825" }]) {
+    assertEquals(lockPauseRefusal({ ...base, requests: [tow, req] }), null, JSON.stringify(req));
+  }
+  for (const pass of [
+    { ...shortTerm, valid_until: "2026-11-21T00:59:00Z" }, { ...shortTerm, status: "expired" }, { ...shortTerm, status: "cancelled" },
+    { ...longTerm, status: "pending", created_at: "2026-11-17T00:59:00Z" }, { ...longTerm, status: "pending", active: false, created_at: "2026-11-20T12:00:00Z" },
+    { ...longTerm, status: "rejected" }, { ...longTerm, plate_text: "XYZ789" }, { ...longTerm, property_id: "1825" },
+  ] as ParkingPass[]) {
+    assertEquals(lockPauseRefusal({ ...base, flags: [flag], passes: [pass] }), null, JSON.stringify(pass));
+  }
+  // A pending request inside its 72 hours protects; matched on the back plate too.
+  assertEquals(protectedAt("ABC1234", "mayfield", [], [{ ...longTerm, status: "pending", created_at: "2026-11-18T01:01:00Z" }], now), true);
+  assertEquals(protectedAt("ABC1234", "mayfield", [], [{ ...shortTerm, plate_text: "ZZZ0000", normalized_back_plate: "ABC1234" }], now), true);
+  assertEquals(protectedAt("ABC1234", "mayfield", [{ ...hold, normalized_plate: "ZZZ0000", normalized_back_plate: "ABC1234" }], [], now), true);
+  assertEquals(protectedAt("", "mayfield", [hold], [longTerm], now), false);
+
+  // The holds or passes could not be read: no request or flag stands, and the message stays general.
+  assertEquals(lockPauseRefusal({ ...base, requests: [tow], flags: [flag], protectionsUnknown: true })?.message,
+    "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. Nothing was recorded. Take the boot off the wheel.");
+  // A hold alone (no request, no flag): the general message.
+  assertEquals(lockPauseRefusal({ ...base, requests: [hold] })?.message.includes("hold or a parking pass"), false);
+
+  // The older rule is not narrowed: a boot text sent before the pause still stands.
+  const texted = [{ property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-20T22:55:00Z" }];
+  assertEquals(lockPauseRefusal({ ...base, standing: texted, requests: [hold], passes: [longTerm] }), null);
+  // With no pause, a hold or pass changes nothing.
+  assertEquals(lockPauseRefusal({ ...base, active: new Map(), requests: [tow, hold], passes: [longTerm] }), null);
 });
