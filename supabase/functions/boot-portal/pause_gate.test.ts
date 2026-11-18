@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { annotatePauses, dispatchedBeforePause, lockPauseRefusal, unknownPauseBlocks } from "./pause_gate.ts";
+import { annotatePauses, dispatchedBeforePause, flaggedBeforePause, lockPauseRefusal, officeRequested, unknownPauseBlocks } from "./pause_gate.ts";
 import type { ActivePause, PauseRead } from "../_shared/pause.ts";
 
 // Property points as stored in production on 2026-11-15 (payments.test.ts).
@@ -15,7 +15,7 @@ const active = (...ids: string[]) => new Map(ids.map((id) => [id, pause(id)]));
 
 Deno.test("lock at a paused property: 409 enforcement_paused with the property and the Eastern end time", () => {
   assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS }), {
-    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
+    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
 });
 
@@ -27,7 +27,7 @@ Deno.test("lock at an unpaused property: no refusal, even while another property
 Deno.test("lock with no property picked: GPS inside a paused property refuses, even one that is not the agent's", () => {
   // In Mayfield's lot; the agent here only has The Villas at 1825.
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: [MINE[0]], lat: 35.2831, lon: -80.8105, active: active("mayfield"), points: POINTS }), {
-    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Take the boot off the wheel.",
+    code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. Nothing was recorded. Take the boot off the wheel.",
   });
   // GPS clearly somewhere else: the boot goes ahead.
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: 34.9776, lon: -80.9979, active: active("mayfield"), points: POINTS }), null);
@@ -35,7 +35,7 @@ Deno.test("lock with no property picked: GPS inside a paused property refuses, e
 
 Deno.test("lock with no property and no GPS while one of the agent's properties is paused: pick the property first", () => {
   const r = lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS });
-  assertEquals(r, { code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car sent to you to boot before the pause can be booted until then. Nothing was recorded. Pick the property you are booting at." });
+  assertEquals(r, { code: "enforcement_paused", message: "Enforcement is paused at Mayfield Memorial Apartments until Sat 6:00 PM. Only a car the office asked to have towed, or one sent out to be towed or booted before the pause, can be booted until then. Nothing was recorded. Pick the property you are booting at." });
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: MINE, lat: 0, lon: 0, active: active("mayfield"), points: POINTS })?.code, "enforcement_paused");
   assertEquals(lockPauseRefusal({ propertyId: null, myProperties: [MINE[0]], lat: null, lon: null, active: active("mayfield"), points: POINTS }), null);
 });
@@ -91,4 +91,50 @@ Deno.test("lock during a pause: a dispatch answered DONE stands only while the r
   assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS, plate: "ABC1234", standing: [old], now })?.code, "enforcement_paused");
   // An open dispatch is not windowed here: the sweep dismisses a stale one (BOOT_STALE_HOURS), which then refuses.
   assertEquals(dispatchedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...sent, status: "dispatched", action_taken: null }], now), true);
+});
+
+Deno.test("lock during a pause: an open office tow request on the plate stands, placed before the pause or during it (Gabe 2026-11-18)", () => {
+  const now = new Date("2026-11-21T01:00:00Z");
+  const req = { property_id: "mayfield", kind: "tow", status: "active", normalized_plate: "ABC1234", normalized_back_plate: null, created_at: "2026-11-20T21:00:00Z", expires_at: null };
+  const base = { propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS, now };
+  assertEquals(lockPauseRefusal({ ...base, plate: "abc-1234", requests: [req] }), null);
+  assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", requests: [{ ...req, created_at: "2026-11-21T00:30:00Z" }] }), null);
+  // By GPS, and with neither property nor GPS (the plate says where).
+  assertEquals(lockPauseRefusal({ ...base, propertyId: null, lat: 35.2831, lon: -80.8105, plate: "ABC1234", requests: [req] }), null);
+  assertEquals(lockPauseRefusal({ ...base, propertyId: null, plate: "ABC1234", requests: [req] }), null);
+  // Back plate matches; expiry is read against now.
+  assertEquals(officeRequested("ABC1234", "mayfield", [{ ...req, normalized_plate: "ZZZ0000", normalized_back_plate: "ABC1234" }], now), true);
+  assertEquals(officeRequested("ABC1234", "mayfield", [{ ...req, expires_at: "2026-11-21T02:00:00Z" }], now), true);
+  assertEquals(officeRequested("ABC1234", "mayfield", [{ ...req, expires_at: "2026-11-21T00:59:00Z" }], now), false);
+  // Not open, photo-only, a hold, another plate, another property: refused.
+  for (const bad of [{ status: "removed" }, { status: "fulfilled" }, { kind: "photo" }, { kind: "hold" }, { normalized_plate: "XYZ789" }, { property_id: "1825" }]) {
+    assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", requests: [{ ...req, ...bad }] })?.code, "enforcement_paused", JSON.stringify(bad));
+  }
+  assertEquals(officeRequested("", "mayfield", [req], now), false);
+});
+
+Deno.test("lock during a pause: an open camera flag (tow email or boot text) sent before the pause stands; one sent after, closed or too old does not", () => {
+  // Pause starts Fri Nov 20, 6:00 PM ET (23:00 UTC).
+  const flag = { property_id: "mayfield", plate_text: "ABC 1234", dispatched_at: "2026-11-20T20:00:00Z", status: "dispatched", action_taken: null, action_channel: "email", left_before_tow_at: null, tow_confirmed_at: null };
+  const base = { propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: active("mayfield"), points: POINTS };
+  assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", flags: [flag] }), null);
+  assertEquals(lockPauseRefusal({ ...base, propertyId: null, plate: "ABC1234", flags: [flag] }), null);
+  assertEquals(flaggedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...flag, action_channel: "boot_sms" }]), true);
+  // Exactly 7 days before the start still stands; a minute more does not.
+  assertEquals(flaggedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...flag, dispatched_at: "2026-11-13T23:00:00Z" }]), true);
+  assertEquals(flaggedBeforePause("ABC1234", "mayfield", pause("mayfield"), [{ ...flag, dispatched_at: "2026-11-13T22:59:00Z" }]), false);
+  for (const bad of [
+    { dispatched_at: "2026-11-20T23:00:00Z" }, { dispatched_at: "2026-11-21T00:00:00Z" }, { dispatched_at: null },
+    { status: "dismissed", action_taken: "no_tow" }, { status: "resolved" }, { action_taken: "tow" },
+    { left_before_tow_at: "2026-11-20T21:00:00Z" }, { tow_confirmed_at: "2026-11-20T21:00:00Z" }, { visit_ended: true },
+    { plate_text: "XYZ789" }, { property_id: "1825" },
+  ]) {
+    assertEquals(lockPauseRefusal({ ...base, plate: "ABC1234", flags: [{ ...flag, ...bad }] })?.code, "enforcement_paused", JSON.stringify(bad));
+  }
+});
+
+Deno.test("lock with no pause: requests and flags change nothing", () => {
+  const req = { property_id: "mayfield", kind: "photo", status: "active", normalized_plate: "ABC1234" };
+  const flag = { property_id: "mayfield", plate_text: "ABC1234", dispatched_at: "2026-11-21T00:00:00Z", status: "dismissed" };
+  assertEquals(lockPauseRefusal({ propertyId: "mayfield", myProperties: MINE, lat: null, lon: null, active: new Map(), points: POINTS, plate: "ABC1234", requests: [req], flags: [flag] }), null);
 });
