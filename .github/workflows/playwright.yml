@@ -95,6 +95,15 @@ jobs:
         working-directory: tests
         run: npm run test:unit
 
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            [ -f "$f" ] && sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+          done
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+
       - name: Install browsers
         working-directory: tests
         run: npx playwright install --with-deps chromium webkit
@@ -219,6 +228,15 @@ jobs:
         # lockfile should FAIL, not silently fall back to a floating install.
         run: npm ci
 
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            [ -f "$f" ] && sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+          done
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+
       - name: Install browsers
         run: npx playwright install --with-deps chromium webkit
 
@@ -327,6 +345,15 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             tests/package-lock.json
+
+      - name: Use a fast Ubuntu mirror
+        # The runner's default archive mirror sometimes serves packages at a few KB/s,
+        # so `playwright install --with-deps` ran past the job timeout before any test.
+        run: |
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            [ -f "$f" ] && sudo sed -i -E 's#https?://[A-Za-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#http://azure.archive.ubuntu.com/ubuntu/#g' "$f"
+          done
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "20";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
 
       # Same PGDG snippet the backend's own CI uses: psql 17 for the fixture's
       # harness reads/writes and the PostgREST stand-in.
