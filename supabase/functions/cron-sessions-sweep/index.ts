@@ -62,6 +62,9 @@ const APARTMENT_GRACE_STALE_HOURS = Number(Deno.env.get("APARTMENT_GRACE_STALE_H
 const BOOT_DRIVER_PHONES = parsePhoneList(Deno.env.get("BOOT_DRIVER_PHONES"));
 const GRACE_DISPATCH_MINUTES = Number(Deno.env.get("GRACE_DISPATCH_MINUTES") ?? String(GRACE_DISPATCH_MINUTES_DEFAULT));
 const BOOT_STALE_HOURS = Number(Deno.env.get("BOOT_STALE_HOURS") ?? String(BOOT_STALE_HOURS_DEFAULT));
+// Violation alert at the dispatch minute, every apartment (Gabe, 2026-11-20): Gabe + Victor.
+const VIOLATION_ALERT_PHONES = parsePhoneList(Deno.env.get("VIOLATION_ALERT_PHONES"));
+const VIOLATION_ALERT_EMAILS = (Deno.env.get("VIOLATION_ALERT_EMAILS") ?? "").split(",").map(e => e.trim()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
 // Apartments: exit-camera reads that closed no visit get a second look
 // against every open visit at the property (exit_sweep.ts).
 const EXIT_SWEEP_LOOKBACK_MINUTES = Number(Deno.env.get("EXIT_SWEEP_LOOKBACK_MINUTES") ?? String(EXIT_SWEEP_LOOKBACK_MINUTES_DEFAULT));
@@ -70,9 +73,14 @@ const bootDeps = (): BootDeps => {
   const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
   const authToken = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
   const from = Deno.env.get("TWILIO_FROM_NUMBER") ?? "";
+  const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
+  const fromEmail = Deno.env.get("FROM_EMAIL") || "dispatch@lotlogicparking.com";
+  const fromName = Deno.env.get("FROM_NAME") || Deno.env.get("EMAIL_FROM_NAME") || "LotLogic";
   return {
     db, phones: BOOT_DRIVER_PHONES, dispatchMinutes: GRACE_DISPATCH_MINUTES, staleHours: BOOT_STALE_HOURS,
     twilio: accountSid && authToken && from ? { accountSid, authToken, from } : null,
+    alertPhones: VIOLATION_ALERT_PHONES, alertEmails: VIOLATION_ALERT_EMAILS,
+    email: resendKey ? { apiKey: resendKey, from: fromEmail.includes("<") ? fromEmail : `${fromName} <${fromEmail}>` } : null,
   };
 };
 

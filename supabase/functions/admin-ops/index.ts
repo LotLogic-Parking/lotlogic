@@ -83,7 +83,7 @@ async function overview(db: SupabaseClient) {
     db.from("resident_plates").select("property_id").eq("status", "approved"),
     db.from("visitor_passes").select("property_id, created_at").eq("status", "pending"),
     db.from("resident_plates").select("property_id, created_at").eq("status", "pending"),
-    db.from("alpr_violations").select("id, property_id, plate_text, dispatched_at").eq("action_channel", "boot_sms").eq("status", "dispatched").is("action_taken", null).gte("dispatched_at", iso(T.BOOT_TEXT_MAX_H * H)),
+    db.from("alpr_violations").select("id, property_id, plate_text, dispatched_at").eq("action_channel", "boot_sms").eq("status", "dispatched").not("sms_sent_at", "is", null).is("action_taken", null).gte("dispatched_at", iso(T.BOOT_TEXT_MAX_H * H)),
     db.from("tow_requests").select("id, property_id, kind, plate_text, created_at, partner_ack_at").eq("status", "active").in("kind", ["tow", "photo"]),
     db.from("boot_events").select("boot_id, server_ts, details").eq("action", "emergency_unlock").gte("server_ts", iso(T.EMERGENCY_H * H)),
   ]);
