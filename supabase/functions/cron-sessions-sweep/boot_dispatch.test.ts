@@ -256,8 +256,9 @@ Deno.test("bootDispatch after a pause: the text says the pause held it; a car th
   await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now: at, pauses: pausedAt(at, [PAUSE_P1]),
     send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
   assertEquals(sent.length, 2);
-  assertMatch(sent[0], /Plate HELD1\n.*\nHeld by an enforcement pause that ended at 4:00 PM\./);
-  assertEquals(/pause/.test(sent[1]), false);
+  // Newest first since 2026-11-20, so find each text by plate.
+  assertMatch(sent.find(t => /Plate HELD1/.test(t))!, /Plate HELD1\n.*\nHeld by an enforcement pause that ended at 4:00 PM\./);
+  assertEquals(/pause/.test(sent.find(t => /Plate NEW1/.test(t))!), false);
 });
 
 // ── a boot dispatch texted before the pause (Gabe, 2026-11-17) ─────────────
@@ -355,4 +356,36 @@ Deno.test("alert: a flagged car seen leaving is dismissed and Gabe + Victor get 
   assertEquals(texts.length, 1);
   assertMatch(texts[0].body, /^\[CANCELLED\] Mayfield Memorial Apartments\nPlate ABC1234 was seen leaving at/);
   assertEquals(mails.map(m => m.subject), ["Cancelled: ABC1234 at Mayfield Memorial Apartments (left)"]);
+});
+
+Deno.test("alert: an alert-only visit that sat in grace for hours is not alerted (no backlog burst)", async () => {
+  const now = new Date("2026-11-11T20:23:00Z");
+  const sessions = [
+    { id: "old", property_id: "p1", normalized_plate: "OLD1111", plate_text: "OLD1111", entered_at: "2026-11-11T15:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },
+    { id: "new", property_id: "p1", normalized_plate: "NEW2222", plate_text: "NEW2222", entered_at: "2026-11-11T20:17:00Z", entry_plate_event_id: "e2", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },
+  ];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [] as Row[] };
+  const texts: string[] = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: [], twilio: null, now, alertPhones: ["+17045550111"], alertEmails: [],
+    send: async (_to, body) => { texts.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(out.dispatched, 1);
+  assertEquals([sessions[0].state, sessions[1].state], ["grace", "expired"]);
+  assertEquals(texts.length, 1);
+  assertMatch(texts[0], /Plate NEW2222/);
+  assertEquals(tables.alpr_violations[0].sms_sent_at, null);   // alert-only: not a driver text
+});
+
+Deno.test("alert: drivers configured but every driver text fails, the alert says so and the row is not marked as a driver text", async () => {
+  const now = new Date("2026-11-11T20:23:00Z");
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:17:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const texts: Array<{ to: string; body: string }> = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now, alertPhones: ["+17045550111"], alertEmails: [],
+    send: async (to, body) => { texts.push({ to, body }); return to === "+19712957521" ? { ok: false, status: 401, error: "auth" } : { ok: true, status: 201 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  const v = tables.alpr_violations[0];
+  assertEquals(v.status, "dispatched");
+  assertEquals(v.sms_sent_at, null);
+  assertMatch(String(v.last_dispatch_error), /^drivers: 401 auth/);
+  assertMatch(texts.find(t => t.to === "+17045550111")!.body, /Driver text FAILED: 401 auth\. No driver is coming\./);
 });

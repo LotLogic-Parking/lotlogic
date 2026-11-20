@@ -74,13 +74,13 @@ const bootDeps = (): BootDeps => {
   const authToken = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
   const from = Deno.env.get("TWILIO_FROM_NUMBER") ?? "";
   const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
-  const fromEmail = Deno.env.get("FROM_EMAIL") ?? "";
-  const fromName = Deno.env.get("FROM_NAME") ?? Deno.env.get("EMAIL_FROM_NAME") ?? "LotLogic";
+  const fromEmail = Deno.env.get("FROM_EMAIL") || "dispatch@lotlogicparking.com";
+  const fromName = Deno.env.get("FROM_NAME") || Deno.env.get("EMAIL_FROM_NAME") || "LotLogic";
   return {
     db, phones: BOOT_DRIVER_PHONES, dispatchMinutes: GRACE_DISPATCH_MINUTES, staleHours: BOOT_STALE_HOURS,
     twilio: accountSid && authToken && from ? { accountSid, authToken, from } : null,
     alertPhones: VIOLATION_ALERT_PHONES, alertEmails: VIOLATION_ALERT_EMAILS,
-    email: resendKey && fromEmail ? { apiKey: resendKey, from: fromEmail.includes("<") ? fromEmail : `${fromName} <${fromEmail}>` } : null,
+    email: resendKey ? { apiKey: resendKey, from: fromEmail.includes("<") ? fromEmail : `${fromName} <${fromEmail}>` } : null,
   };
 };
 

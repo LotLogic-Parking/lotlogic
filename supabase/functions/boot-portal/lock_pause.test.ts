@@ -13,7 +13,7 @@ const NOW = new Date("2026-11-21T02:00:00.000Z");
 const PROPS = [{ id: "mayfield", property_type: "apartment" }, { id: "plaza", property_type: "truck_plaza" }];
 const MINE = [{ id: "mayfield", name: "Mayfield Memorial Apartments" }, { id: "plaza", name: "Plaza Truck Stop" }];
 const POINTS = [{ id: "mayfield", name: "Mayfield Memorial Apartments", lat: 35.282624, lng: -80.811167 }];
-const bootSms = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "ABC1234", action_channel: "boot_sms", status: "dispatched", dispatched_at: "2026-11-20T22:55:00.000Z", ...o });
+const bootSms = (o: Partial<Row>): Row => ({ property_id: "mayfield", plate_text: "ABC1234", action_channel: "boot_sms", status: "dispatched", dispatched_at: "2026-11-20T22:55:00.000Z", sms_sent_at: "2026-11-20T22:55:00.000Z", ...o });
 
 function run(db: ReturnType<typeof fakeDb>, propertyId: string | null, plate = "ABC1234") {
   const calls = { mine: 0, points: 0 };
@@ -58,6 +58,11 @@ Deno.test("lock wiring: a failed pause read never stops a boot at a truck plaza 
   const r = run(fakeDb({ properties: PROPS }, { failReads: ["enforcement_pauses"] }), "plaza");
   await r.p;
   assertEquals(r.calls, { mine: 0, points: 0 });
+});
+
+Deno.test("lock wiring: an alert-only row (Gabe/Victor told, no driver texted: sms_sent_at null) is not a boot text sent before the pause", async () => {
+  const e = await refusal(run(fakeDb({ enforcement_pauses: [PAUSE], properties: PROPS, alpr_violations: [bootSms({ sms_sent_at: null })] }), "mayfield", "abc-1234").p);
+  assertEquals([e.status, e.code], [409, "enforcement_paused"]);
 });
 
 Deno.test("lock wiring: a boot_sms dispatch texted before the pause started, still open, lets the boot go ahead", async () => {

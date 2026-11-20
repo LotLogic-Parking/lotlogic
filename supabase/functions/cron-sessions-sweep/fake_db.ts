@@ -37,6 +37,7 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
       const col = (r: Row, c: string) => (c.startsWith("properties.") ? (r.properties as Row)?.[c.slice(11)] : r[c]);
       self.neq = (c: unknown, v: unknown) => { rows = rows.filter(r => col(r, c as string) !== v); return b; };
       self.not = (c: unknown, op: unknown, v: unknown) => {
+        if (op === "is") { rows = rows.filter(r => (v === null ? r[c as string] != null : r[c as string] !== v)); return b; }
         if (op !== "in") throw new Error(`fake not(${String(op)})`);
         const list = String(v).replace(/^\(|\)$/g, "").split(",");
         rows = rows.filter(r => !list.includes(String(r[c as string]))); return b;
@@ -54,6 +55,11 @@ export function fakeDb(tables: Record<string, Row[]>, opts: { failUpdates?: stri
           throw new Error(`fake or(${op})`);
         });
         rows = rows.filter((r) => terms.some((f) => f(r))); return b;
+      };
+      self.order = (c: unknown, o?: unknown) => {
+        const asc = (o as { ascending?: boolean } | undefined)?.ascending !== false;
+        rows = [...rows].sort((x, y) => (String(x[c as string]) < String(y[c as string]) ? -1 : String(x[c as string]) > String(y[c as string]) ? 1 : 0) * (asc ? 1 : -1));
+        return b;
       };
       self.limit = (n: unknown) => { rows = rows.slice(0, Number(n)); return Promise.resolve(finish()); };
       self.maybeSingle = () => { const o = finish(); return Promise.resolve({ data: o.data?.[0] ?? null, error: o.error }); };

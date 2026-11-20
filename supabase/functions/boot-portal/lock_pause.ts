@@ -69,6 +69,8 @@ export async function refuseIfPaused(db: PauseDb, i: {
   const standingRead = db.from("alpr_violations")
     .select("property_id, plate_text, dispatched_at, status, action_taken, resolved_at")
     .eq("action_channel", "boot_sms").in("status", ["dispatched", "resolved"])
+    // Alert-only rows (Gabe/Victor told, no driver texted) leave sms_sent_at null: not a boot text.
+    .not("sms_sent_at", "is", null)
     .in("property_id", paused)
     .gte("dispatched_at", new Date(i.now.getTime() - STANDING_LOOKBACK_DAYS * 86_400_000).toISOString());
   // The office's open tow requests at the paused properties (placed before the pause or during it, they go
@@ -89,7 +91,7 @@ export async function refuseIfPaused(db: PauseDb, i: {
     .in("property_id", paused).eq("status", "active").gt("valid_until", i.now.toISOString()).or(plateMatch);
   // Open camera flags (tow email or boot text) sent before a pause began: they go ahead.
   const flagRead = starts.length === 0 ? Promise.resolve({ data: [], error: null }) : db.from("alpr_violations")
-    .select("id, property_id, plate_text, dispatched_at, status, action_taken, action_channel, left_before_tow_at, tow_confirmed_at, session_id")
+    .select("id, property_id, plate_text, dispatched_at, status, action_taken, action_channel, sms_sent_at, left_before_tow_at, tow_confirmed_at, session_id")
     .eq("status", "dispatched").is("action_taken", null).is("left_before_tow_at", null).is("tow_confirmed_at", null)
     .in("property_id", paused)
     .gte("dispatched_at", new Date(Math.min(...starts) - FLAG_STANDING_DAYS * 86_400_000).toISOString())
@@ -101,7 +103,11 @@ export async function refuseIfPaused(db: PauseDb, i: {
   if (fErr) console.error(`lock camera_flag_lookup_failed err=${fErr.message}`);
   if (resErr) console.error(`lock resident_plates_lookup_failed err=${resErr.message}`);
   if (gErr) console.error(`lock visitor_passes_lookup_failed err=${gErr.message}`);
-  const flags = await withVisits(db, (flagRows ?? []) as (CameraFlag & { session_id?: string | null })[]);
+  // A boot_sms row with no sms_sent_at is an alert-only violation (Gabe/Victor
+  // told, no driver or partner sent anything): not a flag that went out before the pause.
+  const sentFlags = ((flagRows ?? []) as (CameraFlag & { session_id?: string | null; sms_sent_at?: string | null })[])
+    .filter((r) => !(r.action_channel === "boot_sms" && !r.sms_sent_at));
+  const flags = await withVisits(db, sentFlags);
   const passes: ParkingPass[] = [
     ...((longTerm ?? []) as Omit<ParkingPass, "table">[]).map((r) => ({ ...r, table: "resident_plates" as const })),
     ...((shortTerm ?? []) as Omit<ParkingPass, "table">[]).map((g) => ({ ...g, table: "visitor_passes" as const })),

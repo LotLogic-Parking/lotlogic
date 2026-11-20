@@ -26,8 +26,12 @@
 //
 // Markers, so nothing else in the pipeline treats these as partner tows:
 //   alpr_violations.action_channel = 'boot_sms'   (this is a boot dispatch)
-//   dispatched_at + sms_sent_at set at insert     (dispatchPendingViolations
+//   dispatched_at set at insert                   (dispatchPendingViolations
 //                                                  never emails the partner)
+//   sms_sent_at set ONLY when drivers were texted  (alert-only rows leave it
+//                                                  null; admin-ops' "boot text
+//                                                  unanswered" and the boot
+//                                                  portal's pause rule read it)
 //   left_before_tow_email_sent_at                 (the stand-down went out)
 // No migration: every column already exists.
 //
@@ -56,6 +60,8 @@ export const SIGN_WINDOW_MINUTES = 15;
 export const BOOT_CHANNEL = "boot_sms";
 export const BOOT_STALE_HOURS_DEFAULT = 6;
 export const BOOT_MAX_PER_TICK = 10;
+/** An alert-only visit older than the dispatch minute + this is not alerted (it most likely left unseen). */
+export const ALERT_MAX_LATE_MINUTES = 30;
 
 export type BootDeps = {
   db: SupabaseClient;
@@ -166,7 +172,7 @@ export function standDownMessage(c: Omit<BootContext, "minutesHere" | "enteredAt
 }
 
 /** The violation alert to Gabe / Victor: the facts, no reply codes (those are the drivers'). */
-export function alertMessage(c: BootContext & { exitCamera: boolean; driversTexted: number }): { subject: string; text: string } {
+export function alertMessage(c: BootContext & { exitCamera: boolean; driversConfigured: boolean; driversTexted: number; driverError?: string | null }): { subject: string; text: string } {
   const now = new Date(new Date(c.enteredAt).getTime() + c.minutesHere * 60_000);
   const lines = [
     `[VIOLATION] ${c.propertyName}`,
@@ -174,9 +180,13 @@ export function alertMessage(c: BootContext & { exitCamera: boolean; driversText
     `In since ${clockETFrom(c.enteredAt, now)} (${c.minutesHere}m). No parking pass.`,
     ...(c.pauseEndedAt ? [`Held by an enforcement pause that ended at ${clockETFrom(c.pauseEndedAt, now)}.`] : []),
     ...(c.address ? [c.address] : []),
-    c.exitCamera
-      ? (c.driversTexted > 0 ? `Drivers texted: ${c.driversTexted}.` : "No drivers texted (none on the roster).")
-      : "No exit camera here: it may have left unseen. Drivers not texted.",
+    !c.exitCamera
+      ? "No exit camera here: it may have left unseen. Drivers not texted."
+      : !c.driversConfigured
+        ? "No drivers texted (none on the roster)."
+        : c.driversTexted > 0
+          ? `Drivers texted: ${c.driversTexted}.`
+          : `Driver text FAILED${c.driverError ? `: ${c.driverError}` : ""}. No driver is coming.`,
     `Ref ${shortId(c.violationId)}`,
   ];
   return { subject: `Violation: ${c.plate} at ${c.propertyName} (no parking pass, ${c.minutesHere} min)`, text: lines.join("\n") };
@@ -221,6 +231,7 @@ export function makeTwilioSender(t: { accountSid: string; authToken: string; fro
     for (const m of mediaUrls) form.append("MediaUrl", m);
     const res = await fetch(`${TWILIO_API_BASE}/Accounts/${t.accountSid}/Messages.json`, {
       method: "POST",
+      signal: AbortSignal.timeout(10_000),
       headers: { Authorization: `Basic ${btoa(`${t.accountSid}:${t.authToken}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
     });
@@ -251,6 +262,7 @@ export function makeResendSender(e: { apiKey: string; from: string }) {
   return async (to: string, subject: string, text: string) => {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(10_000),
       headers: { Authorization: `Bearer ${e.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: e.from, to: [to], subject, text }),
     });
@@ -332,7 +344,9 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
     .is("exit_hinted_at", null)
     .is("violation_id", null)
     .lt("entered_at", cutoff)
-    .eq("properties.property_type", "apartment");
+    .eq("properties.property_type", "apartment")
+    // Newest first, so a backlog of old visits never crowds out today's.
+    .order("entered_at", { ascending: false });
   if (deps.pauses) q = excludePaused(q, deps.pauses, "properties.property_type");
   const { data, error } = await q.limit(BOOT_MAX_PER_TICK);
   if (error) throw error;
@@ -342,6 +356,12 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
     const prop = one(s.properties)!;
     if (!pastDispatchWindow(s.entered_at, now, minutes)) continue;
     const exitCamera = canDispatch.has(s.property_id);
+    const driversWillText = exitCamera && deps.phones.length > 0;
+    // An alert-only visit (no driver would go) is worth telling Gabe and
+    // Victor about only while it is fresh: a visit that sat in grace for hours
+    // (no exit camera, or alerts just switched on) most likely left unseen.
+    // Older ones are left to graceExpiry, untouched.
+    if (!driversWillText && now.getTime() - new Date(s.entered_at).getTime() > (minutes + ALERT_MAX_LATE_MINUTES) * 60_000) continue;
     // No exit camera: drivers are never sent (they could roll to an empty
     // space). Without alert recipients there is no one else to tell, so the
     // visit is left in grace exactly as before.
@@ -365,7 +385,7 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
       session_id: s.id,
       action_channel: BOOT_CHANNEL,
       dispatched_at: nowIso,
-      sms_sent_at: nowIso,
+      sms_sent_at: driversWillText ? nowIso : null,
       dispatch_attempts: 1,
       notes: `${exitCamera && deps.phones.length > 0 ? "Boot dispatch to LotLogic drivers" : "Violation alert"} at ${minutes} min with no parking pass${exitCamera ? "" : " (no exit camera: drivers not texted)"}. Sign window ${SIGN_WINDOW_MINUTES} min: boot allowed after ${bootAllowedAfter(s.entered_at)}. Entered ${s.entered_at}. cron-sessions-sweep.`,
     }).select("id").single();
@@ -384,11 +404,18 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
       enteredAt: s.entered_at, minutesHere, violationId, pauseEndedAt,
     };
     const media = photo ? [photo] : [];
-    const r = exitCamera ? await sendToAll(deps, bootMessage(ctx), media) : { sent: 0, error: null };
-    const a = alerting ? await alertAll(deps, alertMessage({ ...ctx, exitCamera, driversTexted: r.sent }), media) : { texts: 0, emails: 0, error: null };
+    const r = driversWillText ? await sendToAll(deps, bootMessage(ctx), media) : { sent: 0, error: null };
+    const a = alerting
+      ? await alertAll(deps, alertMessage({ ...ctx, exitCamera, driversConfigured: deps.phones.length > 0, driversTexted: r.sent, driverError: r.error }), media)
+      : { texts: 0, emails: 0, error: null };
     if (r.sent > 0 || a.texts > 0 || a.emails > 0) {
       out.dispatched++;
-      console.log(`boot_dispatch violation=${violationId} session=${s.id} drivers=${r.sent} alert_texts=${a.texts} alert_emails=${a.emails}${exitCamera ? "" : " no_exit_camera"}`);
+      if (driversWillText && r.sent === 0) {
+        // The alert went out but no driver was reached: say so on the row, and
+        // clear sms_sent_at so nothing treats it as a driver text.
+        await db.from("alpr_violations").update({ last_dispatch_error: `drivers: ${r.error}`, sms_sent_at: null }).eq("id", violationId);
+      }
+      console.log(`boot_dispatch violation=${violationId} session=${s.id} drivers=${r.sent} alert_texts=${a.texts} alert_emails=${a.emails}${exitCamera ? "" : " no_exit_camera"}${r.error || a.error ? ` err=${r.error ?? a.error}` : ""}`);
     } else {
       out.failed++;
       const err = r.error ?? a.error ?? "nothing sent";
@@ -400,7 +427,7 @@ export async function bootDispatch(deps: BootDeps): Promise<{ dispatched: number
 }
 
 type BootViolation = {
-  id: string; session_id: string | null; property_id: string; plate_text: string; left_before_tow_at: string | null; dispatched_at: string | null;
+  id: string; session_id: string | null; property_id: string; plate_text: string; left_before_tow_at: string | null; dispatched_at: string | null; sms_sent_at?: string | null;
   plate_sessions: { id: string; normalized_plate: string; exited_at: string | null; state: string } | { id: string; normalized_plate: string; exited_at: string | null; state: string }[] | null;
   properties: { name: string | null; address: string | null } | { name: string | null; address: string | null }[] | null;
 };
@@ -408,7 +435,7 @@ type BootViolation = {
 async function openBootViolations(db: SupabaseClient): Promise<BootViolation[]> {
   const { data, error } = await db
     .from("alpr_violations")
-    .select("id,session_id,property_id,plate_text,left_before_tow_at,dispatched_at,plate_sessions!alpr_violations_session_id_fkey(id,normalized_plate,exited_at,state),properties(name,address)")
+    .select("id,session_id,property_id,plate_text,left_before_tow_at,dispatched_at,sms_sent_at,plate_sessions!alpr_violations_session_id_fkey(id,normalized_plate,exited_at,state),properties(name,address)")
     .eq("action_channel", BOOT_CHANNEL)
     .eq("status", "dispatched")
     .is("left_before_tow_email_sent_at", null)
@@ -516,7 +543,7 @@ export async function bootStandDowns(deps: BootDeps): Promise<{ stood_down: numb
     if (Number.isFinite(dispatchedMs) && now.getTime() - dispatchedMs >= staleMs) {
       if (await standDown(deps, v, "stale", nowIso, {
         status: "dismissed", action_taken: "no_tow", action_channel: BOOT_CHANNEL, action_at: nowIso, resolved_at: nowIso,
-        last_dispatch_error: "stale: no driver reply",
+        last_dispatch_error: v.sms_sent_at ? "stale: no driver reply" : "stale: no exit seen (alert only)",
       })) out.stale++;
     }
   }
