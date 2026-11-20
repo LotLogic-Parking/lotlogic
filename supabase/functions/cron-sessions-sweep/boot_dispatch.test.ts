@@ -311,7 +311,7 @@ Deno.test("alert: no drivers and no exit camera, the visit is still flagged and 
   assertEquals(texts.map(t => t.to), ["+17045550111", "+17045550122"]);
   assertMatch(texts[0].body, /^\[VIOLATION\] Mayfield Memorial Apartments\nPlate ABC1234/);
   assertMatch(texts[0].body, /No exit camera here: it may have left unseen\. Drivers not texted\./);
-  assertMatch(texts[0].body, /Boot allowed after 3:32 PM/);
+  assertEquals(/Boot allowed/.test(texts[0].body), false);
   assertEquals(/Reply DONE/.test(texts[0].body), false);
   assertEquals(texts[0].media, ["https://r2/x.jpg"]);
   assertEquals(mails.map(m => m.to), ["gabe@example.com", "victor@example.com"]);

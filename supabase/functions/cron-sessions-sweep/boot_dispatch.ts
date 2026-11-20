@@ -174,7 +174,6 @@ export function alertMessage(c: BootContext & { exitCamera: boolean; driversText
     `In since ${clockETFrom(c.enteredAt, now)} (${c.minutesHere}m). No parking pass.`,
     ...(c.pauseEndedAt ? [`Held by an enforcement pause that ended at ${clockETFrom(c.pauseEndedAt, now)}.`] : []),
     ...(c.address ? [c.address] : []),
-    `Boot allowed after ${clockETFrom(bootAllowedAfter(c.enteredAt), now)} (posted ${SIGN_WINDOW_MINUTES}-minute window).`,
     c.exitCamera
       ? (c.driversTexted > 0 ? `Drivers texted: ${c.driversTexted}.` : "No drivers texted (none on the roster).")
       : "No exit camera here: it may have left unseen. Drivers not texted.",
