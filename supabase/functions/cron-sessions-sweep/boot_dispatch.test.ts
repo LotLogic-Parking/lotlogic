@@ -1,7 +1,8 @@
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { excludePaused, pausesFromRows, type PauseRead } from "../_shared/pause.ts";
 import {
-  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, findCoveringPass, normalizePhone, parsePhoneList, pastDispatchWindow, shortId, standDownMessage,
+  bootDispatch, bootMessage, bootRegistrations, bootStandDowns, findCoveringPass, GRACE_DISPATCH_MINUTES_DEFAULT, normalizePhone, parsePhoneList, pastDispatchWindow, shortId,
+  SIGN_WINDOW_MINUTES, standDownMessage,
 } from "./boot_dispatch.ts";
 
 Deno.test("phones: normalised to E.164, de-duplicated, junk dropped", () => {
@@ -41,10 +42,31 @@ Deno.test("pastDispatchWindow", () => {
 
 import { fakeDb, type Row } from "./fake_db.ts";
 
+Deno.test("dispatch window is 4 minutes (Gabe, 2026-11-20); the boot itself still waits for the posted 15", async () => {
+  assertEquals(GRACE_DISPATCH_MINUTES_DEFAULT, 4);
+  assertEquals(SIGN_WINDOW_MINUTES, 15);
+  const now = new Date("2026-11-11T20:23:00Z");
+  assertEquals(pastDispatchWindow("2026-11-11T20:19:00Z", now, GRACE_DISPATCH_MINUTES_DEFAULT), true);   // 4:00 here
+  assertEquals(pastDispatchWindow("2026-11-11T20:19:01Z", now, GRACE_DISPATCH_MINUTES_DEFAULT), false);  // 3:59 here
+  // With no override, a car 4.5 minutes in is dispatched (the sweep runs every minute) and a car 3 minutes in is not.
+  const sessions = [
+    { id: "s4", property_id: "p1", normalized_plate: "FOUR444", plate_text: "FOUR444", entered_at: "2026-11-11T20:18:30Z", entry_plate_event_id: "e4", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },
+    { id: "s3", property_id: "p1", normalized_plate: "THREE33", plate_text: "THREE33", entered_at: "2026-11-11T20:20:00Z", entry_plate_event_id: "e5", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },
+  ];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const sent: string[] = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now,
+    send: async (_to, body) => { sent.push(body); return { ok: true, status: 201 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals([sessions[0].state, sessions[1].state], ["expired", "grace"]);
+  // The text tells the driver the posted-window end: entered 20:18:30Z + 15 min = 20:33:30Z = 3:33 PM ET.
+  assertMatch(sent[0], /Do not boot before 3:33 PM\./);
+});
+
 const NOW = new Date("2026-11-11T20:23:00Z");
 const APT = { property_type: "apartment", name: "Mayfield Memorial Apartments", address: "4912 Daybreak Dr" };
 
-Deno.test("bootDispatch: a grace session past 10 min at an apartment is claimed, recorded as a boot dispatch, and texted with the photo", async () => {
+Deno.test("bootDispatch: a grace session past the dispatch window at an apartment is claimed, recorded as a boot dispatch, and texted with the photo", async () => {
   const sessions = [
     { id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:12:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },
     { id: "s2", property_id: "p1", normalized_plate: "NEW111", plate_text: "NEW111", entered_at: "2026-11-11T20:20:00Z", entry_plate_event_id: "e2", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT },

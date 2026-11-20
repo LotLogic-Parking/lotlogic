@@ -1,9 +1,12 @@
 // ── Grace dispatch: a LotLogic driver is texted to boot (apartments) ────
 //
 // Gabe, 2026-11-11: at an apartment a car the camera sees that is not a
-// resident has 15 minutes (what the sign says) to register. At 10 minutes,
-// a clock only we see, if it has not registered and has not been seen
-// leaving, a LotLogic driver is texted to come boot it. Registration or an
+// resident has 15 minutes (what the sign says) to register. At 4 minutes
+// (Gabe, 2026-11-20; was 10), a clock only we see, if it has not registered
+// and has not been seen leaving, a LotLogic driver is texted to come boot it.
+// The driver still may not boot before the posted 15 minutes end
+// (SIGN_WINDOW_MINUTES; the text says the exact time), so dispatching early
+// only gets a driver there sooner; nothing the public sees changes. Registration or an
 // exit cancels the dispatch with a stand-down text. The office sees a red
 // "Dispatched" mark on the car until then. Dispatches go to LotLogic's own
 // drivers, never to the tow partner.
@@ -39,7 +42,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sameVehicle } from "../camera-snapshot/plate_identity.ts";
 import { excludePaused, heldThroughPause, type PauseRead } from "../_shared/pause.ts";
 
-export const GRACE_DISPATCH_MINUTES_DEFAULT = 10;
+export const GRACE_DISPATCH_MINUTES_DEFAULT = 4;
 export const SIGN_WINDOW_MINUTES = 15;
 export const BOOT_CHANNEL = "boot_sms";
 export const BOOT_STALE_HOURS_DEFAULT = 6;
