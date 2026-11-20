@@ -258,7 +258,7 @@ async function bootDetail(db: SupabaseClient, me: Me, id: string | null) {
       stored_at: b.stored_at,
     },
     deployment: dep ? {
-      id: dep.id, status: dep.status, plate_text: dep.plate_text, plate_state: dep.plate_state, property,
+      id: dep.id, status: dep.status, pay_code: dep.pay_code ?? null, plate_text: dep.plate_text, plate_state: dep.plate_state, property,
       vehicle: [dep.vehicle_color, dep.vehicle_make, dep.vehicle_model].filter(Boolean).join(" ") || null,
       fee_cents: dep.fee_cents, applied_at: dep.applied_at, lock_confirmed_at: dep.lock_confirmed_at,
       paid_at: dep.paid_at, paid_amount_cents: dep.paid_amount_cents, release_reason: dep.release_reason,
@@ -438,7 +438,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     lock_photo_url: photo, lock_lat: num(body.lat), lock_lon: num(body.lon), lock_accuracy_m: num(body.accuracy_m),
     applied_by: me.member_id, fee_cents: fee, notes: [str(body.notes, 1000), geoNote].filter(Boolean).join("\n") || null,
     driver_signature_path: sig, driver_signed_name: signedName, driver_signed_at: signedAt.toISOString(), driver_attestation: attest,
-  }).select("id").single();
+  }).select("*").single(); // "*": pay_code is set by a database trigger (boot pay codes migration)
   if (error) {
     if (error.code === "23505") throw new HttpError(409, "boot_in_use", "This boot is already on a car.");
     throw error;
@@ -455,6 +455,8 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   if (qErr) throw qErr;
   return {
     ok: true, deployment_id: dep.id, command_id: cmdId, online: isOnline(b), attestation: attest,
+    // The motorist's code for this placement: the agent writes it on the boot sticker (QR -> lotlogicparking.com/pay).
+    pay_code: dep.pay_code ?? null,
     message: isOnline(b)
       ? "Signed. Lock sent: the boot picks it up on its next check-in (usually under a minute)."
       : "Signed. Lock queued, but this boot hasn't checked in recently. It locks when it next connects (within 10 minutes) or the lock is cancelled.",

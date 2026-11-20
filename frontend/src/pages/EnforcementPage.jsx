@@ -35,6 +35,17 @@ function Notice({ n }) {
   );
 }
 
+// The placement's pay code, big enough to copy onto the boot sticker in marker. Every sticker's QR goes to
+// lotlogicparking.com/pay; this code is what tells the motorist's phone which placement to pay.
+function PayCode({ code }) {
+  return (
+    <div className="enf-paycode" data-testid="pay-code">
+      <small>PAY CODE: write it on the boot sticker</small>
+      <b className="enf-mono">{code}</b>
+    </div>
+  );
+}
+
 function getPosition() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) return resolve({});
@@ -110,6 +121,7 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
   const [waiting, setWaiting] = React.useState(null); // {commandId, purpose}: sent, not finished
   const [delivered, setDelivered] = React.useState(false);
   const [failText, setFailText] = React.useState('');
+  const [payCode, setPayCode] = React.useState(null); // this placement's code for the motorist, from POST /lock
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -163,7 +175,7 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
     try {
       const [sigPath, pos] = await Promise.all([uploadBootFile(f.boot_id, dataUrlToBlob(f.signature), 'signature'), getPosition()]);
       const r = await portal('lock', { method: 'POST', body: lockBody(f, sigPath, pos) });
-      setPhase('locking'); setDelivered(false);
+      setPhase('locking'); setDelivered(false); setPayCode(r.pay_code || null);
       setWaiting({ commandId: r.command_id, purpose: 'place' });
       onChanged();
     } catch (x) {
@@ -216,8 +228,9 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
               : <button type="button" className="pq-btn" onClick={cancelLock} disabled={busy}>Cancel lock</button>}
           </>
         )}
+        {phase !== 'failed' && payCode && <PayCode code={payCode} />}
         {phase === 'done' && (
-          <Notice n={{ tone: 'done', title: 'Boot locked', text: `${label} is on ${normPlate(f.plate)}${prop ? ` at ${prop.name}` : ''}. The driver pays the fee by scanning the QR code on the boot.` }} />
+          <Notice n={{ tone: 'done', title: 'Boot locked', text: `${label} is on ${normPlate(f.plate)}${prop ? ` at ${prop.name}` : ''}. The motorist scans the QR code on the boot and enters the pay code to pay.` }} />
         )}
         {phase === 'failed' && <Notice n={{ tone: 'ready', title: 'Not locked', text: failText }} />}
         {error && <p className="enf-err" role="alert">{error}</p>}
@@ -484,6 +497,7 @@ function BootDetail({ bootId, admin, onChanged, onPlace }) {
         <section className="enf-dep">
           <h4>{onCar ? deploymentLabel(dep.status) : `Last placement · ${deploymentLabel(dep.status)}`}</h4>
           <dl className="enf-facts">
+            {dep.pay_code && <div><dt>Pay code</dt><dd className="enf-mono" data-testid="dep-pay-code">{dep.pay_code}</dd></div>}
             <div><dt>Plate</dt><dd className="enf-mono">{dep.plate_text}{dep.plate_state ? ` (${dep.plate_state})` : ''}</dd></div>
             <div><dt>Vehicle</dt><dd>{dep.vehicle || '—'}</dd></div>
             <div><dt>Property</dt><dd>{dep.property || '—'}</dd></div>
