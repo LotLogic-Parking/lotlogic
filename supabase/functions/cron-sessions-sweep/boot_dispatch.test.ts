@@ -292,3 +292,67 @@ Deno.test("boot texted before the pause: never texted again during or after it; 
   assertEquals(sent.length, 2);
   assertEquals(violations.length, 2);
 });
+
+// ── Violation alert to Gabe + Victor (2026-11-20) ─────────────────────────
+Deno.test("alert: no drivers and no exit camera, the visit is still flagged and Gabe + Victor get a text and an email", async () => {
+  const now = new Date("2026-11-11T20:23:00Z");
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:17:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [{ id: "e1", image_url: "https://r2/x.jpg" }], alpr_cameras: [{ property_id: "p1", active: true, orientation: "entry", exit_order: null }] };
+  const texts: Array<{ to: string; body: string; media: string[] }> = [];
+  const mails: Array<{ to: string; subject: string; text: string }> = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: [], twilio: null, now,
+    alertPhones: ["+17045550111", "+17045550122"], alertEmails: ["gabe@example.com", "victor@example.com"],
+    send: async (to, body, media) => { texts.push({ to, body, media }); return { ok: true, status: 201 }; },
+    sendEmail: async (to, subject, text) => { mails.push({ to, subject, text }); return { ok: true, status: 200 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 1 });
+  assertEquals(sessions[0].state, "expired");
+  assertEquals(tables.alpr_violations.length, 1);
+  assertEquals([tables.alpr_violations[0].status, tables.alpr_violations[0].action_channel], ["dispatched", "boot_sms"]);
+  assertEquals(texts.map(t => t.to), ["+17045550111", "+17045550122"]);
+  assertMatch(texts[0].body, /^\[VIOLATION\] Mayfield Memorial Apartments\nPlate ABC1234/);
+  assertMatch(texts[0].body, /No exit camera here: it may have left unseen\. Drivers not texted\./);
+  assertMatch(texts[0].body, /Boot allowed after 3:32 PM/);
+  assertEquals(/Reply DONE/.test(texts[0].body), false);
+  assertEquals(texts[0].media, ["https://r2/x.jpg"]);
+  assertEquals(mails.map(m => m.to), ["gabe@example.com", "victor@example.com"]);
+  assertMatch(mails[0].subject, /^Violation: ABC1234 at Mayfield Memorial Apartments/);
+  assertMatch(mails[0].text, /Photo: https:\/\/r2\/x\.jpg/);
+});
+
+Deno.test("alert: with an exit camera the drivers get the boot text and Gabe + Victor get the alert", async () => {
+  const now = new Date("2026-11-11T20:23:00Z");
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:17:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const tables = { plate_sessions: sessions, alpr_violations: [] as Row[], plate_events: [] as Row[], alpr_cameras: [{ property_id: "p1", active: true, orientation: "exit", exit_order: 2 }] };
+  const texts: Array<{ to: string; body: string }> = [];
+  const out = await bootDispatch({ db: fakeDb(tables), phones: ["+19712957521"], twilio: null, now, alertPhones: ["+17045550111"], alertEmails: [],
+    send: async (to, body) => { texts.push({ to, body }); return { ok: true, status: 201 }; } });
+  assertEquals(out, { dispatched: 1, failed: 0, skipped_no_exit_camera: 0 });
+  assertMatch(texts.find(t => t.to === "+19712957521")!.body, /^\[BOOT\]/);
+  const alert = texts.find(t => t.to === "+17045550111")!.body;
+  assertMatch(alert, /^\[VIOLATION\]/);
+  assertMatch(alert, /Drivers texted: 1\./);
+});
+
+Deno.test("alert: nothing configured anywhere means the feature stays off", async () => {
+  const sessions = [{ id: "s1", property_id: "p1", normalized_plate: "ABC1234", plate_text: "ABC1234", entered_at: "2026-11-11T20:00:00Z", entry_plate_event_id: "e1", state: "grace", exited_at: null, exit_hinted_at: null, violation_id: null, properties: APT }];
+  const out = await bootDispatch({ db: fakeDb({ plate_sessions: sessions, alpr_violations: [], plate_events: [], alpr_cameras: [] }), phones: [], twilio: null, now: NOW, alertPhones: [], alertEmails: [] });
+  assertEquals(out, { dispatched: 0, failed: 0, skipped_no_exit_camera: 0 });
+  assertEquals(sessions[0].state, "grace");
+});
+
+Deno.test("alert: a flagged car seen leaving is dismissed and Gabe + Victor get the cancellation", async () => {
+  const violations: Row[] = [{ id: "v1", session_id: "s1", property_id: "p1", plate_text: "ABC1234", status: "dispatched", action_channel: "boot_sms", left_before_tow_at: null, left_before_tow_email_sent_at: null, dispatched_at: "2026-11-11T20:21:00Z",
+    plate_sessions: { id: "s1", normalized_plate: "ABC1234", exited_at: "2026-11-11T20:22:00Z", state: "expired" }, properties: { name: "Mayfield Memorial Apartments", address: null } }];
+  const texts: Array<{ to: string; body: string }> = [];
+  const mails: Array<{ to: string; subject: string }> = [];
+  const n = await bootStandDowns({ db: fakeDb({ alpr_violations: violations }), phones: [], twilio: null, now: NOW,
+    alertPhones: ["+17045550111"], alertEmails: ["gabe@example.com"],
+    send: async (to, body) => { texts.push({ to, body }); return { ok: true, status: 201 }; },
+    sendEmail: async (to, subject) => { mails.push({ to, subject }); return { ok: true, status: 200 }; } });
+  assertEquals(n, { stood_down: 1, stale: 0 });
+  assertEquals(violations[0].status, "dismissed");
+  assertEquals(typeof violations[0].left_before_tow_email_sent_at, "string");
+  assertEquals(texts.length, 1);
+  assertMatch(texts[0].body, /^\[CANCELLED\] Mayfield Memorial Apartments\nPlate ABC1234 was seen leaving at/);
+  assertEquals(mails.map(m => m.subject), ["Cancelled: ABC1234 at Mayfield Memorial Apartments (left)"]);
+});
