@@ -2,7 +2,7 @@
 //   GET  /boot-pay?code=XXXX                      what the pay page shows: plate, property, fee, release progress.
 //                                                 XXXX = the placement's 4-character pay code (boot_deployments.pay_code),
 //                                                 written on the boot sticker by the agent; every sticker's QR goes to
-//                                                 lotlogicparking.com/pay (frontend/pay.html). An 8-character code is a
+//                                                 boot-release.vercel.app (repo boot-release/). An 8-character code is a
 //                                                 boot's own qr_code (the older per-boot stickers) and still works.
 //   GET  /boot-pay?plate=ABC123                   "lost the code?": the open placements on that plate -> [{pay_code, ...}]
 //   POST /boot-pay  {code, action:"checkout", phone?, email?}   -> {checkout_url} (Square payment link)
@@ -18,7 +18,7 @@
 //   SQUARE_WEBHOOK_SIGNATURE_KEY
 //   SQUARE_WEBHOOK_URL  the exact notification URL registered in Square (default: <SUPABASE_URL>/functions/v1/boot-pay/square-webhook)
 //   BOOT_PAY_PAGE_URL   where Square sends the payer back for a boot qr_code checkout, e.g. https://pay.lotlogic.example/boot
-//   BOOT_PAY_LANDING_URL  where Square sends the payer back for a pay-code checkout (default https://lotlogicparking.com/pay)
+//   BOOT_PAY_LANDING_URL  where Square sends the payer back for a pay-code checkout (default https://boot-release.vercel.app)
 import { admin, CORS, hmac, HttpError, json } from "../_shared/boot.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
@@ -114,7 +114,9 @@ async function view(db: SupabaseClient, code: string | null) {
   if (dep && dep.square_order_id && !dep.paid_at && ["locking", "active"].includes(dep.status)) {
     dep = (await syncPayment(db, dep)) ?? dep;
   }
-  const { data: partner } = await db.from("enforcement_partners").select("company_name, phone").eq("id", boot.partner_id).single();
+  const { data: p } = await db.from("enforcement_partners").select("company_name, phone").eq("id", boot.partner_id).single();
+  // A pay code comes from the unbranded boot-release page: it gets the phone only, never the company name.
+  const partner = found.byPayCode ? { phone: p?.phone ?? null } : p;
   const staleClosed = dep && ["unlocked", "cancelled"].includes(dep.status)
     && Date.now() - new Date(dep.updated_at).getTime() > 6 * 3600 * 1000;
   if (!dep || staleClosed || dep.status === "cancelled") {
@@ -134,7 +136,7 @@ async function view(db: SupabaseClient, code: string | null) {
     plate: maskPlate(dep.plate_text),
     vehicle: [dep.vehicle_color, dep.vehicle_make, dep.vehicle_model].filter(Boolean).join(" ") || null,
     property: property?.name ?? null,
-    company: partner,                            // {company_name, phone}
+    company: partner,                            // {company_name, phone}; {phone} for a pay code
     fee_cents: dep.fee_cents,
     currency: dep.currency,
     applied_at: dep.applied_at,
@@ -212,8 +214,8 @@ async function checkout(db: SupabaseClient, body: Record<string, unknown>) {
   const phone = typeof body.phone === "string" ? body.phone.replace(/[^\d+]/g, "").slice(0, 16) : null;
   const email = typeof body.email === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email) ? body.email.slice(0, 120) : null;
   const pageUrl = Deno.env.get("BOOT_PAY_PAGE_URL");
-  const landingUrl = Deno.env.get("BOOT_PAY_LANDING_URL") ?? "https://lotlogicparking.com/pay";
-  const returnUrl = byPayCode ? `${landingUrl}?c=${dep.pay_code}&paid=1`
+  const landingUrl = (Deno.env.get("BOOT_PAY_LANDING_URL") ?? "https://boot-release.vercel.app").replace(/\/+$/, "");
+  const returnUrl = byPayCode ? `${landingUrl}/?c=${dep.pay_code}&paid=1`
     : pageUrl ? `${pageUrl}?code=${boot.qr_code}&paid=1` : undefined;
 
   const res = await square("/v2/online-checkout/payment-links", {

@@ -455,7 +455,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   if (qErr) throw qErr;
   return {
     ok: true, deployment_id: dep.id, command_id: cmdId, online: isOnline(b), attestation: attest,
-    // The motorist's code for this placement: the agent writes it on the boot sticker (QR -> lotlogicparking.com/pay).
+    // The motorist's code for this placement: the agent writes it on the boot sticker (QR -> boot-release.vercel.app).
     pay_code: dep.pay_code ?? null,
     message: isOnline(b)
       ? "Signed. Lock sent: the boot picks it up on its next check-in (usually under a minute)."

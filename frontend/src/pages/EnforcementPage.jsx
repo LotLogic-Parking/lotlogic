@@ -36,7 +36,7 @@ function Notice({ n }) {
 }
 
 // The placement's pay code, big enough to copy onto the boot sticker in marker. Every sticker's QR goes to
-// lotlogicparking.com/pay; this code is what tells the motorist's phone which placement to pay.
+// boot-release.vercel.app (repo boot-release/); this code is what tells the motorist's phone which placement to pay.
 function PayCode({ code }) {
   return (
     <div className="enf-paycode" data-testid="pay-code">
