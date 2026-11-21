@@ -141,7 +141,10 @@ export function bootNotices(detail) {
     });
   }
   if (d?.status === 'active') {
-    out.push({ tone: 'on', title: 'Waiting for payment', text: `${money(d.fee_cents)} fee. The driver pays by scanning the QR code on the boot.` });
+    out.push({
+      tone: 'on', title: 'Waiting for payment',
+      text: `${money(d.fee_cents)} fee. The motorist scans the QR code on the boot${d.pay_code ? ` and enters pay code ${d.pay_code}` : ''}.`,
+    });
   }
   if (d?.status === 'release_authorized') {
     const title = RELEASE_WORD[d.release_reason] || (d.paid_at ? `Paid ${money(d.paid_amount_cents ?? d.fee_cents)} at ${timeOf(d.paid_at)}` : 'Cleared to release');

@@ -48,6 +48,9 @@ test('bootNotices: waiting for payment, paid and opening, pick up, fault, batter
   const waiting = bootNotices({ boot: { state: 0 }, deployment: { status: 'active', fee_cents: 25000 }, commands: [] });
   assert.deepEqual(waiting.map((n) => n.title), ['Waiting for payment']);
   assert.match(waiting[0].text, /\$250\.00 fee/);
+  assert.doesNotMatch(waiting[0].text, /pay code/);
+  const coded = bootNotices({ boot: { state: 0 }, deployment: { status: 'active', fee_cents: 25000, pay_code: 'K7QX' }, commands: [] });
+  assert.match(coded[0].text, /enters pay code K7QX/);
 
   const paid = bootNotices({
     boot: { state: 0 },
