@@ -131,3 +131,11 @@ export async function extractUsdot(
 
   return { kind: "none" };
 }
+
+// Apartment cars carry no USDOT/MC number, so a ParkPow call on an apartment frame is paid for
+// and can never match (Mayfield 2026-11-11: ~12,700 calls in 7 days, zero hits). Truck plazas
+// leave index.ts through handleTruckPlazaExit before the fallback, so today this only turns the
+// fallback off where it was pure cost.
+export function usdotFallbackApplies(propertyType: string | null): boolean {
+  return propertyType !== "apartment";
+}

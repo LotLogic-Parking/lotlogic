@@ -18,7 +18,7 @@ import { candidatePlates, sameVehicle } from "./plate_identity.ts";
 import { assessRead, qualityFromEnv, recentAgreeingRead } from "./read_quality.ts";
 import { isApproaching, recentBoxForPlate } from "./approach.ts";
 import { mayOpenVisit, openFloorFromEnv } from "./open_floor.ts";
-import { extractUsdot } from "./usdot-ocr.ts";
+import { extractUsdot, usdotFallbackApplies } from "./usdot-ocr.ts";
 import { computeImageHashes } from "./image-hash.ts";
 import { rotateJpegBytes, type RotationDir } from "./image-rotate.ts";
 import { extractMmc, mmcColumns, isMmcBlocked, handleMmcFailureStatus, type PrMmcData } from "./mmc.ts";
@@ -937,7 +937,7 @@ Deno.serve(async (req: Request) => {
     const nowMs = Date.now();
     const noUsablePlate = surviving.length === 0;
 
-    const shouldCallUsdot = (USDOT_ENABLED && !!USDOT_TOKEN) && noUsablePlate;
+    const shouldCallUsdot = (USDOT_ENABLED && !!USDOT_TOKEN) && noUsablePlate && usdotFallbackApplies(propertyType);
 
     const usdotResult = shouldCallUsdot
       ? await extractUsdot(bytesForRecognizers, { token: USDOT_TOKEN, minScore: USDOT_MIN_SCORE, cameraId: cameraApiKey })
