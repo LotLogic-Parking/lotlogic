@@ -4,6 +4,7 @@ import { makeR2Uploader } from "../pr-ingest/r2.ts";
 import { normalizePlate } from "../pr-ingest/normalize.ts";
 import { extractFromRequest } from "./extract.ts";
 import { parsePath } from "./path.ts";
+import { isHeartbeat, stampHeartbeat } from "./heartbeat.ts";
 import { findSimilarOpenSession, findRecentSessionByCamera, findRecentPrCallForCamera, findActiveResident, findActiveVisitorPass, insertSession, decideExitOutcome, applyExitOutcome, findCooldownPriorSession, type CooldownHit } from "./sessions.ts";
 import { handleTruckPlazaExit } from "./truck_plaza_exit.ts";
 import {
@@ -259,6 +260,16 @@ Deno.serve(async (req: Request) => {
   const { apiKey: pathApiKey, secret } = parsePath(new URL(req.url));
   const secretOk = !!secret && ((!!URL_SECRET && secret === URL_SECRET) || (!!URL_SECRET_2 && secret === URL_SECRET_2));
   if (!secretOk) return json(401, { ok: false, error: "unauthorized" });
+
+  // Event-only cameras (heartbeat.ts): a relay's liveness ping stamps last_seen_at and stops here.
+  if (isHeartbeat(req)) {
+    try {
+      return json(200, await stampHeartbeat(db, pathApiKey, new Date()));
+    } catch (e) {
+      console.warn(`camera-snapshot heartbeat failed api_key=${pathApiKey ?? "?"}: ${(e as Error)?.message ?? e}`);
+      return json(500, { ok: false, heartbeat: true, error: "heartbeat_failed" });
+    }
+  }
 
   try {
     const ctHdr = (req.headers.get("content-type") ?? "?").slice(0, 80);
