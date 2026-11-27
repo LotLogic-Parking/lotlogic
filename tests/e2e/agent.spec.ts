@@ -4,8 +4,8 @@
  * Gabe, 2026-11-16: "merge the lotlogic agent into the enforcement tab" and "we want them to be
  * able to view the properties that they are scoped into". An agent signs in to /app with their
  * LotLogic login; their nav is Enforcement and Account, the tab lists their boots and the
- * properties they cover, and placing a boot is Victor's four steps from the old /agent screen
- * (which now redirects to /app).
+ * properties they cover, and placing a boot is three steps (boot, car, fit & sign) and a tug test
+ * (Victor, 27 Nov: "strip it down and redesign").
  *
  * Self-contained: builds and serves THIS branch's frontend, starts signed in (a stored dashboard
  * session), answers the backend's /auth/me, and answers every boot-portal call from a small fake
@@ -117,6 +117,12 @@ function world() {
     if (route === 'unlock' && body.waive && !w.admin) return no(403, 'dispatch_only', 'Only dispatch or an admin can waive the fee.');
     if (route === 'setup-wifi') return ok({ ssid: 'LotLogic-Boot-01', password: 'k7m2q9xa', url: 'http://192.168.4.1', message: 'Wi-Fi setup sent.' });
     if (route === 'cancel') { const c = pending(b); if (c) c.status = 'cancelled'; if (b.dep?.status === 'locking') b.dep.status = 'cancelled'; return ok({}); }
+    if (route === 'pin-check') {
+      if (body.tight) return ok({ tight: true });
+      b.dep!.status = 'cancelled';
+      const id = queue(b, 1, 'fit', () => { b.state = 1; });
+      return ok({ tight: false, command_id: id, message: 'Placement cancelled. The boot opens on its next check-in so you can refit it.' });
+    }
     if (route === 'emergency') { const id = queue(b, 1, 'emergency', () => { b.state = 1; }); return ok({ command_id: id, online: true, message: 'Emergency unlock sent and recorded. The boot opens on its next check-in.' }); }
     return no(404, 'not_found', 'Not found');
   }
@@ -232,6 +238,9 @@ test.describe('Enforcement tab for a LotLogic agent @desktop-only', () => {
     await expect(d.getByAltText('Signature of Dana Reyes')).toBeVisible();
     await expect(d).not.toContainText('Recent commands');
     await expect(d).not.toContainText('Signal');
+    // the boot line's pay link for this car, to text a caller
+    await expect(d.getByTestId('pay-link')).toContainText('https://boot-release.vercel.app/?b=P4H8T2NW');
+    await expect(d).not.toContainText(/pay code/i);
     // a battery too low to lock: Place is greyed out
     await openRow(page, 'Boot 05');
     await expect(row(page, 'Boot 05').getByRole('button', { name: 'Place on a car' })).toBeDisabled();
@@ -263,66 +272,56 @@ test.describe('Enforcement tab for a LotLogic agent @desktop-only', () => {
     await shot(page, '11-command-expired');
   });
 
-  test('place a boot: 4 steps, a refusal shown as the server wrote it, an edit clears the signature, then lock', async ({ page }) => {
+  test('place a boot: boot, car, fit & sign, a refusal shown as the server wrote it, an edit clears the signature, then lock and tug test', async ({ page }) => {
     const { w, install } = world(); await install(page); await signIn(page);
     await openRow(page, 'Boot 01 bench');
     await row(page, 'Boot 01 bench').getByRole('button', { name: 'Place on a car' }).click();
     const missing = page.getByTestId('place-missing');
 
-    // 1. Where: only the properties this agent covers
+    // 1. Boot: picked from the boot page, closed, so open it first; Continue while it opens
     await expect(page.getByTestId('place-step-1')).toBeVisible();
+    await expect(missing).toHaveText('Still needed: open the boot');
     await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
-    await expect(missing).toHaveText('Still needed: property');
-    await expect(page.getByLabel('Property').locator('option')).toHaveText(['Select property', 'Mayfield Memorial Apartments']);
-    await shot(page, '12-place-1-where');
-    await page.getByLabel('Property').selectOption('p1');
+    await shot(page, '12-place-1-boot');
+    await page.getByRole('button', { name: 'Open Boot 01 bench' }).click();
+    await expect(page.getByTestId('opening')).toBeVisible();
+    await expect(missing).toHaveText('');
+    await shot(page, '13-place-1-opening');
     await page.getByRole('button', { name: 'Continue' }).click();
 
-    // 2. Vehicle
+    // 2. Car: one property assigned, so it is already set
     await expect(page.getByTestId('place-step-2')).toBeVisible();
+    await expect(page.getByTestId('place-property')).toContainText('Mayfield Memorial Apartments');
+    await expect(missing).toHaveText('Still needed: plate');
     await page.getByLabel('Plate').fill('kmd-4821');
     await page.getByLabel('Make').fill('Nissan');
     await page.getByLabel('Model').fill('Altima');
     await page.getByLabel('Color').fill('Black');
-    await page.getByLabel('Location on property').fill('Building C, row 2');
-    await shot(page, '13-place-2-vehicle');
+    await page.getByLabel('Where on the property').fill('Building C, row 2');
+    await shot(page, '14-place-2-car');
     await page.getByRole('button', { name: 'Continue' }).click();
 
-    // 3. Boot: the boot is closed, so a photo alone is not enough
+    // 3. Fit & sign: the boot opened meanwhile
     await expect(page.getByTestId('place-step-3')).toBeVisible();
-    await expect(missing).toHaveText('Still needed: open the boot, photo of the boot');
+    await expect(page.getByText('Fit Boot 01 bench on the wheel, then take the photo.')).toBeVisible({ timeout: 15_000 });
     await page.getByTestId('place-photo').setInputFiles({ name: 'boot.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
     await expect(page.getByText('Boot on wheel ✓')).toBeVisible();
-    await shot(page, '14-place-3-closed');
-    await page.getByRole('button', { name: 'Open Boot 01 bench' }).click();
-    await expect(page.getByTestId('opening')).toBeVisible();
-    await shot(page, '15-place-3-opening');
-    await expect(page.getByText('Boot 01 bench is open')).toBeVisible({ timeout: 15_000 });
-    await expect(missing).toHaveText('');
-    await shot(page, '16-place-3-open');
-    await page.getByRole('button', { name: 'Continue' }).click();
-
-    // 4. Sign
-    await expect(page.getByTestId('place-step-4')).toBeVisible();
     await expect(page.getByTestId('attestation')).toContainText('I, Dana Reyes, placed boot “Boot 01 bench” on the vehicle with plate KMD4821 (NC) on ');
     await expect(page.getByRole('button', { name: 'Lock boot' })).toBeDisabled();
     await drawSignature(page);
     await expect(page.getByTestId('sig-state')).toHaveText('Signed');
     await expect(page.getByRole('button', { name: 'Lock boot' })).toBeEnabled();
-    await shot(page, '17-place-4-signed');
+    await shot(page, '15-place-3-signed');
 
     // an edit after signing clears the signature and asks again
     await page.getByLabel('Full name').fill('Dana M. Reyes');
     await expect(page.getByTestId('sig-state')).toHaveText('Not signed');
     await expect(page.getByTestId('sig-hint')).toHaveText('You changed the details, so please sign again');
     await expect(page.getByRole('button', { name: 'Lock boot' })).toBeDisabled();
-    await shot(page, '18-place-4-sign-again');
     // going back to change the plate clears it too
     await drawSignature(page);
     await page.getByRole('button', { name: 'Back', exact: true }).click();
-    await page.getByRole('button', { name: 'Back', exact: true }).click();
     await page.getByLabel('Plate').fill('KMD4822');
-    await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByTestId('sig-state')).toHaveText('Not signed');
     await drawSignature(page);
@@ -332,24 +331,53 @@ test.describe('Enforcement tab for a LotLogic agent @desktop-only', () => {
     b1.state = 0;
     await page.getByRole('button', { name: 'Lock boot' }).click();
     await expect(page.getByTestId('place-error')).toContainText("The boot doesn't report open yet. Open it first, fit it on the wheel, then lock it.");
-    await shot(page, '19-place-refused');
+    await shot(page, '16-place-refused');
     b1.state = 1;
 
     // lock
     await page.getByRole('button', { name: 'Lock boot' }).click();
     await expect(page.getByTestId('place-locking')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancel lock' })).toBeVisible();
-    await shot(page, '20-place-locking');
+    await shot(page, '17-place-locking');
     const lock = w.calls.filter((c) => c.route === 'lock').at(-1)!;
     expect(lock.body).toMatchObject({
       boot_id: 'b1', plate_text: 'KMD4822', plate_state: 'NC', property_id: 'p1', photo_path: 'boot-photos/ll/b1/lock-1.jpg',
       signature_path: 'boot-photos/ll/b1/sig-1.png', signed_name: 'Dana M. Reyes', vehicle_make: 'Nissan', vehicle_model: 'Altima',
       vehicle_color: 'Black', notes: 'Location: Building C, row 2',
     });
-    await expect(page.getByTestId('place-done')).toContainText('Boot 01 bench is on KMD4822 at Mayfield Memorial Apartments', { timeout: 15_000 });
-    await shot(page, '21-place-locked');
+
+    // the tug test: no pin sensor, so the agent pulls on it before walking away
+    await expect(page.getByTestId('tug-test')).toContainText('Pull on the boot', { timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Open Boot 01 bench' })).toHaveCount(0);
+    await shot(page, '18-place-tug-test');
+    await page.getByRole('button', { name: 'Tight' }).click();
+    expect(w.calls.filter((c) => c.route === 'pin-check').at(-1)!.body).toMatchObject({ boot_id: 'b1', tight: true });
+    await expect(page.getByTestId('place-done')).toContainText('Boot 01 bench is on KMD4822 at Mayfield Memorial Apartments');
+    await expect(page.getByTestId('place-done')).toContainText('Leave the boot switched on');
+    await expect(page.getByTestId('place-done')).not.toContainText(/pay code/i);
+    await shot(page, '19-place-done');
     await page.getByRole('button', { name: 'Open Boot 01 bench' }).click();
     await expect(row(page, 'Boot 01 bench').getByTestId('boot-detail')).toContainText('Waiting for payment');
+  });
+
+  test('a loose boot after the lock: the placement is cancelled and the boot opens to refit', async ({ page }) => {
+    const { w, install } = world(); await install(page); await signIn(page);
+    const b1 = w.boots.find((b) => b.id === 'b1')!;
+    b1.state = 1;
+    await openRow(page, 'Boot 01 bench');
+    await row(page, 'Boot 01 bench').getByRole('button', { name: 'Place on a car' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByLabel('Plate').fill('ABC1234');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByTestId('place-photo').setInputFiles({ name: 'boot.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    await expect(page.getByText('Boot on wheel ✓')).toBeVisible();
+    await drawSignature(page);
+    await page.getByRole('button', { name: 'Lock boot' }).click();
+    await expect(page.getByTestId('tug-test')).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Loose' }).click();
+    await expect(page.getByTestId('place-failed')).toContainText('Placement cancelled. The boot opens on its next check-in so you can refit it.');
+    expect(w.calls.filter((c) => c.route === 'pin-check').at(-1)!.body).toMatchObject({ boot_id: 'b1', tight: false });
+    await shot(page, '20-place-loose');
   });
 
   test('release without payment: a driver sees the server refuse it', async ({ page }) => {
@@ -381,7 +409,7 @@ test.describe('Enforcement tab for a LotLogic agent @desktop-only', () => {
 });
 
 test.describe('Enforcement tab for a LotLogic admin @desktop-only', () => {
-  test('an admin keeps the fleet, the agents and the payments, and the same four-step placement', async ({ page }) => {
+  test('an admin keeps the fleet, the agents and the payments, and the same three-step placement', async ({ page }) => {
     const { w, install } = world(); w.admin = true; await install(page);
     await signIn(page, 'admin');
     await expect(page.getByLabel('Fleet')).toContainText('Online');

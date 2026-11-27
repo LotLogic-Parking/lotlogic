@@ -1,5 +1,5 @@
 // The boot agent's rules, used by the dashboard's Enforcement tab
-// (pages/EnforcementPage.jsx: the boot page and the four-step placement), with
+// (pages/EnforcementPage.jsx: the boot page and the three-step placement), with
 // no DOM and no network, so `scripts/agentLogic.test.mjs` can cover them. They
 // came from Victor's /agent screen, which now redirects to /app. Phase 1 talks only to the
 // boot-portal edge function as it runs today (supabase/functions/boot-portal):
@@ -17,6 +17,13 @@ export const LOW_BATTERY_PCT = 25;                          // boot-portal lock(
 export const CMD = { UNLOCK: 1, LOCK: 2 };
 export const EMERGENCY_MIN_CHARS = 20;                      // boot-portal EMERGENCY_MIN_CHARS
 export const POLL_MS = 5000;
+/** The unbranded motorist site (repo boot-release/). The window sticker's QR goes to its front page. */
+export const RELEASE_SITE = 'https://boot-release.vercel.app';
+
+/** The pay link for one boot's car: what the boot line texts a caller who can't use the sticker. */
+export function payLink(qrCode) {
+  return qrCode ? `${RELEASE_SITE}/?b=${encodeURIComponent(qrCode)}` : RELEASE_SITE;
+}
 
 // ── formatting ─────────────────────────────────────────────────────────────
 export function esc(s) {
@@ -136,12 +143,15 @@ export function bootNotices(detail) {
     out.push({
       tone: 'wait', spin: true, title: `${what} sent at ${timeOf(pend.created_at)}`,
       text: d?.status === 'release_authorized'
-        ? 'Boots are switched off while on a car. It opens once the driver switches it on, which the pay page tells them to do.'
+        ? 'A boot on a car checks in every few minutes, so it opens within about 3 minutes.'
         : 'The boot picks this up when it next checks in, usually within a minute.',
     });
   }
   if (d?.status === 'active') {
-    out.push({ tone: 'on', title: 'Waiting for payment', text: `${money(d.fee_cents)} fee. The driver pays by scanning the QR code on the boot.` });
+    out.push({
+      tone: 'on', title: 'Waiting for payment',
+      text: `${money(d.fee_cents)} fee. The motorist pays by plate from the window sticker, or the boot line texts them the pay link.`,
+    });
   }
   if (d?.status === 'release_authorized') {
     const title = RELEASE_WORD[d.release_reason] || (d.paid_at ? `Paid ${money(d.paid_amount_cents ?? d.fee_cents)} at ${timeOf(d.paid_at)}` : 'Cleared to release');
@@ -207,12 +217,14 @@ export function outcomeMessage(purpose, outcome) {
   return { tone: 'ready', text: 'The boot reported a problem with that command. Try again, or use another boot.' };
 }
 
-// ── place a boot: 4 steps ──────────────────────────────────────────────────
-export const STEP_NAMES = ['Where', 'Vehicle', 'Boot', 'Sign'];
+// ── place a boot: 3 steps ──────────────────────────────────────────────────
+// Boot first, so it opens while the agent types the car in; then the car; then fit, photo and sign. Locking is
+// followed by the tug test (EnforcementPage PlaceFlow; boot-portal pin-check).
+export const STEP_NAMES = ['Boot', 'Car', 'Fit & sign'];
 
-export function newPlacement(bootId = '') {
+export function newPlacement(bootId = '', properties = []) {
   return {
-    step: 1, property_id: '', plate: '', plate_state: 'NC', make: '', model: '', color: '', spot: '', notes: '',
+    step: 1, property_id: properties.length === 1 ? properties[0].id : '', plate: '', plate_state: 'NC', make: '', model: '', color: '', spot: '', notes: '',
     boot_id: bootId, photo_path: '', photo_preview: '', signed_name: '', signature: null, signed_at: null, resign: false,
   };
 }
@@ -235,6 +247,7 @@ export function signPlacement(f, pngDataUrl, at = new Date().toISOString()) {
 /**
  * What still stops a step from going on, in words for "Still needed: …".
  * ctx: {properties, pausesUnknown, boot (a GET /boots row or detail.boot), pending (a command), opening}
+ * Step 1 does not wait for the boot to open: it opens while the agent fills in step 2. Step 3 does.
  */
 export function stepMissing(f, step, ctx = {}) {
   const m = [];
@@ -242,26 +255,25 @@ export function stepMissing(f, step, ctx = {}) {
   // accepts a boot of a car LotLogic texted the drivers to boot before the
   // pause started (spec Part 3; pause_gate.ts dispatchedBeforePause), which
   // this screen cannot see, and refuses any other. bootPauseNotice warns first.
+  const b = ctx.boot;
   if (step === 1) {
-    if (!(ctx.properties || []).length) m.push('a property assigned to you (ask LotLogic)');
-    else if (!f.property_id) m.push('property');
-  }
-  if (step === 2) {
-    if (normPlate(f.plate).length < 2) m.push('plate');
-    if (!/^[A-Z]{2}$/.test(String(f.plate_state || '').trim().toUpperCase())) m.push('plate state');
-  }
-  if (step === 3) {
-    const b = ctx.boot;
     if (!f.boot_id || !b) m.push('boot');
     else {
       if (lowBattery(b)) m.push('a boot with more battery');
       if (hasFault(b)) m.push('a boot without a fault');
       if (ctx.pending && ctx.pending.purpose !== 'fit') m.push('wait for the boot to finish');
-      if (!isOpenState(b.state)) m.push(ctx.opening ? 'wait for the boot to open' : 'open the boot');
+      else if (!isOpenState(b.state) && !ctx.opening) m.push('open the boot');
     }
-    if (!f.photo_path) m.push('photo of the boot');
   }
-  if (step === 4) {
+  if (step === 2) {
+    if (!(ctx.properties || []).length) m.push('a property assigned to you (ask LotLogic)');
+    else if (!f.property_id) m.push('property');
+    if (normPlate(f.plate).length < 2) m.push('plate');
+    if (!/^[A-Z]{2}$/.test(String(f.plate_state || '').trim().toUpperCase())) m.push('plate state');
+  }
+  if (step === 3) {
+    if (b && !isOpenState(b.state)) m.push(ctx.opening ? 'wait for the boot to open' : 'open the boot');
+    if (!f.photo_path) m.push('photo of the boot');
     if (String(f.signed_name || '').trim().length < 2) m.push('your full name');
     if (!f.signature) m.push('signature');
   }

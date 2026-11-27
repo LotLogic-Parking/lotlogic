@@ -106,6 +106,56 @@ export async function wifiPassword(secret: Uint8Array): Promise<string> {
   return bytesToHex(await hmac(secret, new TextEncoder().encode("lotlogic-wifi-ap"))).slice(0, 16);
 }
 
+// ---------------------------------------------------------------- check-in interval
+// A boot stays switched on while it is on a car (Victor, 27 Nov: no more "switch it off after locking"). To save
+// its one 18650, the server tells it to check in less often while a placement is open. The trade-off is the
+// release: a paid boot hears about it on its next check-in, so up to this long after payment.
+const ON_CAR_POLL_DEFAULT_S = 180;
+export function onCarPollS(): number {
+  const v = Number(Deno.env.get("BOOT_ON_CAR_POLL_S"));
+  return Number.isInteger(v) && v >= 30 && v <= 900 ? v : ON_CAR_POLL_DEFAULT_S;
+}
+/** How often this boot is told to check in: the on-car interval while a placement is open, else its poll_s. */
+export function checkInS(boot: { poll_s: number }, depStatus: string | null | undefined): number {
+  return depStatus && ["locking", "active", "release_authorized"].includes(depStatus) ? onCarPollS() : boot.poll_s;
+}
+
+// ---------------------------------------------------------------- phone numbers and SMS
+/** A US number as E.164 (+1XXXXXXXXXX), an already-E.164 number as is, anything else null. Square refuses bare digits. */
+export function e164(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return null;
+  const digits = s.replace(/\D/g, "");
+  if (s.startsWith("+") && digits.length >= 8 && digits.length <= 15) return "+" + digits;
+  if (digits.length === 10) return "+1" + digits;
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  return null;
+}
+
+/**
+ * Text one number through Twilio. Needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and BOOT_SMS_FROM (the boot line,
+ * +19809904401) as edge secrets; without them it does nothing and says so. Never throws: an alert must not break
+ * the request that triggered it.
+ */
+export async function sendSms(to: string, body: string): Promise<{ sent: boolean; reason?: string }> {
+  const sid = Deno.env.get("TWILIO_ACCOUNT_SID"), token = Deno.env.get("TWILIO_AUTH_TOKEN"), from = Deno.env.get("BOOT_SMS_FROM");
+  if (!sid || !token || !from) return { sent: false, reason: "sms_not_configured" };
+  const num = e164(to);
+  if (!num) return { sent: false, reason: "bad_number" };
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: "POST",
+      headers: { Authorization: "Basic " + btoa(`${sid}:${token}`), "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ To: num, From: from, Body: body }),
+    });
+    if (!res.ok) { console.error("twilio", res.status, await res.text().catch(() => "")); return { sent: false, reason: `twilio_${res.status}` }; }
+    return { sent: true };
+  } catch (e) {
+    console.error("twilio", e);
+    return { sent: false, reason: "twilio_unreachable" };
+  }
+}
+
 export async function loadSecret(db: SupabaseClient, bootId: string): Promise<Uint8Array | null> {
   const { data, error } = await db.from("boot_secrets").select("secret").eq("boot_id", bootId).maybeSingle();
   if (error) throw error;

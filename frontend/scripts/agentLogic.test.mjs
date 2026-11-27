@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   ago, attestation, bootActions, bootCounts, bootNotices, bootStatus, bootSubline, commandOutcome, editPlacement,
   emergencyReady, esc, freeBoots, initials, lockBody, needsPickup, newPlacement, normPlate, outcomeMessage,
-  bootPauseNotice, placementNotes, signPlacement, stepMissing,
+  bootPauseNotice, payLink, placementNotes, signPlacement, STEP_NAMES, stepMissing,
 } from '../src/agent/logic.js';
 
 const NOW = Date.parse('2026-11-16T15:00:00Z');
@@ -48,6 +48,8 @@ test('bootNotices: waiting for payment, paid and opening, pick up, fault, batter
   const waiting = bootNotices({ boot: { state: 0 }, deployment: { status: 'active', fee_cents: 25000 }, commands: [] });
   assert.deepEqual(waiting.map((n) => n.title), ['Waiting for payment']);
   assert.match(waiting[0].text, /\$250\.00 fee/);
+  assert.doesNotMatch(waiting[0].text, /pay code/i);
+  assert.match(waiting[0].text, /by plate/);
 
   const paid = bootNotices({
     boot: { state: 0 },
@@ -56,7 +58,8 @@ test('bootNotices: waiting for payment, paid and opening, pick up, fault, batter
   });
   assert.equal(paid[0].spin, true);
   assert.match(paid[0].title, /^Releasing sent at /);
-  assert.match(paid[0].text, /switches it on/);
+  assert.doesNotMatch(paid[0].text, /switch/);   // boots stay on while on a car (27 Nov)
+  assert.match(paid[0].text, /about 3 minutes/);
   assert.match(paid[1].title, /^Paid \$250\.00 at /);
 
   assert.equal(bootNotices({ boot: { state: 0 }, deployment: { status: 'release_authorized', release_reason: 'waived' }, commands: [] })[0].title, 'Fee waived');
@@ -101,24 +104,40 @@ test('commandOutcome and outcomeMessage', () => {
 });
 
 // ── place a boot ──────────────────────────────────────────────────────────
-test('stepMissing: each step names what is still needed', () => {
+test('stepMissing: boot first (it may still be opening), then the car, then fit and sign', () => {
+  assert.deepEqual(STEP_NAMES, ['Boot', 'Car', 'Fit & sign']);
   const f = newPlacement();
-  assert.deepEqual(stepMissing(f, 1, { properties: [] }), ['a property assigned to you (ask LotLogic)']);
-  assert.deepEqual(stepMissing(f, 1, { properties: [{ id: 'p1' }] }), ['property']);
-  assert.deepEqual(stepMissing({ ...f, property_id: 'p1' }, 1, { properties: [{ id: 'p1' }] }), []);
-
-  assert.deepEqual(stepMissing({ ...f, plate_state: '' }, 2), ['plate', 'plate state']);
-  assert.deepEqual(stepMissing({ ...f, plate: 'kmd-4821', plate_state: 'nc' }, 2), []);
-
-  assert.deepEqual(stepMissing(f, 3, {}), ['boot', 'photo of the boot']);
+  // 1. the boot: picked, usable, and open or opening
+  assert.deepEqual(stepMissing(f, 1, {}), ['boot']);
   const g = { ...f, boot_id: 'b1' };
-  assert.deepEqual(stepMissing(g, 3, { boot: { state: 0, battery_pct: 80 } }), ['open the boot', 'photo of the boot']);
-  assert.deepEqual(stepMissing(g, 3, { boot: { state: 0, battery_pct: 80 }, opening: true }), ['wait for the boot to open', 'photo of the boot']);
-  assert.deepEqual(stepMissing(g, 3, { boot: { state: 1, battery_pct: 20 } }), ['a boot with more battery', 'photo of the boot']);
-  assert.deepEqual(stepMissing({ ...g, photo_path: 'boot-photos/x/b1/lock-1.jpg' }, 3, { boot: { state: 1, battery_pct: 80 } }), []);
+  assert.deepEqual(stepMissing(g, 1, { boot: { state: 0, battery_pct: 80 } }), ['open the boot']);
+  assert.deepEqual(stepMissing(g, 1, { boot: { state: 0, battery_pct: 80 }, opening: true }), []);
+  assert.deepEqual(stepMissing(g, 1, { boot: { state: 1, battery_pct: 20 } }), ['a boot with more battery']);
+  assert.deepEqual(stepMissing(g, 1, { boot: { state: 1, battery_pct: 80 }, pending: { purpose: 'store' } }), ['wait for the boot to finish']);
+  assert.deepEqual(stepMissing(g, 1, { boot: { state: 1, battery_pct: 80 } }), []);
 
-  assert.deepEqual(stepMissing(f, 4), ['your full name', 'signature']);
-  assert.deepEqual(stepMissing(signPlacement({ ...f, signed_name: 'Dana Reyes' }, PNG), 4), []);
+  // 2. the car
+  assert.deepEqual(stepMissing(f, 2, { properties: [] }), ['a property assigned to you (ask LotLogic)', 'plate']);
+  assert.deepEqual(stepMissing({ ...f, plate: 'kmd-4821' }, 2, { properties: [{ id: 'p1' }] }), ['property']);
+  assert.deepEqual(stepMissing({ ...f, plate_state: '', property_id: 'p1' }, 2, { properties: [{ id: 'p1' }] }), ['plate', 'plate state']);
+  assert.deepEqual(stepMissing({ ...f, plate: 'kmd-4821', plate_state: 'nc', property_id: 'p1' }, 2, { properties: [{ id: 'p1' }] }), []);
+
+  // 3. fit and sign: the boot must be open now
+  assert.deepEqual(stepMissing(g, 3, { boot: { state: 0, battery_pct: 80 }, opening: true }),
+    ['wait for the boot to open', 'photo of the boot', 'your full name', 'signature']);
+  const ready = signPlacement({ ...g, photo_path: 'boot-photos/x/b1/lock-1.jpg', signed_name: 'Dana Reyes' }, PNG);
+  assert.deepEqual(stepMissing(ready, 3, { boot: { state: 1, battery_pct: 80 } }), []);
+});
+
+test('newPlacement: one assigned property is picked for the agent', () => {
+  assert.equal(newPlacement('', [{ id: 'p1' }]).property_id, 'p1');
+  assert.equal(newPlacement('', [{ id: 'p1' }, { id: 'p2' }]).property_id, '');
+  assert.equal(newPlacement('b1').boot_id, 'b1');
+});
+
+test('payLink: the boot-release page opened on this boot', () => {
+  assert.equal(payLink('YERHYDBS'), 'https://boot-release.vercel.app/?b=YERHYDBS');
+  assert.equal(payLink(null), 'https://boot-release.vercel.app');
 });
 
 // ── an enforcement pause (boot-portal GET /properties: paused_until per property, pauses_unknown) ──
@@ -128,16 +147,16 @@ test('stepMissing: a paused property does not stop the steps; the server decides
   // spec Part 3: a car LotLogic texted the drivers to boot before the pause
   // started may still be booted (boot-portal pause_gate.ts dispatchedBeforePause).
   // This screen cannot see those texts, so it warns and lets the agent go on.
-  const f = { ...newPlacement(), property_id: 'p1' };
-  assert.deepEqual(stepMissing(f, 1, { properties: [PAUSED] }), []);
-  const signed = signPlacement({ ...f, signed_name: 'Dana Reyes' }, PNG);
-  assert.deepEqual(stepMissing(signed, 4, { properties: [PAUSED] }), []);
+  const f = { ...newPlacement(), property_id: 'p1', plate: 'KMD4821' };
+  assert.deepEqual(stepMissing(f, 2, { properties: [PAUSED] }), []);
+  const signed = signPlacement({ ...f, signed_name: 'Dana Reyes', photo_path: 'boot-photos/x/b1/lock-1.jpg' }, PNG);
+  assert.deepEqual(stepMissing(signed, 3, { properties: [PAUSED] }), []);
   // The step's own needs still count at a paused property.
   assert.deepEqual(stepMissing({ ...f, plate: '' }, 2, { properties: [PAUSED] }), ['plate']);
-  assert.deepEqual(stepMissing(f, 1, { properties: [{ ...PAUSED, paused_until: null }] }), []);
+  assert.deepEqual(stepMissing(f, 2, { properties: [{ ...PAUSED, paused_until: null }] }), []);
   // The pauses could not be read: the server decides at Lock boot, so the agent may go on.
-  assert.deepEqual(stepMissing(f, 1, { properties: [{ id: 'p1' }], pausesUnknown: true }), []);
-  for (const step of [1, 2, 3, 4]) {
+  assert.deepEqual(stepMissing(f, 2, { properties: [{ id: 'p1' }], pausesUnknown: true }), []);
+  for (const step of [1, 2, 3]) {
     assert.ok(!stepMissing(f, step, { properties: [PAUSED] }).some((w) => /paused/.test(w)), `step ${step} names no pause`);
   }
 });
