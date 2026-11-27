@@ -6,7 +6,7 @@ import {
 } from '../lib/enforcement.js';
 import {
   attestation, bootActions, bootCounts, bootNotices, bootPauseNotice, commandOutcome, editPlacement, freeBoots, hasFault, lockBody,
-  lowBattery, newPlacement, normPlate, outcomeMessage, pendingCommand, POLL_MS, signPlacement, STEP_NAMES, stepMissing,
+  lowBattery, newPlacement, normPlate, outcomeMessage, payLink, pendingCommand, POLL_MS, signPlacement, STEP_NAMES, stepMissing,
 } from '../agent/logic.js';
 import { fmtETStamp } from '../lib/holdTime.js';
 import { PauseIcon } from './office/PauseBanners.jsx';
@@ -15,7 +15,7 @@ import { PauseIcon } from './office/PauseBanners.jsx';
 // The Smart Boot fleet. LotLogic's two admins see every boot, the agents and
 // the payments; a LotLogic boot agent sees their own boots and the properties
 // they cover (lib/enforcement.js says how each is scoped). Placing a boot is
-// the agent screen's four steps (agent/logic.js holds its rules). Everything
+// the agent screen's three steps and the tug test (agent/logic.js holds its rules). Everything
 // goes through the boot-portal edge function; the boots pick commands up on
 // their next LTE check-in, and the page looks again every 5 s until they do.
 
@@ -35,14 +35,18 @@ function Notice({ n }) {
   );
 }
 
-// The placement's pay code, big enough to copy onto the boot sticker in marker. Every sticker's QR goes to
-// boot-release.vercel.app (repo boot-release/); this code is what tells the motorist's phone which placement to pay.
-function PayCode({ code }) {
+// The car's pay link, for the boot line: a caller who can't use the window sticker gets it by text.
+function PayLink({ qr }) {
+  const link = payLink(qr);
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* the link is on screen to copy by hand */ }
+  };
   return (
-    <div className="enf-paycode" data-testid="pay-code">
-      <small>PAY CODE: write it on the boot sticker</small>
-      <b className="enf-mono">{code}</b>
-    </div>
+    <dl className="enf-facts" data-testid="pay-link">
+      <div className="enf-wide"><dt>Pay link</dt><dd><span className="enf-mono">{link}</span>{' '}
+        <button type="button" className="pq-btn pq-btn--quiet pq-btn--small" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></dd></div>
+    </dl>
   );
 }
 
@@ -113,15 +117,14 @@ function SignaturePad({ value, onSign, hint }) {
   );
 }
 
-// ── place a boot: 4 steps ─────────────────────────────────────
+// ── place a boot: 3 steps, then the tug test ──────────────────
 function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, onExit, onChanged }) {
-  const [f, setF] = React.useState(() => ({ ...newPlacement(startBootId || ''), signed_name: me?.name || '' }));
-  const [phase, setPhase] = React.useState('form'); // form | locking | done | failed
+  const [f, setF] = React.useState(() => ({ ...newPlacement(startBootId || '', properties), signed_name: me?.name || '' }));
+  const [phase, setPhase] = React.useState('form'); // form | locking | tug | done | failed
   const [detail, setDetail] = React.useState(null);  // GET /boot of the boot picked in step 3
   const [waiting, setWaiting] = React.useState(null); // {commandId, purpose}: sent, not finished
   const [delivered, setDelivered] = React.useState(false);
   const [failText, setFailText] = React.useState('');
-  const [payCode, setPayCode] = React.useState(null); // this placement's code for the motorist, from POST /lock
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
@@ -135,6 +138,10 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
   const pauseNote = bootPauseNotice(prop, pausesUnknown);
   const missing = stepMissing(f, f.step, ctx);
   const set = (key) => (e) => setF(prev => editPlacement(prev, key, e.target.value));
+  // One property assigned: it is the property (the list can arrive after the flow opens).
+  React.useEffect(() => {
+    if (properties.length === 1 && !f.property_id) setF(p => editPlacement(p, 'property_id', properties[0].id));
+  }, [properties]); // eslint-disable-line react-hooks/exhaustive-deps
 
   React.useEffect(() => {
     if (!f.boot_id) return undefined;
@@ -157,7 +164,7 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
         if (phase === 'locking') setDelivered(!!o.delivered);
         if (o.state === 'waiting') return;
         if (phase === 'locking') {
-          if (o.state === 'done') setPhase('done');
+          if (o.state === 'done') setPhase('tug');
           else { setPhase('failed'); setFailText(outcomeMessage('place', o).text); }
         }
         setWaiting(null);
@@ -170,12 +177,12 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
   const top = () => window.scrollTo(0, 0);
   const next = async () => {
     if (missing.length || busy) return;
-    if (f.step < 4) { setF(p => ({ ...p, step: p.step + 1 })); setError(''); top(); return; }
+    if (f.step < STEP_NAMES.length) { setF(p => ({ ...p, step: p.step + 1 })); setError(''); top(); return; }
     setBusy(true); setError('');
     try {
       const [sigPath, pos] = await Promise.all([uploadBootFile(f.boot_id, dataUrlToBlob(f.signature), 'signature'), getPosition()]);
       const r = await portal('lock', { method: 'POST', body: lockBody(f, sigPath, pos) });
-      setPhase('locking'); setDelivered(false); setPayCode(r.pay_code || null);
+      setPhase('locking'); setDelivered(false);
       setWaiting({ commandId: r.command_id, purpose: 'place' });
       onChanged();
     } catch (x) {
@@ -197,6 +204,16 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
       const path = await uploadBootFile(f.boot_id, file, 'lock');
       setF(p => ({ ...editPlacement(p, 'photo_path', path), photo_preview: URL.createObjectURL(file) }));
     } catch (x) { setError(x.message); } finally { setUploading(false); }
+  };
+  // The tug test: there is no pin sensor, so "locked" is only the boot's word until the agent pulls on it.
+  const pinCheck = async (tight) => {
+    setBusy(true); setError('');
+    try {
+      const r = await portal('pin-check', { method: 'POST', body: { boot_id: f.boot_id, tight } });
+      if (tight) setPhase('done');
+      else { setPhase('failed'); setFailText(r.message || 'Placement cancelled. The boot opens so you can refit it.'); }
+      onChanged();
+    } catch (x) { setError(x.message || 'Could not record the check. Try again.'); } finally { setBusy(false); }
   };
   const cancelLock = async () => {
     setBusy(true); setError('');
@@ -228,13 +245,21 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
               : <button type="button" className="pq-btn" onClick={cancelLock} disabled={busy}>Cancel lock</button>}
           </>
         )}
-        {phase !== 'failed' && payCode && <PayCode code={payCode} />}
+        {phase === 'tug' && (
+          <div data-testid="tug-test">
+            <Notice n={{ tone: 'on', title: 'Pull on the boot', text: 'Grab it with both hands and pull hard. Is it tight on the wheel?' }} />
+            <div className="enf-actions">
+              <button type="button" className="pq-btn pq-btn--primary" onClick={() => pinCheck(true)} disabled={busy}>Tight</button>
+              <button type="button" className="pq-btn" onClick={() => pinCheck(false)} disabled={busy}>Loose</button>
+            </div>
+          </div>
+        )}
         {phase === 'done' && (
-          <Notice n={{ tone: 'done', title: 'Boot locked', text: `${label} is on ${normPlate(f.plate)}${prop ? ` at ${prop.name}` : ''}. The motorist scans the QR code on the boot and enters the pay code to pay.` }} />
+          <Notice n={{ tone: 'done', title: 'Boot placed', text: `${label} is on ${normPlate(f.plate)}${prop ? ` at ${prop.name}` : ''}. Put the sticker on a side window and write the violation on it. Leave the boot switched on. You get a text when it opens.` }} />
         )}
         {phase === 'failed' && <Notice n={{ tone: 'ready', title: 'Not locked', text: failText }} />}
         {error && <p className="enf-err" role="alert">{error}</p>}
-        {phase !== 'locking' && <button type="button" className="pq-btn pq-btn--primary" onClick={() => onExit(f.boot_id)}>Open {label}</button>}
+        {phase !== 'locking' && phase !== 'tug' && <button type="button" className="pq-btn pq-btn--primary" onClick={() => onExit(f.boot_id)}>Open {label}</button>}
       </div>
     );
   }
@@ -250,35 +275,7 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
         </div>
       )}
       {pauseNote?.kind === 'unknown' && <p className="enf-muted" role="status" data-testid="place-pause">{pauseNote.text}</p>}
-      {f.step === 1 && (properties.length
-        ? (
-          <label className="pq-field"><span className="pq-label">Property</span>
-            <select value={f.property_id} onChange={set('property_id')} aria-label="Property">
-              <option value="">Select property</option>
-              {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            {prop?.address && <span className="enf-muted">{prop.address}</span>}
-          </label>
-        )
-        : <p className="enf-warn">No properties are assigned to you yet. Ask LotLogic to assign the properties you cover.</p>)}
-      {f.step === 2 && (
-        <>
-          <div className="enf-form-grid">
-            <label className="pq-field"><span className="pq-label">Plate</span>
-              <input value={f.plate} onChange={set('plate')} autoComplete="off" autoCapitalize="characters" placeholder="ABC1234" className="enf-mono" />
-            </label>
-            <label className="pq-field"><span className="pq-label">State</span>
-              <input value={f.plate_state} onChange={set('plate_state')} maxLength={2} autoCapitalize="characters" className="enf-mono" />
-            </label>
-            <label className="pq-field"><span className="pq-label">Make</span><input value={f.make} onChange={set('make')} placeholder="Toyota" /></label>
-            <label className="pq-field"><span className="pq-label">Model</span><input value={f.model} onChange={set('model')} placeholder="Camry" /></label>
-            <label className="pq-field"><span className="pq-label">Color</span><input value={f.color} onChange={set('color')} placeholder="White" /></label>
-          </div>
-          <label className="pq-field"><span className="pq-label">Location on property</span><input value={f.spot} onChange={set('spot')} placeholder="Building C, row 2" /></label>
-          <label className="pq-field"><span className="pq-label">Notes</span><textarea rows={2} value={f.notes} onChange={set('notes')} placeholder="Anything LotLogic or the office should know" /></label>
-        </>
-      )}
-      {f.step === 3 && (
+      {f.step === 1 && (
         <>
           <fieldset className="pq-field enf-bootpick">
             <legend className="pq-label">Which boot</legend>
@@ -295,15 +292,56 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
             {freeBoots(boots).length === 0 && <p className="ls-note">No free boots.</p>}
           </fieldset>
           {picked && (isOpen
-            ? <Notice n={{ tone: 'done', title: `${picked.label} is open`, text: 'Fit it on the wheel, then take the photo.' }} />
+            ? <Notice n={{ tone: 'done', title: `${picked.label} is open`, text: 'Continue and enter the car.' }} />
             : ctx.opening
-              ? <div data-testid="opening"><Notice n={{ tone: 'wait', spin: true, title: `Opening ${picked.label}`, text: 'Usually within a minute.' }} /></div>
+              ? <div data-testid="opening"><Notice n={{ tone: 'wait', spin: true, title: `Opening ${picked.label}`, text: 'Usually within a minute. Enter the car meanwhile.' }} /></div>
               : (
                 <>
-                  <Notice n={{ tone: 'grey', title: `${picked.label} is closed`, text: 'Open it so you can fit it on the wheel.' }} />
+                  <Notice n={{ tone: 'grey', title: `${picked.label} is closed`, text: 'Open it now. It opens while you enter the car.' }} />
                   <button type="button" className="pq-btn" onClick={openPicked} disabled={busy || lowBattery(picked) || hasFault(picked)}>Open {picked.label}</button>
                 </>
               ))}
+        </>
+      )}
+      {f.step === 2 && (
+        <>
+          {properties.length === 0 && <p className="enf-warn">No properties are assigned to you yet. Ask LotLogic to assign the properties you cover.</p>}
+          {properties.length === 1 && <p className="enf-muted" data-testid="place-property">At <b>{properties[0].name}</b></p>}
+          {properties.length > 1 && (
+            <label className="pq-field"><span className="pq-label">Property</span>
+              <select value={f.property_id} onChange={set('property_id')} aria-label="Property">
+                <option value="">Select property</option>
+                {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              {prop?.address && <span className="enf-muted">{prop.address}</span>}
+            </label>
+          )}
+          <div className="enf-form-grid">
+            <label className="pq-field"><span className="pq-label">Plate</span>
+              <input value={f.plate} onChange={set('plate')} autoComplete="off" autoCapitalize="characters" placeholder="ABC1234" className="enf-mono" />
+            </label>
+            <label className="pq-field"><span className="pq-label">State</span>
+              <input value={f.plate_state} onChange={set('plate_state')} maxLength={2} autoCapitalize="characters" className="enf-mono" />
+            </label>
+            <label className="pq-field"><span className="pq-label">Color (optional)</span><input value={f.color} onChange={set('color')} placeholder="White" /></label>
+            <label className="pq-field"><span className="pq-label">Make (optional)</span><input value={f.make} onChange={set('make')} placeholder="Toyota" /></label>
+            <label className="pq-field"><span className="pq-label">Model (optional)</span><input value={f.model} onChange={set('model')} placeholder="Camry" /></label>
+          </div>
+          <label className="pq-field"><span className="pq-label">Where on the property (optional)</span><input value={f.spot} onChange={set('spot')} placeholder="Building C, row 2" /></label>
+          <label className="pq-field"><span className="pq-label">Notes (optional)</span><textarea rows={2} value={f.notes} onChange={set('notes')} placeholder="Anything LotLogic or the office should know" /></label>
+        </>
+      )}
+      {f.step === 3 && (
+        <>
+          {picked && !isOpen && (ctx.opening
+            ? <div data-testid="opening"><Notice n={{ tone: 'wait', spin: true, title: `Opening ${picked.label}`, text: 'Usually within a minute.' }} /></div>
+            : (
+              <>
+                <Notice n={{ tone: 'grey', title: `${picked.label} is closed`, text: 'Open it so you can fit it on the wheel.' }} />
+                <button type="button" className="pq-btn" onClick={openPicked} disabled={busy || lowBattery(picked) || hasFault(picked)}>Open {picked.label}</button>
+              </>
+            ))}
+          {isOpen && <p className="enf-muted">Fit {picked.label} on the wheel, then take the photo.</p>}
           <label className={`pq-field enf-shot${f.photo_preview ? ' is-filled' : ''}`}>
             <span className="pq-label">Photo</span>
             {f.photo_preview
@@ -312,11 +350,6 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
             <input type="file" accept="image/*" capture="environment" data-testid="place-photo" disabled={!f.boot_id || uploading}
               aria-label="Photo of the boot on the wheel" onChange={e => photo(e.target.files?.[0])} />
           </label>
-          {!f.boot_id && <p className="ls-note">Pick a boot first: the photo is stored with it.</p>}
-        </>
-      )}
-      {f.step === 4 && (
-        <>
           <dl className="enf-facts">
             <div><dt>Property</dt><dd>{prop?.name || '—'}</dd></div>
             <div><dt>Plate</dt><dd className="enf-mono">{normPlate(f.plate)} {String(f.plate_state).toUpperCase()}</dd></div>
@@ -332,11 +365,11 @@ function PlaceFlow({ boots, properties, pausesUnknown = false, startBootId, me, 
       )}
       {error && <div className="enf-notice enf-notice--ready" role="alert" data-testid="place-error"><div><b>Not done</b><span>{error}</span></div></div>}
       <div className="enf-place-foot">
-        <p className="enf-muted" data-testid="place-missing">{missing.length ? `Still needed: ${missing.join(', ')}` : f.step === 4 ? 'Keep your hands clear when it locks.' : ''}</p>
+        <p className="enf-muted" data-testid="place-missing">{missing.length ? `Still needed: ${missing.join(', ')}` : f.step === STEP_NAMES.length ? 'Keep your hands clear when it locks.' : ''}</p>
         <div className="enf-actions">
           {f.step > 1 && <button type="button" className="pq-btn" onClick={() => { setF(p => ({ ...p, step: p.step - 1 })); setError(''); top(); }}>Back</button>}
-          <button type="button" className={`pq-btn ${f.step === 4 ? 'pq-btn--danger' : 'pq-btn--primary'}`} onClick={next} disabled={missing.length > 0 || busy}>
-            {f.step === 4 ? (busy ? 'Locking…' : 'Lock boot') : 'Continue'}
+          <button type="button" className={`pq-btn ${f.step === STEP_NAMES.length ? 'pq-btn--danger' : 'pq-btn--primary'}`} onClick={next} disabled={missing.length > 0 || busy}>
+            {f.step === STEP_NAMES.length ? (busy ? 'Locking…' : 'Lock boot') : 'Continue'}
           </button>
         </div>
       </div>
@@ -497,7 +530,6 @@ function BootDetail({ bootId, admin, onChanged, onPlace }) {
         <section className="enf-dep">
           <h4>{onCar ? deploymentLabel(dep.status) : `Last placement · ${deploymentLabel(dep.status)}`}</h4>
           <dl className="enf-facts">
-            {dep.pay_code && <div><dt>Pay code</dt><dd className="enf-mono" data-testid="dep-pay-code">{dep.pay_code}</dd></div>}
             <div><dt>Plate</dt><dd className="enf-mono">{dep.plate_text}{dep.plate_state ? ` (${dep.plate_state})` : ''}</dd></div>
             <div><dt>Vehicle</dt><dd>{dep.vehicle || '—'}</dd></div>
             <div><dt>Property</dt><dd>{dep.property || '—'}</dd></div>
@@ -506,6 +538,7 @@ function BootDetail({ bootId, admin, onChanged, onPlace }) {
             <div><dt>Placed</dt><dd>{stamp(dep.lock_confirmed_at || dep.applied_at)}{dep.driver_signed_name ? ` · ${dep.driver_signed_name}` : ''}</dd></div>
             <div><dt>Released</dt><dd>{dep.released_at ? `${stamp(dep.released_at)} · ${dep.release_reason}` : '—'}{dep.unlocked_at ? ` · opened ${stamp(dep.unlocked_at)}` : ''}</dd></div>
           </dl>
+          {dep.status === 'active' && <PayLink qr={boot.qr_code} />}
           {dep.notes && <p className="ls-note enf-notes">{dep.notes}</p>}
           {dep.emergency_unlocked_at && <p className="enf-warn">Emergency unlock {stamp(dep.emergency_unlocked_at)}: {dep.emergency_reason_label}. {dep.emergency_explanation}</p>}
           <div className="enf-photos">

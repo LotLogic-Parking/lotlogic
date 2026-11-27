@@ -29,9 +29,8 @@ main{flex:1;padding-block:28px 24px;padding-left:max(16px,env(safe-area-inset-le
 form,.step{display:flex;flex-direction:column;gap:14px}
 label{font-weight:800;font-size:13px;letter-spacing:.14em}
 .hint{margin:0;color:var(--mute);font-size:15px;line-height:1.45}
-.big{font-family:var(--mono);font-weight:700;font-size:44px;letter-spacing:.32em;text-align:center;text-transform:uppercase;
-  width:100%;padding:14px 0 14px .32em;border:3px solid var(--ink);border-radius:12px;background:var(--paper);color:var(--ink);outline:none}
-.big.plate{font-size:32px;letter-spacing:.12em;padding-left:.12em}
+.big{font-family:var(--mono);font-weight:700;font-size:32px;letter-spacing:.12em;text-align:center;text-transform:uppercase;
+  width:100%;padding:14px 0 14px .12em;border:3px solid var(--ink);border-radius:12px;background:var(--paper);color:var(--ink);outline:none}
 .big:focus-visible{border-color:var(--brand);box-shadow:0 0 0 4px rgba(11,13,16,.18)}
 .big[aria-invalid="true"]{border-color:var(--bad)}
 .err{margin:0;color:var(--bad);font-weight:600;font-size:15px;min-height:1.4em}
@@ -41,7 +40,6 @@ button:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
 .primary:hover:not(:disabled){background:var(--brand-deep);border-color:var(--brand-deep)}
 .primary:disabled{background:#B9BEC7;border-color:#B9BEC7;cursor:not-allowed}
 .ghost{background:var(--paper);color:var(--brand)}
-.link{background:none;border:0;padding:6px 0;color:var(--brand);font-size:16px;font-weight:700;text-decoration:underline;text-underline-offset:3px;align-self:center}
 .card{background:var(--tint);border:1px solid #E1E4E8;border-left:6px solid var(--brand);border-radius:12px;padding:18px}
 .card.good{background:var(--good-tint);border-color:#ABEFC6;border-left-color:var(--good)}
 .card small{display:block;font-weight:800;font-size:12px;letter-spacing:.16em;color:var(--brand)}
@@ -59,9 +57,8 @@ ol.steps{margin:0;padding-left:22px;font-size:16px;line-height:1.5}
 ol.steps li+li{margin-top:6px}
 .matches{display:flex;flex-direction:column;gap:10px}
 .matches button{text-align:left;font-size:16px;font-weight:600;background:var(--paper);color:var(--ink);border:2px solid var(--line)}
-.matches button b{font-family:var(--mono);letter-spacing:.2em;color:var(--brand);font-size:20px;margin-right:10px}
 .small{margin:0;color:var(--mute);font-size:14px;line-height:1.45}
-.small a{color:var(--mute)}
+.small a{color:var(--ink);font-weight:700}
 @media (prefers-reduced-motion:no-preference){.step{animation:in .18s ease-out}@keyframes in{from{opacity:.4;transform:translateY(4px)}}}
 </style>
 </head>
@@ -72,25 +69,15 @@ ol.steps li+li{margin-top:6px}
 </div></header>
 
 <main><div class="wrap">
-  <!-- 1. the pay code from the sticker -->
-  <form id="enter" class="step" novalidate>
-    <label for="code">PAY CODE</label>
-    <p class="hint">Enter the 4-character code written on the sticker on the boot.</p>
-    <input id="code" class="big" name="code" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····" aria-describedby="err">
-    <p id="err" class="err" role="alert"></p>
-    <button id="find" class="primary" type="submit" disabled>Find my vehicle</button>
-    <button id="toPlate" class="link" type="button">No code on the sticker? Use your plate</button>
-  </form>
-
-  <!-- 1b. no code: the plate instead -->
-  <form id="plateForm" class="step" novalidate hidden>
+  <!-- 1. the plate -->
+  <form id="plateForm" class="step" novalidate>
     <label for="plate">LICENSE PLATE</label>
-    <p class="hint">Enter your plate exactly as it reads, letters and numbers only.</p>
-    <input id="plate" class="big plate" name="plate" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC1234" aria-describedby="plateErr">
+    <p class="hint">Enter the plate of the booted car, letters and numbers only.</p>
+    <input id="plate" class="big" name="plate" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC1234" aria-describedby="plateErr">
     <p id="plateErr" class="err" role="alert"></p>
     <button id="findPlate" class="primary" type="submit" disabled>Find my vehicle</button>
     <div id="matches" class="matches" hidden></div>
-    <button id="toCode" class="link" type="button">I have the pay code</button>
+    <p class="small">Need help? Call or text <a class="line" href="tel:+19809904401">980-990-4401</a>.</p>
   </form>
 
   <!-- 2. the booted vehicle, and what to do next -->
@@ -102,7 +89,6 @@ ol.steps li+li{margin-top:6px}
         <dt>Plate</dt><dd id="vPlate" class="mono"></dd>
         <dt id="vVehicleL">Vehicle</dt><dd id="vVehicle"></dd>
         <dt id="vPropL">Location</dt><dd id="vProp"></dd>
-        <dt>Pay code</dt><dd id="vCode" class="mono"></dd>
       </dl>
       <p id="cardText" hidden></p>
     </div>
@@ -116,66 +102,55 @@ ol.steps li+li{margin-top:6px}
 
     <div id="releaseBox" class="step" hidden>
       <ol class="steps">
-        <li>Turn the power switch on the boot <b>ON</b>.</li>
-        <li>Wait for it to open. This usually takes under a minute once it's on.</li>
+        <li>Stay by your car. The boot opens on its own, <span id="eta">within a few minutes</span>.</li>
         <li id="returnStep"></li>
       </ol>
       <p class="small">This page updates on its own.</p>
     </div>
 
-    <p id="help" class="small"></p>
-    <button id="again" class="ghost" type="button">Wrong vehicle? Re-enter code</button>
+    <p class="small">Questions? Call or text <a id="helpLine" class="line" href="tel:+19809904401">980-990-4401</a>.</p>
+    <button id="again" class="ghost" type="button">Wrong vehicle? Enter the plate again</button>
   </section>
 </div></main>
 <script>
 // Served as-is to the public: keep notes about this page in README.md, not here.
 const BOOT_PAY = 'https://nzdkoouoaedbbccraoti.supabase.co/functions/v1/boot-pay';
 const POLL_MS = 5000;
+const RETURN_DEFAULT = 'Lift the boot off the wheel and leave it on the curb next to your car.';
 
 const $ = id => document.getElementById(id);
-const codeIn = $('code'), plateIn = $('plate');
-let current = null;   // the code being shown
+const plateIn = $('plate');
+let current = null;   // the boot code being shown
 let view = null;      // the last GET answer for it
 let timer = null;
 let paidReturn = false;
 
-const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 const cleanPlate = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
 const money = (cents, cur) => (cents / 100).toLocaleString('en-US', { style: 'currency', currency: cur || 'USD' });
 
 function show(id) {
-  for (const s of ['enter', 'plateForm', 'booted']) $(s).hidden = s !== id;
+  for (const s of ['plateForm', 'booted']) $(s).hidden = s !== id;
 }
 
 async function api(query, init) {
-  const res = await fetch(BOOT_PAY + (query ? '?' + query : ''), init);
+  const res = await fetch(BOOT_PAY + '?via=release' + (query ? '&' + query : ''), init);
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.ok === false) { const e = new Error(body.message || body.error || 'HTTP ' + res.status); e.code = body.error; e.status = res.status; throw e; }
   return body;
 }
 
-// ── 1. code ─────────────────────────────────────────────
-codeIn.addEventListener('input', () => {
-  const c = cleanCode(codeIn.value);
-  if (codeIn.value !== c) codeIn.value = c;
-  $('find').disabled = c.length !== 4;
-  $('err').textContent = ''; codeIn.removeAttribute('aria-invalid');
-});
-function codeFail(msg) {
-  $('err').textContent = msg; codeIn.setAttribute('aria-invalid', 'true');
-  show('enter'); codeIn.focus(); codeIn.select();
-}
-$('enter').addEventListener('submit', e => { e.preventDefault(); const c = cleanCode(codeIn.value); if (c.length === 4) load(c, true); });
-$('toPlate').addEventListener('click', () => { show('plateForm'); plateIn.focus(); });
-
-// ── 1b. plate ───────────────────────────────────────────
+// ── 1. plate ────────────────────────────────────────────
 plateIn.addEventListener('input', () => {
   const p = cleanPlate(plateIn.value);
   if (plateIn.value !== p) plateIn.value = p;
   $('findPlate').disabled = p.length < 2;
   $('plateErr').textContent = ''; plateIn.removeAttribute('aria-invalid'); $('matches').hidden = true;
 });
-$('toCode').addEventListener('click', () => { show('enter'); codeIn.focus(); });
+function plateFail(msg) {
+  $('plateErr').textContent = msg; plateIn.setAttribute('aria-invalid', 'true');
+  show('plateForm'); plateIn.focus();
+}
 $('plateForm').addEventListener('submit', async e => {
   e.preventDefault();
   const p = cleanPlate(plateIn.value);
@@ -184,38 +159,36 @@ $('plateForm').addEventListener('submit', async e => {
   try {
     const r = await api('plate=' + encodeURIComponent(p));
     const list = r.matches || [];
-    if (!list.length) {
-      $('plateErr').textContent = "No booted vehicle has that plate. Check it, or use the pay code on the boot's sticker.";
-      plateIn.setAttribute('aria-invalid', 'true');
-      return;
-    }
-    if (list.length === 1) { load(list[0].pay_code, true); return; }
+    if (!list.length) { plateFail('No booted vehicle has that plate. Check it and try again, or call or text 980-990-4401.'); return; }
+    if (list.length === 1) { await load(list[0].code, true); return; }
     const box = $('matches'); box.textContent = '';
     for (const m of list) {
       const b = document.createElement('button'); b.type = 'button';
-      const code = document.createElement('b'); code.textContent = m.pay_code;
-      b.append(code, document.createTextNode([m.vehicle, m.property].filter(Boolean).join(' · ') || m.plate));
-      b.addEventListener('click', () => load(m.pay_code, true));
+      b.textContent = [m.plate, m.vehicle, m.property].filter(Boolean).join(' · ');
+      b.addEventListener('click', () => load(m.code, true));
       box.append(b);
     }
     box.hidden = false;
   } catch (_) {
-    $('plateErr').textContent = "We couldn't look that up right now. Check your signal and try again.";
+    plateFail("We couldn't look that up right now. Check your signal and try again.");
   } finally { btn.textContent = 'Find my vehicle'; btn.disabled = cleanPlate(plateIn.value).length < 2; }
 });
 
 // ── 2. the vehicle ──────────────────────────────────────
 async function load(code, fromInput) {
-  const btn = $('find'); if (fromInput) { btn.disabled = true; btn.textContent = 'Finding…'; }
   try {
     const v = await api('code=' + encodeURIComponent(code));
     current = code; view = v;
-    if (fromInput) history.replaceState(null, '', '/?c=' + code + (paidReturn ? '&paid=1' : ''));
+    if (fromInput) history.replaceState(null, '', '/?b=' + code + (paidReturn ? '&paid=1' : ''));
     render();
   } catch (e) {
-    if (e.status === 404) codeFail("That code doesn't match a booted vehicle. Check the sticker on the boot and try again.");
-    else codeFail("We couldn't check that code right now. Check your signal and try again.");
-  } finally { btn.textContent = 'Find my vehicle'; btn.disabled = cleanCode(codeIn.value).length !== 4; }
+    plateFail(e.status === 404 ? 'We could not find that boot. Enter your plate.' : "We couldn't check right now. Check your signal and try again.");
+  }
+}
+
+function etaText(s) {
+  const m = Math.ceil((Number(s) || 0) / 60);
+  return m <= 1 ? 'usually within a minute' : `usually within ${m} minutes`;
 }
 
 function render() {
@@ -223,19 +196,18 @@ function render() {
   show('booted');
   const card = $('card');
   const phone = v.company && v.company.phone;
-  $('help').textContent = phone ? `Questions? Call ${phone}.` : '';
+  if (phone) { $('helpLine').textContent = phone; $('helpLine').href = 'tel:' + phone.replace(/[^\d+]/g, ''); }
   if (v.status === 'not_deployed') {
     card.className = 'card'; $('cardKicker').textContent = 'NOTHING TO PAY';
     $('cardTitle').textContent = 'This boot is not on a vehicle';
     $('facts').hidden = true;
-    $('cardText').hidden = false; $('cardText').textContent = 'If a boot is on your car, use the code on its sticker.';
+    $('cardText').hidden = false; $('cardText').textContent = 'If a boot is on your car, enter your plate again.';
     $('payBox').hidden = true; $('releaseBox').hidden = true; stopPoll(); return;
   }
   $('facts').hidden = false;
   $('vPlate').textContent = v.plate;
   $('vVehicle').textContent = v.vehicle || ''; $('vVehicle').hidden = $('vVehicleL').hidden = !v.vehicle;
   $('vProp').textContent = v.property || ''; $('vProp').hidden = $('vPropL').hidden = !v.property;
-  $('vCode').textContent = v.pay_code || current;
   $('cardText').hidden = true;
 
   const unpaid = (v.status === 'active' || v.status === 'locking') && !v.paid;
@@ -253,15 +225,16 @@ function render() {
   $('payBox').hidden = true;
   if (v.status === 'release_authorized') {
     card.className = 'card good'; $('cardKicker').textContent = v.paid ? 'PAID' : 'RELEASED';
-    $('cardTitle').textContent = 'Switch the boot on to open it';
-    $('returnStep').textContent = v.return_instructions || 'Lift the boot off the wheel and leave it on the curb next to your car.';
+    $('cardTitle').textContent = 'The boot is opening';
+    $('eta').textContent = etaText(v.release_eta_s);
+    $('returnStep').textContent = 'When it opens: ' + (v.return_instructions || RETURN_DEFAULT).replace(/^./, c => c.toLowerCase());
     $('releaseBox').hidden = false; startPoll(); return;
   }
   if (v.status === 'unlocked') {
     card.className = 'card good'; $('cardKicker').textContent = 'RELEASED';
     $('cardTitle').textContent = 'The boot is open';
     $('cardText').hidden = false;
-    $('cardText').textContent = v.return_instructions || 'Lift the boot off the wheel and leave it on the curb next to your car.';
+    $('cardText').textContent = v.return_instructions || RETURN_DEFAULT;
     $('releaseBox').hidden = true; stopPoll(); return;
   }
 }
@@ -277,7 +250,7 @@ function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 $('pay').addEventListener('click', async () => {
   const btn = $('pay'); btn.disabled = true; btn.textContent = 'Opening checkout…'; $('payErr').textContent = '';
   try {
-    const r = await api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: current, action: 'checkout' }) });
+    const r = await api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: current, action: 'checkout', via: 'release' }) });
     location.href = r.checkout_url;
   } catch (e) {
     if (e.code === 'already_paid') { paidReturn = true; load(current, false); return; }
@@ -289,13 +262,13 @@ $('pay').addEventListener('click', async () => {
 $('again').addEventListener('click', () => {
   stopPoll(); current = null; view = null; paidReturn = false;
   history.replaceState(null, '', '/');
-  codeIn.value = ''; $('find').disabled = true; show('enter'); codeIn.focus();
+  plateIn.value = ''; $('findPlate').disabled = true; $('matches').hidden = true; show('plateForm'); plateIn.focus();
 });
 
 const qs = new URLSearchParams(location.search);
 paidReturn = qs.get('paid') === '1';
-const pre = cleanCode(qs.get('c'));
-if (pre.length === 4) { codeIn.value = pre; load(pre, false); }
+const pre = cleanCode(qs.get('b'));
+if (pre.length === 8) load(pre, false);
 </script>
 </body>
 </html>

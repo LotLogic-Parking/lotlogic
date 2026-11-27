@@ -9,8 +9,8 @@
 // Long-poll: a report with "wait_s" (1..25) is held open until a command is queued or the time runs out.
 // Deploy with verify_jwt = false (the boot has no Supabase key; the HMAC is the auth).
 import {
-  admin, batteryPct, bytesToBytea, bytesToHex, CMD, CMD_ACTION, commandMac, ctEqual, hexToBytes, hmac, HttpError, json,
-  loadSecret,
+  admin, batteryPct, bytesToBytea, bytesToHex, checkInS, CMD, CMD_ACTION, commandMac, ctEqual, hexToBytes, hmac, HttpError, json,
+  loadSecret, sendSms,
 } from "../_shared/boot.ts";
 import { ingestDeviceEvents, parseEvents } from "../_shared/events.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -143,7 +143,8 @@ Deno.serve(async (req) => {
       nonce: body.nonce,                 // binds this reply to this request
       report_seq: reportSeq,
       ack_seq: ackSeq,                   // highest device event seq the server has; the boot may drop events <= this
-      next_report_s: cmd ? 5 : boot.poll_s,   // after a command: report the result right away
+      // After a command: report the result right away. On a car: less often, to save the battery (checkInS).
+      next_report_s: cmd ? 5 : checkInS(boot, dep?.status),
       server_time: Math.floor(Date.now() / 1000),
       cmd,
     };
@@ -239,7 +240,27 @@ async function markDone(db: SupabaseClient, c: Record<string, any>, now: Date, f
     await db.from("boot_deployments").update({ status: "active", lock_confirmed_at: now.toISOString() })
       .eq("id", c.deployment_id).eq("status", "locking");
   } else if (c.cmd === CMD.UNLOCK) {
-    await db.from("boot_deployments").update({ status: "unlocked", unlocked_at: now.toISOString(), unlock_transport: "lte" })
-      .eq("id", c.deployment_id).in("status", ["release_authorized", "active", "locking"]);
+    const { data: dep } = await db.from("boot_deployments")
+      .update({ status: "unlocked", unlocked_at: now.toISOString(), unlock_transport: "lte" })
+      .eq("id", c.deployment_id).in("status", ["release_authorized", "active", "locking"])
+      .select("id, boot_id, plate_text, property_id, applied_by").maybeSingle();
+    if (dep) await pickupAlert(db, dep);
   }
+}
+
+/** The boot opened off a car: text the agent who placed it to come and collect it (once, when it opens). */
+async function pickupAlert(db: SupabaseClient, dep: Record<string, any>) {
+  if (!dep.applied_by) return;
+  const [{ data: m }, { data: b }, { data: p }] = await Promise.all([
+    db.from("partner_members").select("phone, removed_at").eq("id", dep.applied_by).maybeSingle(),
+    db.from("boots").select("label").eq("id", dep.boot_id).maybeSingle(),
+    dep.property_id ? db.from("properties").select("name").eq("id", dep.property_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  if (!m?.phone || m.removed_at) return;
+  const at = p?.name ? ` at ${p.name}` : "";
+  const r = await sendSms(m.phone, `LotLogic: ${b?.label ?? "Your boot"} is open and off ${dep.plate_text}${at}. Pick it up and close it for storage.`);
+  await db.from("boot_events").insert({
+    boot_id: dep.boot_id, deployment_id: dep.id, source: "server", action: "pickup_alert", actor_member_id: null,
+    details: { to_member: dep.applied_by, sent: r.sent, reason: r.reason ?? null },
+  });
 }

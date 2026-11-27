@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
       if (route === "store") return json(await store(db, me, body));
       if (route === "emergency") return json(await emergency(db, me, body, req));
       if (route === "cancel") return json(await cancel(db, me, body));
+      if (route === "pin-check") return json(await pinCheck(db, me, body));
       if (route === "setup-wifi") return json(await setupWifi(db, me, body));
       if (route === "agent-add") return json(await addAgent(supabaseStore(db), teamCall(dashToken), me, body));
       if (route === "agent-resend") return json(await resendAgent(supabaseStore(db), teamCall(dashToken), me, body));
@@ -258,7 +259,7 @@ async function bootDetail(db: SupabaseClient, me: Me, id: string | null) {
       stored_at: b.stored_at,
     },
     deployment: dep ? {
-      id: dep.id, status: dep.status, pay_code: dep.pay_code ?? null, plate_text: dep.plate_text, plate_state: dep.plate_state, property,
+      id: dep.id, status: dep.status, plate_text: dep.plate_text, plate_state: dep.plate_state, property,
       vehicle: [dep.vehicle_color, dep.vehicle_make, dep.vehicle_model].filter(Boolean).join(" ") || null,
       fee_cents: dep.fee_cents, applied_at: dep.applied_at, lock_confirmed_at: dep.lock_confirmed_at,
       paid_at: dep.paid_at, paid_amount_cents: dep.paid_amount_cents, release_reason: dep.release_reason,
@@ -438,7 +439,7 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
     lock_photo_url: photo, lock_lat: num(body.lat), lock_lon: num(body.lon), lock_accuracy_m: num(body.accuracy_m),
     applied_by: me.member_id, fee_cents: fee, notes: [str(body.notes, 1000), geoNote].filter(Boolean).join("\n") || null,
     driver_signature_path: sig, driver_signed_name: signedName, driver_signed_at: signedAt.toISOString(), driver_attestation: attest,
-  }).select("*").single(); // "*": pay_code is set by a database trigger (boot pay codes migration)
+  }).select("id").single();
   if (error) {
     if (error.code === "23505") throw new HttpError(409, "boot_in_use", "This boot is already on a car.");
     throw error;
@@ -455,8 +456,6 @@ async function lock(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
   if (qErr) throw qErr;
   return {
     ok: true, deployment_id: dep.id, command_id: cmdId, online: isOnline(b), attestation: attest,
-    // The motorist's code for this placement: the agent writes it on the boot sticker (QR -> boot-release.vercel.app).
-    pay_code: dep.pay_code ?? null,
     message: isOnline(b)
       ? "Signed. Lock sent: the boot picks it up on its next check-in (usually under a minute)."
       : "Signed. Lock queued, but this boot hasn't checked in recently. It locks when it next connects (within 10 minutes) or the lock is cancelled.",
@@ -515,7 +514,7 @@ async function store(db: SupabaseClient, me: Me, body: Record<string, unknown>) 
 }
 
 // ---------------------------------------------------------------- emergency unlock (any signed-in user, always logged)
-// Open decision (9 Nov): drivers can use this today; it could be limited to dispatch/admin with canManage(me).
+// Decided (Victor, 27 Nov): agents keep it, not only dispatch/admin. Every use is logged in boot_events.
 const EMERGENCY_REASONS: Record<string, string> = {
   police_fire_ems: "Police, fire or EMS ordered the car moved",
   medical: "Medical emergency",
@@ -571,6 +570,35 @@ async function emergency(db: SupabaseClient, me: Me, body: Record<string, unknow
     ok: true, command_id: cmdId, online: isOnline(b),
     message: "Emergency unlock sent and recorded. The boot opens on its next check-in.",
   };
+}
+
+// ---------------------------------------------------------------- placing 3: the tug test
+// There is no pin sensor: "locked" only means the lock command ran (Boot 03 once reported locked with its pin out).
+// After every lock the agent pulls on the boot and says how it held. Tight: logged. Loose: the placement is
+// cancelled (a loose boot holds no car, so no motorist may be charged for it) and the boot opens so the agent can
+// refit it or use another boot, as a new placement.
+async function pinCheck(db: SupabaseClient, me: Me, body: Record<string, unknown>) {
+  const b = await myBoot(db, me, body.boot_id);
+  const dep = await openDeployment(db, b.id);
+  if (!dep || dep.status !== "active") throw new HttpError(409, "not_locked", "This boot isn't locked on a car.");
+  if (me.role === "driver" && dep.applied_by !== me.member_id) throw new HttpError(403, "not_yours", "Only the agent who placed it can check it.");
+  const tight = body.tight === true;
+  await db.from("boot_events").insert({
+    boot_id: b.id, deployment_id: dep.id, source: "server", transport: "web", action: tight ? "pin_check_tight" : "pin_check_loose",
+    actor_member_id: me.member_id, details: { plate: dep.plate_text, ...by(me) },
+  });
+  if (tight) return { ok: true, tight: true };
+  const { data: cancelled } = await db.from("boot_deployments").update({
+    status: "cancelled", cancelled_at: new Date().toISOString(),
+    notes: [dep.notes, "cancelled: loose after lock (tug test)"].filter(Boolean).join("\n"),
+  }).eq("id", dep.id).eq("status", "active").select("id").maybeSingle();
+  if (!cancelled) throw new HttpError(409, "changed", "This placement changed meanwhile. Refresh and look again.");
+  const { data: cmdId, error } = await db.rpc("boot_queue_command", {
+    p_boot_id: b.id, p_deployment_id: null, p_cmd: CMD.UNLOCK, p_source: "portal", p_member: me.member_id,
+    p_ttl_s: null, p_note: "loose after lock: open to refit", p_purpose: "fit",
+  });
+  if (error) throw error;
+  return { ok: true, tight: false, command_id: cmdId, message: "Placement cancelled. The boot opens on its next check-in so you can refit it." };
 }
 
 // ---------------------------------------------------------------- cancel a lock that hasn't reached the boot

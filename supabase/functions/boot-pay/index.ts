@@ -1,11 +1,12 @@
 // boot-pay: the motorist side. Public (verify_jwt = false).
-//   GET  /boot-pay?code=XXXX                      what the pay page shows: plate, property, fee, release progress.
-//                                                 XXXX = the placement's 4-character pay code (boot_deployments.pay_code),
-//                                                 written on the boot sticker by the agent; every sticker's QR goes to
-//                                                 boot-release.vercel.app (repo boot-release/). An 8-character code is a
-//                                                 boot's own qr_code (the older per-boot stickers) and still works.
-//   GET  /boot-pay?plate=ABC123                   "lost the code?": the open placements on that plate -> [{pay_code, ...}]
+//   GET  /boot-pay?code=XXXXXXXX                  what the pay page shows: plate, property, fee, release progress.
+//                                                 XXXXXXXX = the boot's own qr_code. The window sticker carries no code
+//                                                 (Victor, 24 Nov): its QR goes to boot-release.vercel.app (repo
+//                                                 boot-release/), where the motorist types the plate.
+//   GET  /boot-pay?plate=ABC123                   the open placements on that plate -> [{code, ...}] (code = boot qr_code)
 //   POST /boot-pay  {code, action:"checkout", phone?, email?}   -> {checkout_url} (Square payment link)
+//   via=release (query, or in the POST body): the request comes from the unbranded boot-release page, which never
+//   shows the company name and gets Square to send the payer back there.
 //   POST /boot-pay/square-webhook                 Square payment.* and refund.* webhooks (signature checked)
 //   POST /boot-pay  {code, action:"dev_pay"}      test-only fake payment; refused on production
 // Paying moves the deployment to release_authorized; the boot picks the unlock up on its next LTE report.
@@ -18,8 +19,8 @@
 //   SQUARE_WEBHOOK_SIGNATURE_KEY
 //   SQUARE_WEBHOOK_URL  the exact notification URL registered in Square (default: <SUPABASE_URL>/functions/v1/boot-pay/square-webhook)
 //   BOOT_PAY_PAGE_URL   where Square sends the payer back for a boot qr_code checkout, e.g. https://pay.lotlogic.example/boot
-//   BOOT_PAY_LANDING_URL  where Square sends the payer back for a pay-code checkout (default https://boot-release.vercel.app)
-import { admin, CORS, hmac, HttpError, json } from "../_shared/boot.ts";
+//   BOOT_PAY_LANDING_URL  where Square sends a boot-release payer back (default https://boot-release.vercel.app)
+import { admin, checkInS, CORS, e164, hmac, HttpError, json } from "../_shared/boot.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const PROD_REF = "nzdkoouoaedbbccraoti";
@@ -34,7 +35,7 @@ Deno.serve(async (req) => {
     if (url.pathname.endsWith("/square-webhook")) return await squareWebhook(db, req);
     if (req.method === "GET") {
       if (url.searchParams.has("plate")) return json(await byPlate(db, url.searchParams.get("plate")));
-      return json(await view(db, url.searchParams.get("code")));
+      return json(await view(db, url.searchParams.get("code"), url.searchParams.get("via") === "release"));
     }
     if (req.method !== "POST") throw new HttpError(405, "method_not_allowed");
     const body = await req.json().catch(() => ({}));
@@ -49,54 +50,45 @@ Deno.serve(async (req) => {
 });
 
 const BOOT_COLS = "id, label, qr_code, partner_id, state, last_report_at, poll_s, return_instructions, active";
-/** A placement's pay code: the site-code alphabet (no 0/O, 1/I/L), 4 characters. */
-const PAY_CODE = /^[A-HJKMNP-Z2-9]{4}$/;
 const OPEN = ["locking", "active", "release_authorized"];
 
-/**
- * A 4-character pay code names one placement (and so its boot); an 8-character code is a boot's qr_code, which
- * shows that boot's open placement, else its latest. byPayCode is true for the first: the page and the Square
- * return link then carry the pay code.
- */
+/** A boot by its qr_code, with its open placement, else its latest (so the page still shows "released" after the unlock). */
 async function findByCode(db: SupabaseClient, code: unknown) {
   const c = typeof code === "string" ? code.trim().toUpperCase() : "";
-  if (PAY_CODE.test(c)) {
-    const { data: dep } = await db.from("boot_deployments").select("*").eq("pay_code", c).maybeSingle();
-    if (!dep || dep.status === "cancelled") throw new HttpError(404, "unknown_code");
-    const { data: boot } = await db.from("boots").select(BOOT_COLS).eq("id", dep.boot_id).maybeSingle();
-    if (!boot) throw new HttpError(404, "unknown_code");
-    return { boot, dep, byPayCode: true };
-  }
   if (!/^[2-9A-HJ-NP-Z]{8}$/.test(c)) throw new HttpError(404, "unknown_boot");
   const { data: boot } = await db.from("boots").select(BOOT_COLS).eq("qr_code", c).maybeSingle();
   if (!boot || !boot.active) throw new HttpError(404, "unknown_boot");
-  // The open deployment, else the most recent one (so the page still shows "released" after the unlock).
   const { data: deps } = await db.from("boot_deployments").select("*").eq("boot_id", boot.id)
     .order("created_at", { ascending: false }).limit(1);
-  return { boot, dep: deps?.[0] ?? null, byPayCode: false };
+  return { boot, dep: deps?.[0] ?? null };
 }
 
 /**
- * "Lost the code?": the motorist types their plate and gets the pay code of each open placement on it (normally
- * one). Exact plate only, open placements only, and nothing beyond what the pay page would show for that code.
+ * The motorist types their plate and gets each open placement on it (normally one), keyed by its boot's code.
+ * Exact plate only, open placements only, and nothing beyond what the pay page would show for that boot.
  */
 async function byPlate(db: SupabaseClient, raw: string | null) {
   const plate = String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
   if (plate.length < 2) throw new HttpError(400, "plate_required", "Enter your plate.");
   const { data, error } = await db.from("boot_deployments")
-    .select("pay_code, plate_text, plate_state, vehicle_color, vehicle_make, vehicle_model, property_id, applied_at")
+    .select("boot_id, plate_text, plate_state, vehicle_color, vehicle_make, vehicle_model, property_id, applied_at")
     .eq("plate_text", plate).in("status", OPEN).order("applied_at", { ascending: false }).limit(3);
   if (error) { console.error("byPlate", error); throw new HttpError(503, "lookup_unavailable"); }
-  const ids = [...new Set((data ?? []).map((d) => d.property_id).filter(Boolean))];
+  const rows = data ?? [];
   const names = new Map<string, string>();
-  if (ids.length) {
-    const { data: props } = await db.from("properties").select("id, name").in("id", ids);
-    for (const p of props ?? []) names.set(p.id, p.name);
-  }
+  const codes = new Map<string, string>();
+  const propIds = [...new Set(rows.map((d) => d.property_id).filter(Boolean))];
+  const bootIds = [...new Set(rows.map((d) => d.boot_id))];
+  const [props, boots] = await Promise.all([
+    propIds.length ? db.from("properties").select("id, name").in("id", propIds) : Promise.resolve({ data: [] }),
+    bootIds.length ? db.from("boots").select("id, qr_code, active").in("id", bootIds) : Promise.resolve({ data: [] }),
+  ]);
+  for (const p of props.data ?? []) names.set(p.id, p.name);
+  for (const b of boots.data ?? []) if (b.active) codes.set(b.id, b.qr_code);
   return {
     ok: true,
-    matches: (data ?? []).filter((d) => d.pay_code).map((d) => ({
-      pay_code: d.pay_code, plate: maskPlate(d.plate_text), plate_state: d.plate_state,
+    matches: rows.filter((d) => codes.has(d.boot_id)).map((d) => ({
+      code: codes.get(d.boot_id), plate: maskPlate(d.plate_text), plate_state: d.plate_state,
       vehicle: [d.vehicle_color, d.vehicle_make, d.vehicle_model].filter(Boolean).join(" ") || null,
       property: d.property_id ? names.get(d.property_id) ?? null : null, applied_at: d.applied_at,
     })),
@@ -107,16 +99,15 @@ function maskPlate(p: string) {
   return p.length <= 3 ? p : p.slice(0, 2) + "•".repeat(p.length - 4) + p.slice(-2);
 }
 
-async function view(db: SupabaseClient, code: string | null) {
-  const found = await findByCode(db, code);
-  const { boot } = found;
-  let { dep } = found;
+async function view(db: SupabaseClient, code: string | null, unbranded: boolean) {
+  const { boot, dep: found } = await findByCode(db, code);
+  let dep = found;
   if (dep && dep.square_order_id && !dep.paid_at && ["locking", "active"].includes(dep.status)) {
     dep = (await syncPayment(db, dep)) ?? dep;
   }
   const { data: p } = await db.from("enforcement_partners").select("company_name, phone").eq("id", boot.partner_id).single();
-  // A pay code comes from the unbranded boot-release page: it gets the phone only, never the company name.
-  const partner = found.byPayCode ? { phone: p?.phone ?? null } : p;
+  // The unbranded boot-release page gets the phone only, never the company name.
+  const partner = unbranded ? { phone: p?.phone ?? null } : p;
   const staleClosed = dep && ["unlocked", "cancelled"].includes(dep.status)
     && Date.now() - new Date(dep.updated_at).getTime() > 6 * 3600 * 1000;
   if (!dep || staleClosed || dep.status === "cancelled") {
@@ -130,22 +121,22 @@ async function view(db: SupabaseClient, code: string | null) {
   return {
     ok: true,
     status: dep.status,                          // locking | active | release_authorized | unlocked
-    pay_code: dep.pay_code ?? null,
+    code: boot.qr_code,
     paid: !!dep.paid_at,
     release_reason: dep.release_reason,
     plate: maskPlate(dep.plate_text),
     vehicle: [dep.vehicle_color, dep.vehicle_make, dep.vehicle_model].filter(Boolean).join(" ") || null,
     property: property?.name ?? null,
-    company: partner,                            // {company_name, phone}; {phone} for a pay code
+    company: partner,                            // {company_name, phone}; {phone} for boot-release
     fee_cents: dep.fee_cents,
     currency: dep.currency,
     applied_at: dep.applied_at,
     released_at: dep.released_at,
     unlocked_at: dep.unlocked_at,
-    // Worst-case wait for the boot to hear about the release on its next LTE check-in (every poll_s, default 60 s).
+    // Worst-case wait for the boot to hear about the release on its next LTE check-in (checkInS: slower while on a car).
     release_eta_s: dep.status === "release_authorized" && lastReport
-      ? Math.max(0, Math.round((lastReport + boot.poll_s * 1000 - Date.now()) / 1000))
-      : boot.poll_s,
+      ? Math.max(0, Math.round((lastReport + checkInS(boot, dep.status) * 1000 - Date.now()) / 1000))
+      : checkInS(boot, dep.status),
     return_instructions: dep.status === "unlocked" || dep.status === "release_authorized" ? boot.return_instructions : null,
   };
 }
@@ -204,18 +195,18 @@ async function syncPayment(db: SupabaseClient, dep: Record<string, any>) {
 }
 
 async function checkout(db: SupabaseClient, body: Record<string, unknown>) {
-  const { boot, dep, byPayCode } = await findByCode(db, body.code);
+  const { boot, dep } = await findByCode(db, body.code);
   if (!dep || !["locking", "active"].includes(dep.status)) throw new HttpError(409, "nothing_to_pay");
   if (dep.paid_at) throw new HttpError(409, "already_paid");
   if (dep.square_checkout_url) return { ok: true, checkout_url: dep.square_checkout_url };
 
   const location = Deno.env.get("SQUARE_LOCATION_ID");
   if (!Deno.env.get("SQUARE_ACCESS_TOKEN") || !location) throw new HttpError(503, "payments_not_configured");
-  const phone = typeof body.phone === "string" ? body.phone.replace(/[^\d+]/g, "").slice(0, 16) : null;
+  const phone = e164(body.phone);   // Square refuses bare digits (INVALID_PHONE_NUMBER); anything else is left out
   const email = typeof body.email === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email) ? body.email.slice(0, 120) : null;
   const pageUrl = Deno.env.get("BOOT_PAY_PAGE_URL");
   const landingUrl = (Deno.env.get("BOOT_PAY_LANDING_URL") ?? "https://boot-release.vercel.app").replace(/\/+$/, "");
-  const returnUrl = byPayCode ? `${landingUrl}/?c=${dep.pay_code}&paid=1`
+  const returnUrl = body.via === "release" ? `${landingUrl}/?b=${boot.qr_code}&paid=1`
     : pageUrl ? `${pageUrl}?code=${boot.qr_code}&paid=1` : undefined;
 
   const res = await square("/v2/online-checkout/payment-links", {
